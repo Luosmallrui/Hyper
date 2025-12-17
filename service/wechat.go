@@ -49,17 +49,12 @@ func (w *WeChatService) Code2Session(ctx context.Context, code string) (*types.W
 }
 
 func (w *WeChatService) GetAccessToken() (string, error) {
-	// 实际上你应该先检查 Redis 里有没有缓存的 token，如果有直接返回
-
 	appID := w.Config.App.AppID
 	appSecret := w.Config.App.AppSecret
-	fmt.Println("appID:", appID)
-	fmt.Println("appSecret:", appSecret)
 	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Println(err)
 		return "", err
 	}
 	defer resp.Body.Close()
@@ -67,14 +62,8 @@ func (w *WeChatService) GetAccessToken() (string, error) {
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
-		ErrCode     int    `json:"errcode"`
 	}
 	json.NewDecoder(resp.Body).Decode(&tokenResp)
-
-	if tokenResp.ErrCode != 0 {
-		fmt.Println(tokenResp.ErrCode)
-		return "", fmt.Errorf("token error")
-	}
 
 	return tokenResp.AccessToken, nil
 }
