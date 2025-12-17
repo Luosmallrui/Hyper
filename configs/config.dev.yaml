@@ -6,7 +6,7 @@ app:
   app_secret: 5f8833e38748aa345e3b8e919241d2ce
 
 server:
-  http: 8082
+  http: 8081
   websocket: 8083
   rpc: 8889
 

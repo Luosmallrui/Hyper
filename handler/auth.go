@@ -48,6 +48,7 @@ func (u *Auth) Login(c *gin.Context) {
 			"is_new_user": true,
 			"user_id":     userID,
 			"token":       token,
+			"data":        wxResp,
 		},
 	})
 }
@@ -58,10 +59,10 @@ func (u *Auth) BindPhone(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "phone_code 不能为空"})
 		return
 	}
-	userPhoneNumber, err := u.WeChatService.GetUserPhoneNumber()
+	userPhoneNumber, err := u.WeChatService.GetUserPhoneNumber(req.PhoneCode)
 	if err != nil {
 		fmt.Println(err)
-		c.JSON(500, gin.H{"error": "获取 access_token 失败"})
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 	// 3. TODO: 绑定手机号到当前登录用户（user_id 从 token 中取）
