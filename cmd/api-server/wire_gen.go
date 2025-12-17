@@ -7,20 +7,32 @@
 package main
 
 import (
-	"Hyper/internal/module/user"
+	"Hyper/config"
+	"Hyper/dao"
+	"Hyper/handler"
 	"Hyper/pkg/database"
-	"Hyper/server"
-	"github.com/gin-gonic/gin"
+	"Hyper/pkg/server"
+	"Hyper/service"
 )
 
 // Injectors from wire.go:
 
-func InitServer() *gin.Engine {
-	db := database.NewDB()
-	repository := user.NewRepository(db)
-	service := user.NewService(repository)
-	handler := user.NewHandler(service)
-	handlers := server.NewHandlers(handler)
+func InitServer(cfg *config.Config) *server.AppProvider {
+	db := database.NewDB(cfg)
+	users := dao.NewUsers(db)
+	userService := &service.UserService{
+		UsersRepo: users,
+	}
+	auth := &handler.Auth{
+		UserService: userService,
+	}
+	handlers := &server.Handlers{
+		Auth: auth,
+	}
 	engine := server.NewGinEngine(handlers)
-	return engine
+	appProvider := &server.AppProvider{
+		Config: cfg,
+		Engine: engine,
+	}
+	return appProvider
 }
