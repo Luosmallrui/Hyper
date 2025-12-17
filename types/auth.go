@@ -12,7 +12,6 @@ type UserResponse struct {
 
 type WxLoginRequest struct {
 	LoginCode string `json:"code"` // wx.login 获取的 code (用于换 openid)
-	//PhoneCode string `json:"phone_code"` // getPhoneNumber 获取的 code
 }
 
 type WxSessionResponse struct {
@@ -29,16 +28,25 @@ type UpdateProfileRequest struct {
 }
 
 type WxPhoneResponse struct {
-	ErrCode   int    `json:"errcode"`
-	ErrMsg    string `json:"errmsg"`
-	PhoneInfo struct {
-		PhoneNumber     string `json:"phoneNumber"`
-		PurePhoneNumber string `json:"purePhoneNumber"`
-		CountryCode     string `json:"countryCode"`
-	} `json:"phone_info"`
+	ErrCode   int       `json:"errcode"`
+	ErrMsg    string    `json:"errmsg"`
+	PhoneInfo PhoneInfo `json:"phone_info"`
 }
+
+type PhoneInfo struct {
+	PhoneNumber     string    `json:"phoneNumber"`
+	PurePhoneNumber string    `json:"purePhoneNumber"`
+	CountryCode     string    `json:"countryCode"`
+	Watermark       Watermark `json:"watermark"`
+}
+
+type Watermark struct {
+	Timestamp int64  `json:"timestamp"`
+	AppID     string `json:"appid"`
+}
+
 type BindPhoneRequest struct {
-	PhoneCode string `json:"phone_code"`
+	PhoneCode string `json:"phone_code"` //与wx.LOGIN的code不一样
 }
 
 type WxLoginResponse struct {
