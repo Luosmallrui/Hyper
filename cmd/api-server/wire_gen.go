@@ -23,9 +23,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	userService := &service.UserService{
 		UsersRepo: users,
 	}
+	weChatService := service.WeChatService{
+		Config: cfg,
+	}
 	auth := &handler.Auth{
-		Config:      cfg,
-		UserService: userService,
+		Config:        cfg,
+		UserService:   userService,
+		WeChatService: weChatService,
 	}
 	handlers := &server.Handlers{
 		Auth: auth,
