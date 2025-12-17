@@ -24,6 +24,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UsersRepo: users,
 	}
 	auth := &handler.Auth{
+		Config:      cfg,
 		UserService: userService,
 	}
 	handlers := &server.Handlers{
