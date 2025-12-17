@@ -2,10 +2,12 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/context"
+	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
-	"fmt"
 	"github.com/gin-gonic/gin"
+	"net/http"
 )
 
 type Auth struct {
@@ -16,46 +18,44 @@ type Auth struct {
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/")
-	auth.POST("/api/auth/wx-login", u.Login) // 登录
-	auth.POST("/api/auth/bind-phone", u.BindPhone)
+	auth.POST("/api/auth/wx-login", context.Wrap(u.Login)) // 登录
+	auth.POST("/api/auth/bind-phone", context.Wrap(u.BindPhone))
 }
 
-func (u *Auth) Login(c *gin.Context) {
+func (u *Auth) Login(c *gin.Context) error {
 	var req types.WxLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.LoginCode == "" {
-		c.JSON(400, gin.H{"error": "login_code 不能为空"})
-		return
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	if req.LoginCode == "" {
+		return response.NewError(http.StatusInternalServerError, "login_code 不能为空")
 	}
 
 	wxResp, err := u.WeChatService.Code2Session(c.Request.Context(), req.LoginCode)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
-	c.JSON(200, gin.H{
-		"data": wxResp,
-	})
+	response.Success(c, wxResp)
+	return nil
 }
 
-func (u *Auth) BindPhone(c *gin.Context) {
+func (u *Auth) BindPhone(c *gin.Context) error {
 	var req types.BindPhoneRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.PhoneCode == "" {
-		c.JSON(400, gin.H{"error": "phone_code 不能为空"})
-		return
+		return response.NewError(http.StatusInternalServerError, "phone_code 不能为空")
 	}
 	userPhoneNumber, err := u.WeChatService.GetUserPhoneNumber(req.PhoneCode)
 	if err != nil {
-		fmt.Println(err)
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	phone := userPhoneNumber
-	c.JSON(200, gin.H{
+	response.Success(c, gin.H{
 		"code": 0,
 		"msg":  "绑定手机号成功",
 		"data": gin.H{
 			"phone": phone,
 		},
 	})
+	return nil
 }

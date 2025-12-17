@@ -2,6 +2,7 @@ package server
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/response"
 	"context"
 	"errors"
 	"fmt"
@@ -43,6 +44,7 @@ func init() {
 func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
+	r.Use(response.ErrorMiddleware())
 	h.Auth.RegisterRouter(r)
 	// h.Order.RegisterRoutes(r)
 	// h.Auth.RegisterRoutes(r)
