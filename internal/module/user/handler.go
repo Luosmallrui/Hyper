@@ -1,120 +1,1 @@
-package user
-
-import (
-	"Hyper/pkg/util"
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"strconv"
-
-	"github.com/gin-gonic/gin"
-)
-
-// Handler 用户模块的 HTTP 处理器
-type Handler struct {
-	svc Service
-}
-
-// NewHandler 构造函数
-func NewHandler(svc Service) *Handler {
-	return &Handler{svc: svc}
-}
-
-// RegisterRoutes 注册路由
-func (h *Handler) RegisterRoutes(r *gin.Engine) {
-	userGroup := r.Group("/users")
-	{
-		userGroup.GET("/:id", h.GetUser)
-		userGroup.POST("/login", h.Login)
-	}
-}
-func (h *Handler) Login(c *gin.Context) {
-	var req WxLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "参数错误"})
-		return
-	}
-
-	// 1. 获取 AccessToken
-	accessToken, err := util.GetAccessToken()
-	if err != nil {
-		c.JSON(500, gin.H{"error": "获取微信Token失败"})
-		return
-	}
-
-	// 2. 解析手机号 (调用微信 getuserphonenumber 接口)
-	// 官方文档: https://developers.weixin.qq.com/miniprogram/dev/OpenApiDoc/user-info/phone-number/getPhoneNumber.html
-	phoneUrl := fmt.Sprintf("https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=%s", accessToken)
-	phoneBody := map[string]string{"code": req.PhoneCode}
-	jsonData, _ := json.Marshal(phoneBody)
-
-	phoneResp, err := http.Post(phoneUrl, "application/json", bytes.NewBuffer(jsonData))
-	// ... 错误处理 ...
-
-	var wxPhoneRes WxPhoneResponse
-	json.NewDecoder(phoneResp.Body).Decode(&wxPhoneRes)
-
-	if wxPhoneRes.ErrCode != 0 {
-		c.JSON(400, gin.H{"error": "手机号解析失败: " + wxPhoneRes.ErrMsg})
-		return
-	}
-
-	//phoneNumber := wxPhoneRes.PhoneInfo.PurePhoneNumber
-
-	// 3. (可选但推荐) 获取 OpenID
-	// 虽然手机号能唯一标识用户，但 OpenID 是微信生态的唯一ID，建议同时获取并关联
-	// url := fmt.Sprintf("https://api.weixin.qq.com/sns/jscode2session?appid=%s&secret=%s&js_code=%s&grant_type=authorization_code", AppID, AppSecret, req.LoginCode)
-	// ... 请求并解析出 openid ...
-
-	// 4. 数据库逻辑 (Find or Create)
-	// user := DB.FindUserByPhone(phoneNumber)
-	// if user == nil {
-	//     user = DB.CreateUser(phoneNumber, openid)
-	// }
-
-	// 5. 生成系统 Token (JWT)
-	token := "eyJhbGciOiJIUzI1NiIsInR5c..." // 使用 JWT 库生成
-
-	c.JSON(200, gin.H{
-		"code": 0,
-		"msg":  "登录成功",
-		"data": gin.H{
-			"token":       token,
-			"user_id":     12345, // user.ID
-			"is_new_user": true,  // 告诉前端是否是新用户，决定是否跳转设置头像
-		},
-	})
-}
-
-// GetUser 具体处理函数
-func (h *Handler) GetUser(c *gin.Context) {
-	idStr := c.Param("id")
-	id, _ := strconv.Atoi(idStr)
-
-	user, err := h.svc.GetUser(c.Request.Context(), uint(id))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, user)
-}
-
-func (h *Handler) Create(c *gin.Context) {
-	var req CreateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-
-	user, err := h.svc.CreateUser(c.Request.Context(), 5)
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(200, UserResponse{
-		ID:    user.ID,
-		Email: user.Email,
-	})
-}
+package userimport (	"bytes"	"encoding/json"	"fmt"	"io/ioutil"	"net/http"	"strconv"	"github.com/gin-gonic/gin")// Handler 用户模块的 HTTP 处理器type Handler struct {	svc Service}// NewHandler 构造函数func NewHandler(svc Service) *Handler {	return &Handler{svc: svc}}type WxPhoneResponse struct {	ErrCode   int    `json:"errcode"`	ErrMsg    string `json:"errmsg"`	PhoneInfo struct {		PhoneNumber     string `json:"phoneNumber"`		PurePhoneNumber string `json:"purePhoneNumber"`		CountryCode     string `json:"countryCode"`	} `json:"phone_info"`}// RegisterRoutes 注册路由func (h *Handler) RegisterRoutes(r *gin.Engine) {	userGroup := r.Group("/")	{		userGroup.GET("/:id", h.GetUser)		userGroup.POST("/api/auth/wx-login", h.Login)		userGroup.POST("/api/auth/bind-phone", h.BindPhone)	}}type WxLoginResponse struct {	OpenID     string `json:"openid"`	SessionKey string `json:"session_key"`	UnionID    string `json:"unionid"`	ErrCode    int    `json:"errcode"`	ErrMsg     string `json:"errmsg"`}func Code2Session(code string) (*WxLoginResponse, error) {	url := fmt.Sprintf(		"https://api.weixin.qq.com/sns/jscode2session?appid=%s&secret=%s&js_code=%s&grant_type=authorization_code",		"wxfc5a474d1f34d3bc",		"1d0ddf2da6dde6db123b8ddf1d4c4abe",		code,	)	resp, err := http.Get(url)	if err != nil {		return nil, err	}	defer resp.Body.Close()	body, err := ioutil.ReadAll(resp.Body)	if err != nil {		return nil, err	}	var wxResp WxLoginResponse	if err := json.Unmarshal(body, &wxResp); err != nil {		return nil, err	}	if wxResp.ErrCode != 0 {		return nil, fmt.Errorf("wx error: %s", wxResp.ErrMsg)	}	return &wxResp, nil}func (h *Handler) getAccessToken() (string, error) {	// 实际上你应该先检查 Redis 里有没有缓存的 token，如果有直接返回	appID := "wxfc5a474d1f34d3bc"	appSecret := "1d0ddf2da6dde6db123b8ddf1d4c4abe"	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)	resp, err := http.Get(url)	if err != nil {		return "", err	}	defer resp.Body.Close()	var tokenResp struct {		AccessToken string `json:"access_token"`		ExpiresIn   int    `json:"expires_in"`		ErrCode     int    `json:"errcode"`	}	json.NewDecoder(resp.Body).Decode(&tokenResp)	if tokenResp.ErrCode != 0 {		return "", fmt.Errorf("token error")	}	return tokenResp.AccessToken, nil}type BindPhoneRequest struct {	PhoneCode string `json:"phone_code"`}func (h *Handler) BindPhone(c *gin.Context) {	var req BindPhoneRequest	if err := c.ShouldBindJSON(&req); err != nil || req.PhoneCode == "" {		c.JSON(400, gin.H{"error": "phone_code 不能为空"})		return	}	// 1. 获取 access_token	accessToken, err := h.getAccessToken()	if err != nil {		c.JSON(500, gin.H{"error": "获取 access_token 失败"})		return	}	// 2. 调用微信换手机号接口	wxAPI := fmt.Sprintf(		"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=%s",		accessToken,	)	body, _ := json.Marshal(map[string]string{		"code": req.PhoneCode, // ⚠️ 只能是 getPhoneNumber 的 code	})	resp, err := http.Post(wxAPI, "application/json", bytes.NewBuffer(body))	if err != nil {		c.JSON(500, gin.H{"error": "调用微信接口失败"})		return	}	defer resp.Body.Close()	var wxResp WxPhoneResponse	if err := json.NewDecoder(resp.Body).Decode(&wxResp); err != nil {		c.JSON(500, gin.H{"error": "解析微信返回失败"})		return	}	if wxResp.ErrCode != 0 {		c.JSON(400, gin.H{"error": wxResp.ErrMsg})		return	}	// 3. TODO: 绑定手机号到当前登录用户（user_id 从 token 中取）	phone := wxResp.PhoneInfo.PhoneNumber	c.JSON(200, gin.H{		"code": 0,		"msg":  "绑定手机号成功",		"data": gin.H{			"phone": phone,		},	})}func (h *Handler) Login(c *gin.Context) {	var req WxLoginRequest	if err := c.ShouldBindJSON(&req); err != nil || req.LoginCode == "" {		c.JSON(400, gin.H{"error": "login_code 不能为空"})		return	}	// 1. code 换 openid	wxResp, err := Code2Session(req.LoginCode)	if err != nil {		c.JSON(500, gin.H{"error": "微信登录失败"})		return	}	// 2. TODO: 根据 openid 查用户 / 创建用户	userID := int64(12345) // 示例	// 3. TODO: 生成你自己的 token	token := "123"	c.JSON(200, gin.H{		"code": 0,		"msg":  "登录成功",		"data": gin.H{			"openid":      wxResp.OpenID,			"is_new_user": true,			"user_id":     userID,			"token":       token,		},	})}// GetUser 具体处理函数func (h *Handler) GetUser(c *gin.Context) {	idStr := c.Param("id")	id, _ := strconv.Atoi(idStr)	user, err := h.svc.GetUser(c.Request.Context(), uint(id))	if err != nil {		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})		return	}	c.JSON(http.StatusOK, user)}func (h *Handler) Create(c *gin.Context) {	var req CreateUserRequest	if err := c.ShouldBindJSON(&req); err != nil {		c.JSON(400, gin.H{"error": err.Error()})		return	}	user, err := h.svc.CreateUser(c.Request.Context(), 5)	if err != nil {		c.JSON(500, gin.H{"error": err.Error()})		return	}	c.JSON(200, UserResponse{		ID:    user.ID,		Email: user.Email,	})}
