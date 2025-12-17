@@ -3,6 +3,7 @@ package service
 import (
 	"Hyper/config"
 	"Hyper/types"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,7 @@ var _ IWeChatService = (*WeChatService)(nil)
 type IWeChatService interface {
 	Code2Session(ctx context.Context, code string) (*types.WxLoginResponse, error)
 	GetAccessToken() (string, error)
-	GetUserPhoneNumber() (string, error)
+	GetUserPhoneNumber(code string) (string, error)
 }
 
 type WeChatService struct {
@@ -52,10 +53,13 @@ func (w *WeChatService) GetAccessToken() (string, error) {
 
 	appID := w.Config.App.AppID
 	appSecret := w.Config.App.AppSecret
+	fmt.Println("appID:", appID)
+	fmt.Println("appSecret:", appSecret)
 	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)
 
 	resp, err := http.Get(url)
 	if err != nil {
+		fmt.Println(err)
 		return "", err
 	}
 	defer resp.Body.Close()
@@ -68,13 +72,14 @@ func (w *WeChatService) GetAccessToken() (string, error) {
 	json.NewDecoder(resp.Body).Decode(&tokenResp)
 
 	if tokenResp.ErrCode != 0 {
+		fmt.Println(tokenResp.ErrCode)
 		return "", fmt.Errorf("token error")
 	}
 
 	return tokenResp.AccessToken, nil
 }
 
-func (w *WeChatService) GetUserPhoneNumber() (string, error) {
+func (w *WeChatService) GetUserPhoneNumber(code string) (string, error) {
 	accessToken, err := w.GetAccessToken()
 	if err != nil {
 		return "", err
@@ -83,18 +88,23 @@ func (w *WeChatService) GetUserPhoneNumber() (string, error) {
 		"https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=%s",
 		accessToken,
 	)
+	body, _ := json.Marshal(map[string]string{
+		"code": code,
+	})
 
-	resp, err := http.Get(url)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	rep := &types.WxPhoneResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
+		fmt.Println(err)
 		return "", err
 	}
 
 	if rep.ErrCode != 0 {
+		fmt.Println(rep.ErrMsg)
 		return "", errors.New("微信获取手机号失败")
 	}
 	return rep.PhoneInfo.PhoneNumber, nil
