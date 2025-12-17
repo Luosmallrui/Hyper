@@ -29,30 +29,7 @@ func (s *UserService) GetOrCreateByOpenID(ctx context.Context, openid string) (*
 	if openid == "" {
 		return nil, errors.New("openid 不能为空")
 	}
-	user, err := s.UsersRepo.FindByWhere(ctx, "open_id = ?", openid)
-	if err == nil {
-		return user, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	user = &models.Users{
-		OpenID: openid,
-	}
-	err = s.UsersRepo.Create(ctx, user)
-	if err == nil {
-		return user, nil
-	}
-
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		err = s.UsersRepo.Db.Where("open_id = ?", openid).First(&user).Error
-		if err == nil {
-			return user, nil
-		}
-	}
-	return nil, err
-
+	return s.UsersRepo.GetOrCreateByOpenID(ctx, openid)
 }
 
 type UserRegisterOpt struct {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
@@ -20,7 +21,7 @@ type Auth struct {
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/")
 	auth.POST("/api/auth/wx-login", context.Wrap(u.Login)) // 登录
-	auth.POST("/api/auth/bind-phone", context.Wrap(u.BindPhone))
+	auth.POST("/api/auth/bind-phone", middleware.Auth(), context.Wrap(u.BindPhone))
 }
 
 func (u *Auth) Login(c *gin.Context) error {
