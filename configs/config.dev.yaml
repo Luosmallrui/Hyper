@@ -5,6 +5,11 @@ app:
   app_id: wx27c89241d93f10d3
   app_secret: 5f8833e38748aa345e3b8e919241d2ce
 
+jwt:
+  secret: z9tld5hG07Mgz1wm995xeH4yKYOprz9NALqQj2bBDUs
+  expires_time: 3600
+  buffer_time: 3600
+
 server:
   http: 8081
   websocket: 8083

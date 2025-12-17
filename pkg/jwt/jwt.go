@@ -6,7 +6,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var secret = []byte("hyper-secret-key")
+var secret = []byte("z9tld5hG07Mgz1wm995xeH4yKYOprz9NALqQj2bBDUs=")
 
 type Claims struct {
 	UserID uint   `json:"user_id"`
