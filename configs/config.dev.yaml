@@ -1,0 +1,40 @@
+# 项目配置信息
+app:
+  env: dev
+  debug: false
+
+server:
+  http: 8082
+  websocket: 8083
+  rpc: 8889
+
+
+# 日志配置
+log:
+  # 日志文件路径 *请使用绝对路径*
+  path: "/path/to/.../runtime"
+
+# Redis 相关配置
+redis:
+  host: 127.0.0.1:6379
+  auth: xxx
+  database: 0
+
+# Mysql 数据库配置
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  charset: utf8mb4
+  username: root
+  password: 123456
+  database: k
+  collation: utf8mb4_general_ci
+
+# 跨域配置
+cors:
+  origin: "*"
+  headers: "Content-Type,Cache-Control,User-Agent,Keep-Alive,DNT,AccessToken,Authorization"
+  methods: "OPTIONS,GET,POST,PUT,DELETE"
+  credentials: false
+  max_age: 600
+

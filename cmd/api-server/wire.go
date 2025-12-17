@@ -4,19 +4,24 @@
 package main
 
 import (
-	"Hyper/internal/module/user"
+	"Hyper/config"
+	"Hyper/dao"
+	"Hyper/handler"
 	"Hyper/pkg/database"
-	"Hyper/server"
-	"github.com/gin-gonic/gin"
+	"Hyper/pkg/server"
+	"Hyper/service"
 	"github.com/google/wire"
 )
 
-func InitServer() *gin.Engine {
+func InitServer(cfg *config.Config) *server.AppProvider {
 	wire.Build(
 		database.NewDB,
 		server.NewGinEngine,
-		server.NewHandlers,
-		user.ProviderSet,
+		wire.Struct(new(handler.Auth), "*"),
+		wire.Struct(new(server.AppProvider), "*"),
+		wire.Struct(new(server.Handlers), "*"),
+		dao.ProviderSet,
+		service.ProviderSet,
 	)
 	return nil
 }

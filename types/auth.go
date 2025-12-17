@@ -1,4 +1,4 @@
-package user
+package types
 
 type CreateUserRequest struct {
 	Email    string `json:"email" binding:"required,email"`
@@ -26,4 +26,25 @@ type WxSessionResponse struct {
 type UpdateProfileRequest struct {
 	AvatarUrl string `json:"avatar_url"`
 	Nickname  string `json:"nickname"`
+}
+
+type WxPhoneResponse struct {
+	ErrCode   int    `json:"errcode"`
+	ErrMsg    string `json:"errmsg"`
+	PhoneInfo struct {
+		PhoneNumber     string `json:"phoneNumber"`
+		PurePhoneNumber string `json:"purePhoneNumber"`
+		CountryCode     string `json:"countryCode"`
+	} `json:"phone_info"`
+}
+type BindPhoneRequest struct {
+	PhoneCode string `json:"phone_code"`
+}
+
+type WxLoginResponse struct {
+	OpenID     string `json:"openid"`
+	SessionKey string `json:"session_key"`
+	UnionID    string `json:"unionid"`
+	ErrCode    int    `json:"errcode"`
+	ErrMsg     string `json:"errmsg"`
 }

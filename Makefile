@@ -43,7 +43,7 @@ build:
 .PHONY: run
 run: gen
 	@echo "==> Running $(APP_NAME)"
-	@$(GO) run ./$(CMD_DIR)
+	@$(GO) run ./$(CMD_DIR) serve
 
 # =========================
 # Test

@@ -1,12 +1,29 @@
 package main
 
 import (
-	"fmt"
+	"Hyper/config"
+	"Hyper/pkg/server"
+	"github.com/urfave/cli/v2"
+	"log"
+	"os"
 )
 
 func main() {
-	r := InitServer()
-
-	fmt.Println("Server starting on :8080...")
-	r.Run(":8081")
+	cfg := config.New("configs/config.dev.yaml")
+	appProvider := InitServer(cfg)
+	cliApp := &cli.App{
+		Name: "api-server",
+		Commands: []*cli.Command{
+			{
+				Name:  "serve",
+				Usage: "start http server",
+				Action: func(ctx *cli.Context) error {
+					return server.Run(ctx, appProvider)
+				},
+			},
+		},
+	}
+	if err := cliApp.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
 }
