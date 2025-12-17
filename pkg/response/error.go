@@ -47,3 +47,11 @@ func ErrorMiddleware() gin.HandlerFunc {
 		}
 	}
 }
+
+func Abort(c *gin.Context, httpStatus int, msg string) {
+	c.AbortWithStatusJSON(httpStatus, Response{
+		Code: httpStatus,
+		Msg:  msg,
+		Data: nil,
+	})
+}

@@ -3,6 +3,7 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/pkg/context"
+	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
@@ -36,7 +37,26 @@ func (u *Auth) Login(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-	response.Success(c, wxResp)
+
+	// 1. 根据 openid 查询或创建用户
+	user, err := u.UserService.GetOrCreateByOpenID(c.Request.Context(), wxResp.OpenID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 2. 生成 JWT
+	token, err := jwt.GenerateToken(uint(user.Id), user.OpenID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "生成 token 失败")
+	}
+	response.Success(c, gin.H{
+		"token": token,
+		"user": gin.H{
+			"id":     user.Id,
+			"openid": user.OpenID,
+			"phone":  user.Mobile,
+		},
+	})
 	return nil
 }
 

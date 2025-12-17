@@ -4,6 +4,7 @@ go 1.24.4
 
 require (
 	github.com/gin-gonic/gin v1.11.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/wire v0.7.0
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/urfave/cli/v2 v2.27.7

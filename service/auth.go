@@ -14,6 +14,7 @@ import (
 var _ IUserService = (*UserService)(nil)
 
 type IUserService interface {
+	GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error)
 	Register(ctx context.Context, opt *UserRegisterOpt) (*models.Users, error)
 	Login(mobile string, password string) (*models.Users, error)
 	Forget(opt *UserForgetOpt) (bool, error)
@@ -22,6 +23,36 @@ type IUserService interface {
 
 type UserService struct {
 	UsersRepo *dao.Users
+}
+
+func (s *UserService) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {
+	if openid == "" {
+		return nil, errors.New("openid 不能为空")
+	}
+	user, err := s.UsersRepo.FindByWhere(ctx, "open_id = ?", openid)
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	user = &models.Users{
+		OpenID: openid,
+	}
+	err = s.UsersRepo.Create(ctx, user)
+	if err == nil {
+		return user, nil
+	}
+
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		err = s.UsersRepo.Db.Where("open_id = ?", openid).First(&user).Error
+		if err == nil {
+			return user, nil
+		}
+	}
+	return nil, err
+
 }
 
 type UserRegisterOpt struct {
@@ -39,15 +70,13 @@ func (s *UserService) Register(ctx context.Context, opt *UserRegisterOpt) (*mode
 	}
 
 	user := &models.Users{
-		Mobile:   opt.Mobile,
-		Nickname: opt.Nickname,
-		Avatar:   "",
-		Gender:   models.UsersGenderDefault,
-		//Password:  encrypt.HashPassword(opt.Password),
+		Mobile:    opt.Mobile,
+		Nickname:  opt.Nickname,
+		Avatar:    "",
+		Gender:    models.UsersGenderDefault,
 		Motto:     "",
 		Email:     "",
 		Birthday:  "",
-		IsRobot:   models.AdminStatusDeactivate,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
