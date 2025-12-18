@@ -14,5 +14,6 @@ func NewDB(conf *config.Config) *gorm.DB {
 	if err != nil {
 		fmt.Print("failed to connect database")
 	}
+	fmt.Println("connected to database")
 	return db
 }

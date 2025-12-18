@@ -4,7 +4,9 @@
 APP_NAME := Hyper
 CMD_DIR  := cmd/api-server
 BIN_DIR  := bin
-
+GOOS    ?= linux
+GOARCH  ?= amd64
+CGO     ?= 0
 GO       := go
 WIRE     := wire
 
@@ -33,9 +35,11 @@ wire:
 # =========================
 .PHONY: build
 build:
-	@echo "==> Building $(APP_NAME)"
+	@echo "==> Building $(APP_NAME) for $(GOOS)/$(GOARCH)"
 	@mkdir -p $(BIN_DIR)
-	@$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) ./$(CMD_DIR)
+	@CGO_ENABLED=$(CGO) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+		$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
+		-o $(BIN_DIR)/$(APP_NAME) ./$(CMD_DIR)
 
 # =========================
 # Run
