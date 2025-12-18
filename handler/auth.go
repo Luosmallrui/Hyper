@@ -20,8 +20,8 @@ type Auth struct {
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/")
-	auth.POST("/api/auth/wx-login", context.Wrap(u.Login)) // 登录
-	auth.POST("/api/auth/bind-phone", middleware.Auth(), context.Wrap(u.BindPhone))
+	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                                             // 微信登录
+	auth.POST("/api/auth/bind-phone", middleware.Auth(u.Config.Jwt.Secret), context.Wrap(u.BindPhone)) //微信获取手机号
 }
 
 func (u *Auth) Login(c *gin.Context) error {
@@ -39,25 +39,23 @@ func (u *Auth) Login(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	// 1. 根据 openid 查询或创建用户
 	user, err := u.UserService.GetOrCreateByOpenID(c.Request.Context(), wxResp.OpenID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	// 2. 生成 JWT
-	token, err := jwt.GenerateToken(uint(user.Id), user.OpenID)
+	token, err := jwt.GenerateToken(u.Config.Jwt.Secret, uint(user.Id), user.OpenID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "生成 token 失败")
 	}
-	response.Success(c, gin.H{
-		"token": token,
-		"user": gin.H{
-			"id":     user.Id,
-			"openid": user.OpenID,
-			"phone":  user.Mobile,
-		},
-	})
+
+	rep := types.LoginRep{
+		Token:       token,
+		UserId:      user.Id,
+		OpenId:      user.OpenID,
+		PhoneNumber: user.Mobile,
+	}
+	response.Success(c, rep)
 	return nil
 }
 
@@ -71,12 +69,6 @@ func (u *Auth) BindPhone(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	phone := userPhoneNumber
-	response.Success(c, gin.H{
-		"code": 0,
-		"msg":  "绑定手机号成功",
-		"data": gin.H{
-			"phone": phone,
-		},
-	})
+	response.Success(c, types.BindPhoneRep{PhoneNumber: phone})
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Auth() gin.HandlerFunc {
+func Auth(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -23,7 +23,7 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		claims, err := jwt.ParseToken(parts[1])
+		claims, err := jwt.ParseToken(secret, parts[1])
 		if err != nil {
 			response.Abort(c, http.StatusUnauthorized, "token 无效")
 			return

@@ -56,3 +56,14 @@ type WxLoginResponse struct {
 	ErrCode    int    `json:"errcode"`
 	ErrMsg     string `json:"errmsg"`
 }
+
+type LoginRep struct {
+	Token       string `json:"token"`
+	UserId      int    `json:"user_id"`
+	OpenId      string `json:"open_id"`
+	PhoneNumber string `json:"phone_number"`
+}
+
+type BindPhoneRep struct {
+	PhoneNumber string `json:"phone_number"`
+}
