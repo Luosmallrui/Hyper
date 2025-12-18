@@ -3,6 +3,7 @@ module Hyper
 go 1.24.4
 
 require (
+	github.com/bwmarrin/snowflake v0.3.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/wire v0.7.0
