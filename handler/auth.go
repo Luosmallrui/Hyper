@@ -2,7 +2,6 @@ package handler
 
 import (
 	"Hyper/config"
-	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
@@ -20,14 +19,14 @@ type Auth struct {
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/")
-	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                                             // 微信登录
-	auth.POST("/api/auth/bind-phone", middleware.Auth(u.Config.Jwt.Secret), context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))       // 微信登录
+	auth.POST("/api/auth/bind-phone", context.Wrap(u.BindPhone)) //微信获取手机号
 }
 
 func (u *Auth) Login(c *gin.Context) error {
 	var req types.WxLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
 	}
 
 	if req.LoginCode == "" {
@@ -44,9 +43,9 @@ func (u *Auth) Login(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	token, err := jwt.GenerateToken(u.Config.Jwt.Secret, uint(user.Id), user.OpenID)
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID)
 	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "生成 token 失败")
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
 	rep := types.LoginRep{
