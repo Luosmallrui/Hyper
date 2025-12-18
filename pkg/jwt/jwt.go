@@ -14,7 +14,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(secret string, userID uint, openid string) (string, error) {
+func GenerateToken(secret []byte, userID uint, openid string) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		OpenID: openid,
@@ -27,7 +27,7 @@ func GenerateToken(secret string, userID uint, openid string) (string, error) {
 	return token.SignedString(secret)
 }
 
-func ParseToken(secret string, tokenStr string) (*Claims, error) {
+func ParseToken(secret []byte, tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return secret, nil
 	})
