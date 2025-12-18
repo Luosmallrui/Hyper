@@ -46,8 +46,6 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r.Use(CORSMiddleware())
 	r.Use(response.ErrorMiddleware())
 	h.Auth.RegisterRouter(r)
-	// h.Order.RegisterRoutes(r)
-	// h.Auth.RegisterRoutes(r)
 
 	return r
 }
@@ -105,7 +103,7 @@ func run(c chan os.Signal, eg *errgroup.Group, ctx context.Context, app *AppProv
 		defer func() {
 			log.Println("Shutting down serv...")
 
-			// 等待中断信号以优雅地关闭服务器（设置 5 秒的超时时间）
+			// 等待中断信号以优雅地关闭服务器
 			timeCtx, timeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer timeCancel()
 
