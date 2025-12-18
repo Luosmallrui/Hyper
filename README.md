@@ -1,3 +1,11 @@
+# 运行代码
+```shell
+go run ./cmd/api-server/. serve
+```
+
+
+
+
 ``` 
 Hyper/
 ├── api/                    # API 定义 (OpenAPI/Swagger, Protocol Buffers)
