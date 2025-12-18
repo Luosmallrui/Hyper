@@ -1,7 +1,6 @@
 package dao
 
 import (
-	"Hyper/models"
 	"context"
 
 	"gorm.io/gorm"
@@ -62,13 +61,6 @@ func (r *Repo[T]) FindAll(ctx context.Context, arg ...func(*gorm.DB)) ([]*T, err
 	}
 
 	return items, nil
-}
-func (r *Repo[T]) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {
-	user := &models.Users{OpenID: openid}
-	err := r.Db.WithContext(ctx).
-		Where("open_id = ?", openid).
-		FirstOrCreate(user).Error
-	return user, err
 }
 
 // FindByWhere 根据条件查询一条数据

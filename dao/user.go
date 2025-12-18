@@ -27,3 +27,11 @@ func (u *Users) IsMobileExist(ctx context.Context, mobile string) bool {
 	exist, _ := u.Repo.IsExist(ctx, "mobile = ?", mobile)
 	return exist
 }
+
+func (u *Users) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {
+	user := &models.Users{OpenID: openid}
+	err := u.Repo.Db.WithContext(ctx).
+		Where("open_id = ?", openid).
+		FirstOrCreate(user).Error
+	return user, err
+}
