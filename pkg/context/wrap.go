@@ -44,11 +44,16 @@ func GetUserID(c *gin.Context) (int64, error) {
 	if !ok {
 		return 0, errors.New("user_id 不存在")
 	}
-
-	uid, ok := v.(int64)
-	if !ok {
-		return 0, errors.New("user_id 类型错误")
+	switch uid := v.(type) {
+	case int64:
+		return uid, nil
+	case uint:
+		return int64(uid), nil
+	case int:
+		return int64(uid), nil
+	case float64:
+		return int64(uid), nil
+	default:
+		return 0, errors.New("user_id 类型不支持")
 	}
-
-	return uid, nil
 }
