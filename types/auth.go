@@ -64,6 +64,26 @@ type LoginRep struct {
 	PhoneNumber string `json:"phone_number"`
 }
 
+type UserProfileResp struct {
+	User  UserBasicInfo `json:"user"`
+	Stats UserStats     `json:"stats"`
+	Token string        `json:"token"`
+}
+
+type UserBasicInfo struct {
+	UserID      int64  `json:"user_id"`    // Snowflake ID（对外）
+	Nickname    string `json:"nickname"`   // 邪修的马路路
+	AvatarURL   string `json:"avatar_url"` // 头像
+	VipLevel    string `json:"vip_level"`  // gold / silver / none
+	PhoneNumber string `json:"phone_number"`
+}
+
+type UserStats struct {
+	Following int64 `json:"following"` // 23
+	Follower  int64 `json:"follower"`  // 115
+	Likes     int64 `json:"likes"`     // 25
+}
+
 type BindPhoneRep struct {
 	PhoneNumber string `json:"phone_number"`
 }

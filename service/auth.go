@@ -19,10 +19,33 @@ type IUserService interface {
 	Login(mobile string, password string) (*models.Users, error)
 	Forget(opt *UserForgetOpt) (bool, error)
 	UpdatePassword(uid int, oldPassword string, password string) error
+	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 }
 
 type UserService struct {
 	UsersRepo *dao.Users
+}
+
+func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error {
+	if PhoneNumber == "" {
+		return errors.New("手机号不能为空")
+	}
+
+	user, err := s.UsersRepo.FindById(ctx, UserId)
+	if err != nil || user.Id == 0 {
+		return errors.New("用户不存在")
+	}
+
+	if user.Mobile == user.Mobile {
+		return nil
+	}
+
+	err = s.UsersRepo.UpdateById(ctx, int64(user.Id), map[string]any{
+		"mobile":     PhoneNumber,
+		"updated_at": time.Now(),
+	})
+
+	return err
 }
 
 func (s *UserService) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {
@@ -98,12 +121,7 @@ func (s *UserService) Forget(opt *UserForgetOpt) (bool, error) {
 	if err != nil || user.Id == 0 {
 		return false, errors.New("账号不存在! ")
 	}
-
-	affected, err := s.UsersRepo.UpdateById(context.TODO(), user.Id, map[string]any{
-		"password": encrypt.HashPassword(opt.Password),
-	})
-
-	return affected > 0, err
+	return true, nil
 }
 
 // UpdatePassword 修改用户密码
@@ -117,10 +135,6 @@ func (s *UserService) UpdatePassword(uid int, oldPassword string, password strin
 	if !encrypt.VerifyPassword(user.Password, oldPassword) {
 		return errors.New("密码验证不正确！")
 	}
-
-	_, err = s.UsersRepo.UpdateById(context.TODO(), user.Id, map[string]any{
-		"password": encrypt.HashPassword(password),
-	})
 
 	return err
 }
