@@ -36,10 +36,6 @@ func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber 
 		return errors.New("用户不存在")
 	}
 
-	if user.Mobile == user.Mobile {
-		return nil
-	}
-
 	err = s.UsersRepo.UpdateById(ctx, int64(user.Id), map[string]any{
 		"mobile":     PhoneNumber,
 		"updated_at": time.Now(),
