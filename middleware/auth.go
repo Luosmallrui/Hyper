@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -28,6 +29,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, "token 无效")
 			return
 		}
+		fmt.Println(claims.UserID, 66)
 		c.Set("user_id", claims.UserID)
 		c.Set("openid", claims.OpenID)
 
