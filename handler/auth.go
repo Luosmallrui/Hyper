@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
@@ -18,9 +19,10 @@ type Auth struct {
 }
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
 	auth := r.Group("/")
-	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))       // 微信登录
-	auth.POST("/api/auth/bind-phone", context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
+	auth.POST("/api/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 }
 
 func (u *Auth) Login(c *gin.Context) error {
@@ -48,17 +50,28 @@ func (u *Auth) Login(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	rep := types.LoginRep{
-		Token:       token,
-		UserId:      user.Id,
-		OpenId:      user.OpenID,
-		PhoneNumber: user.Mobile,
+	rep := types.UserProfileResp{
+		User: types.UserBasicInfo{
+			UserID:      231255123123,
+			Nickname:    "邪修的马路路",
+			PhoneNumber: user.Mobile,
+		},
+		Stats: types.UserStats{
+			Following: 25,
+			Follower:  115,
+			Likes:     25,
+		},
+		Token: token,
 	}
 	response.Success(c, rep)
 	return nil
 }
 
 func (u *Auth) BindPhone(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
 	var req types.BindPhoneRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.PhoneCode == "" {
 		return response.NewError(http.StatusInternalServerError, "phone_code 不能为空")
@@ -68,6 +81,11 @@ func (u *Auth) BindPhone(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	phone := userPhoneNumber
+	err = u.UserService.UpdateMobile(c.Request.Context(), int(userId), phone)
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+
 	response.Success(c, types.BindPhoneRep{PhoneNumber: phone})
 	return nil
 }

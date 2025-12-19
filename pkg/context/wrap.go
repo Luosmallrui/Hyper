@@ -7,6 +7,11 @@ import (
 	"net/http"
 )
 
+const (
+	CtxUserID = "user_id"
+	CtxOpenID = "openid"
+)
+
 type HandlerFunc func(*gin.Context) error
 
 func Wrap(h func(*gin.Context) error) gin.HandlerFunc {
@@ -32,4 +37,18 @@ func Wrap(h func(*gin.Context) error) gin.HandlerFunc {
 			})
 		}
 	}
+}
+
+func GetUserID(c *gin.Context) (int64, error) {
+	v, ok := c.Get(CtxUserID)
+	if !ok {
+		return 0, errors.New("user_id 不存在")
+	}
+
+	uid, ok := v.(int64)
+	if !ok {
+		return 0, errors.New("user_id 类型错误")
+	}
+
+	return uid, nil
 }

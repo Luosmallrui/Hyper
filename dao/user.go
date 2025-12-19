@@ -35,3 +35,19 @@ func (u *Users) GetOrCreateByOpenID(ctx context.Context, openid string) (*models
 		FirstOrCreate(user).Error
 	return user, err
 }
+
+func (u *Users) UpdateById(
+	ctx context.Context,
+	id int64,
+	data map[string]any,
+) error {
+
+	if id <= 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return u.Db.WithContext(ctx).
+		Model(&models.Users{}).
+		Where("id = ?", id).
+		Updates(data).Error
+
+}
