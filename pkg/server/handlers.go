@@ -6,4 +6,5 @@ import (
 
 type Handlers struct {
 	Auth *handler.Auth
+	Map  *handler.Map
 }
