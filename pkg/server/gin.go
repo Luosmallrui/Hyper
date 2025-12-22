@@ -5,10 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	gonanoid "github.com/matoous/go-nanoid/v2"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/errgroup"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +12,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	gonanoid "github.com/matoous/go-nanoid/v2"
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 )
 
 type AppProvider struct {
@@ -44,6 +45,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 	h.Auth.RegisterRouter(r)
+	h.Map.RegisterRouter(r)
 
 	return r
 }
