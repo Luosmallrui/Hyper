@@ -31,8 +31,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:   userService,
 		WeChatService: weChatService,
 	}
+	mapDao := dao.NewMapDao()
+	mapService := service.NewMapService(mapDao)
+	handlerMap := &handler.Map{
+		MapService: mapService,
+	}
 	handlers := &server.Handlers{
 		Auth: auth,
+		Map:  handlerMap,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
