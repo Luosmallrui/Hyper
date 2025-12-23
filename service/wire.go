@@ -11,5 +11,6 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(WeChatService), "*"),
 	wire.Bind(new(IWeChatService), new(*WeChatService)),
 
-	NewMapService,
+	wire.Struct(new(MapService), "*"),
+	wire.Bind(new(IMapService), new(*MapService)),
 )

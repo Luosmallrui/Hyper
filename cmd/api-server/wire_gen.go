@@ -32,7 +32,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		WeChatService: weChatService,
 	}
 	mapDao := dao.NewMapDao()
-	mapService := service.NewMapService(mapDao)
+	mapService := &service.MapService{
+		MapDao: mapDao,
+	}
 	handlerMap := &handler.Map{
 		MapService: mapService,
 	}
