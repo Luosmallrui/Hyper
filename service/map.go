@@ -8,6 +8,12 @@ type MapService struct {
 	MapDao *dao.MapDao
 }
 
+var _ IMapService = (*MapService)(nil)
+
+type IMapService interface {
+	GetMapData() (interface{}, error)
+}
+
 func NewMapService(mapDao *dao.MapDao) *MapService {
 	return &MapService{
 		MapDao: mapDao,
