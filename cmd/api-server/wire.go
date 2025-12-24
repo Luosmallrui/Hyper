@@ -17,6 +17,7 @@ import (
 func InitServer(cfg *config.Config) *server.AppProvider {
 	wire.Build(
 		database.NewDB,
+		config.ProvideOssConfig,
 		server.NewGinEngine,
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
