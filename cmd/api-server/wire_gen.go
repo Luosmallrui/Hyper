@@ -40,6 +40,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	handlerMap := &handler.Map{
 		MapService: mapService,
+		OssService: iOssService,
 	}
 	handlers := &server.Handlers{
 		Auth: auth,

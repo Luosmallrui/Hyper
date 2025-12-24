@@ -29,11 +29,34 @@ type IOssService interface {
 
 	// SignURL 生成临时访问 URL（秒）
 	SignURL(ctx context.Context, objectKey string, expireSeconds int64) (string, error)
+
+	ListBuckets(ctx context.Context) ([]string, error)
+}
+
+// ListBuckets 列举当前账号下所有 Bucket
+func (s *OssService) ListBuckets(
+	ctx context.Context,
+) ([]string, error) {
+
+	out, err := s.Client.ListBuckets(ctx, &oss.ListBucketsRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	buckets := make([]string, 0, len(out.Buckets))
+	for _, b := range out.Buckets {
+		if b.Name != nil {
+			buckets = append(buckets, *b.Name)
+		}
+	}
+
+	return buckets, nil
 }
 
 func NewOssService(cfg *config.OssConfig) IOssService {
 	ossCfg := oss.LoadDefaultConfig().
 		WithEndpoint(cfg.Endpoint).
+		WithRegion(cfg.Region).
 		WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(
 				cfg.AccessKeyID,
