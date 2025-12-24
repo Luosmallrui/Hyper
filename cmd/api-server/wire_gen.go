@@ -23,13 +23,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	userService := &service.UserService{
 		UsersRepo: users,
 	}
-	weChatService := service.WeChatService{
+	weChatService := &service.WeChatService{
 		Config: cfg,
 	}
+	ossConfig := config.ProvideOssConfig(cfg)
+	iOssService := service.NewOssService(ossConfig)
 	auth := &handler.Auth{
 		Config:        cfg,
 		UserService:   userService,
 		WeChatService: weChatService,
+		OssService:    iOssService,
 	}
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
