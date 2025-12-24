@@ -8,11 +8,12 @@ import (
 
 // Config 配置信息
 type Config struct {
-	App    *App    `json:"app" yaml:"app"`
-	Redis  *Redis  `json:"redis" yaml:"redis"`
-	MySQL  *MySQL  `json:"mysql" yaml:"mysql"`
-	Jwt    *Jwt    `json:"jwt" yaml:"jwt"`
-	Server *Server `json:"server" yaml:"server"`
+	App    *App       `json:"app" yaml:"app"`
+	Redis  *Redis     `json:"redis" yaml:"redis"`
+	MySQL  *MySQL     `json:"mysql" yaml:"mysql"`
+	Jwt    *Jwt       `json:"jwt" yaml:"jwt"`
+	Oss    *OssConfig `json:"oss" yaml:"oss"`
+	Server *Server    `json:"server" yaml:"server"`
 }
 
 type Server struct {

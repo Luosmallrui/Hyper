@@ -13,4 +13,6 @@ var ProviderSet = wire.NewSet(
 
 	wire.Struct(new(MapService), "*"),
 	wire.Bind(new(IMapService), new(*MapService)),
+
+	NewOssService,
 )

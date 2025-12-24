@@ -15,7 +15,8 @@ import (
 type Auth struct {
 	Config        *config.Config
 	UserService   service.IUserService
-	WeChatService service.WeChatService
+	WeChatService service.IWeChatService
+	OssService    service.IOssService
 }
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
