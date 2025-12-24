@@ -31,6 +31,7 @@ func (m *Map) GetMap(c *gin.Context) error {
 	mapData, err := m.MapService.GetMapData()
 	if err != nil {
 		response.Fail(c, 500, "获取地图数据失败")
+		return err
 	}
 	response.Success(c, mapData)
 	return nil
