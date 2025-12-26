@@ -10,7 +10,6 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/handler"
-	"Hyper/pkg/client"
 	"Hyper/pkg/database"
 	"Hyper/pkg/server"
 	"Hyper/service"
@@ -21,10 +20,8 @@ import (
 func InitServer(cfg *config.Config) *server.AppProvider {
 	db := database.NewDB(cfg)
 	users := dao.NewUsers(db)
-	redisClient := client.NewRedisClient(cfg)
 	userService := &service.UserService{
 		UsersRepo: users,
-		Redis:     redisClient,
 	}
 	weChatService := &service.WeChatService{
 		Config: cfg,
@@ -45,9 +42,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MapService: mapService,
 		OssService: iOssService,
 	}
+	note := &handler.Note{
+		OssService: iOssService,
+		Config:     cfg,
+	}
 	handlers := &server.Handlers{
 		Auth: auth,
 		Map:  handlerMap,
+		Note: note,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
