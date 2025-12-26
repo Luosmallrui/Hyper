@@ -46,6 +46,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r.Use(CORSMiddleware())
 	h.Auth.RegisterRouter(r)
 	h.Map.RegisterRouter(r)
+	h.Note.RegisterRouter(r)
 
 	return r
 }
