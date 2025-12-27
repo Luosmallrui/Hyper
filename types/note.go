@@ -44,3 +44,26 @@ type UploadResponse struct {
 	Width  int    `json:"width"`  // 原始宽度
 	Height int    `json:"height"` // 原始高度
 }
+
+// CreateNoteRequest 创建笔记请求
+type CreateNoteRequest struct {
+	Title       string      `json:"title" binding:"required,max=100"`   // 标题
+	Content     string      `json:"content"`                            // 正文内容
+	TopicIDs    []int64     `json:"topic_ids"`                          // 话题列表
+	Location    *Location   `json:"location"`                           // 地理位置
+	MediaData   []NoteMedia `json:"media_data"`                         // 媒体资源列表
+	Type        int         `json:"type" binding:"required,oneof=1 2"`  // 1-图文, 2-视频
+	VisibleConf int         `json:"visible_conf" binding:"oneof=1 2 3"` // 1-公开, 2-粉丝可见, 3-自己可见
+}
+
+// Location 地理位置
+type Location struct {
+	Lat  float64 `json:"lat"`  // 纬度
+	Lng  float64 `json:"lng"`  // 经度
+	Name string  `json:"name"` // 地点名称
+}
+
+// CreateNoteResponse 创建笔记响应
+type CreateNoteResponse struct {
+	NoteID uint64 `json:"note_id"` // 笔记ID
+}
