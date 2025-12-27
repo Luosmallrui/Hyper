@@ -8,8 +8,9 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Auth struct {
@@ -24,6 +25,16 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/")
 	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
 	auth.POST("/api/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.GET("/token", context.Wrap(u.GetToken))
+}
+
+func (u *Auth) GetToken(c *gin.Context) error {
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XXX")
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, token)
+	return nil
 }
 
 func (u *Auth) Login(c *gin.Context) error {
