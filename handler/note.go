@@ -2,32 +2,38 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net/http"
 	"path"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	_ "golang.org/x/image/webp"
 )
 
 type Note struct {
-	OssService service.IOssService
-	Config     *config.Config
+	OssService  service.IOssService
+	NoteService service.INoteService
+	Config      *config.Config
 }
 
 func (n *Note) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
 	g.POST("/upload", context.Wrap(n.UploadImage))
+	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 }
 func (n *Note) UploadImage(c *gin.Context) error {
 	header, err := c.FormFile("image")
@@ -79,6 +85,33 @@ func (n *Note) UploadImage(c *gin.Context) error {
 			objectKey),
 		Width:  width,
 		Height: height,
+	})
+	return nil
+}
+
+// CreateNote 创建笔记
+func (n *Note) CreateNote(c *gin.Context) error {
+	// 从 context 获取用户 ID
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 绑定请求参数
+	var req types.CreateNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
+	}
+
+	// 调用 Service 层创建笔记
+	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
+	}
+
+	// 返回成功响应
+	response.Success(c, types.CreateNoteResponse{
+		NoteID: noteID,
 	})
 	return nil
 }
