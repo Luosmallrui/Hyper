@@ -24,6 +24,7 @@ func (d *NoteDAO) Create(ctx context.Context, note *models.Note) error {
 func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error) {
 	var notes []*models.Note
 	err := d.Db.WithContext(ctx).
+		// Debug().
 		Where("user_id = ? AND status = ?", userID, status).
 		Order("created_at DESC").
 		Limit(limit).
