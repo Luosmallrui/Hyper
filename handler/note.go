@@ -34,6 +34,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g := r.Group("/v1/note")
 	g.POST("/upload", context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
+	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 }
 func (n *Note) UploadImage(c *gin.Context) error {
 	header, err := c.FormFile("image")
@@ -112,6 +113,51 @@ func (n *Note) CreateNote(c *gin.Context) error {
 	// 返回成功响应
 	response.Success(c, types.CreateNoteResponse{
 		NoteID: noteID,
+	})
+	return nil
+}
+
+// GetMyNotes 查询自己的笔记列表
+func (n *Note) GetMyNotes(c *gin.Context) error {
+	// 1. 获取当前登录用户ID
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	// fmt.Printf("[GetMyNotes] 查询用户ID: %d\n", userID)
+
+	// 2. 绑定查询参数
+	var req types.GetMyNotesRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	// 3. 设置默认值
+	if req.Limit == 0 {
+		req.Limit = 20
+	}
+	// 仅当未提供 status 参数时，默认查询公开状态
+	if c.Query("status") == "" {
+		req.Status = 1
+	}
+	// fmt.Printf("[GetMyNotes] 查询参数 - Status: %d, Limit: %d, Offset: %d\n", req.Status, req.Limit, req.Offset)
+
+	// 4. 调用 Service 层查询
+	notes, err := n.NoteService.GetUserNotes(c.Request.Context(), uint64(userID), req.Status, req.Limit, req.Offset)
+	if err != nil {
+		// fmt.Printf("[GetMyNotes] 查询错误: %v\n", err)
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
+	}
+	// fmt.Printf("[GetMyNotes] 查询结果数量: %d\n", len(notes))
+
+	// 5. 返回成功响应
+	total := 0
+	if notes != nil {
+		total = len(notes)
+	}
+	response.Success(c, types.GetMyNotesResponse{
+		Notes: notes,
+		Total: total,
 	})
 	return nil
 }

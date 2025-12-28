@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"Hyper/models"
+	"time"
+)
 
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
@@ -66,4 +69,17 @@ type Location struct {
 // CreateNoteResponse 创建笔记响应
 type CreateNoteResponse struct {
 	NoteID uint64 `json:"note_id"` // 笔记ID
+}
+
+// GetMyNotesRequest 查询自己笔记的请求
+type GetMyNotesRequest struct {
+	Status int8 `form:"status" binding:"omitempty,oneof=0 1 2 3"` // 笔记状态筛选（可选）
+	Limit  int  `form:"limit" binding:"omitempty,min=1,max=100"`  // 每页数量
+	Offset int  `form:"offset" binding:"omitempty,min=0"`         // 偏移量
+}
+
+// GetMyNotesResponse 笔记列表响应
+type GetMyNotesResponse struct {
+	Notes []*models.Note `json:"notes"` // 笔记列表
+	Total int            `json:"total"` // 总数
 }
