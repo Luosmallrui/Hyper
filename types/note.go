@@ -73,9 +73,9 @@ type CreateNoteResponse struct {
 
 // GetMyNotesRequest 查询自己笔记的请求
 type GetMyNotesRequest struct {
-	Status int8 `form:"status" binding:"omitempty,oneof=0 1 2 3"` // 笔记状态筛选（可选）
-	Limit  int  `form:"limit" binding:"omitempty,min=1,max=100"`  // 每页数量
-	Offset int  `form:"offset" binding:"omitempty,min=0"`         // 偏移量
+	Status   int8 `form:"status" binding:"omitempty,oneof=0 1 2 3"`   // 笔记状态筛选（可选）
+	Page     int  `form:"page" binding:"omitempty,min=1"`             // 页码（从1开始）
+	PageSize int  `form:"pagesize" binding:"omitempty,min=1,max=100"` // 每页数量
 }
 
 // GetMyNotesResponse 笔记列表响应

@@ -133,17 +133,23 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	}
 
 	// 3. 设置默认值
-	if req.Limit == 0 {
-		req.Limit = 20
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 20
 	}
 	// 仅当未提供 status 参数时，默认查询公开状态
 	if c.Query("status") == "" {
 		req.Status = 1
 	}
-	// fmt.Printf("[GetMyNotes] 查询参数 - Status: %d, Limit: %d, Offset: %d\n", req.Status, req.Limit, req.Offset)
+	// 计算 limit 和 offset
+	limit := req.PageSize
+	offset := (req.Page - 1) * req.PageSize
+	// fmt.Printf("[GetMyNotes] 查询参数 - Status: %d, Page: %d, PageSize: %d, Offset: %d\n", req.Status, req.Page, req.PageSize, offset)
 
 	// 4. 调用 Service 层查询
-	notes, err := n.NoteService.GetUserNotes(c.Request.Context(), uint64(userID), req.Status, req.Limit, req.Offset)
+	notes, err := n.NoteService.GetUserNotes(c.Request.Context(), uint64(userID), req.Status, limit, offset)
 	if err != nil {
 		// fmt.Printf("[GetMyNotes] 查询错误: %v\n", err)
 		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
