@@ -42,9 +42,24 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MapService: mapService,
 		OssService: iOssService,
 	}
+	messageDAO := dao.NewMessageDAO(db)
+	messageService := service.NewMessageService(messageDAO)
+	messageHandler := &handler.MessageHandler{
+		Service: messageService,
+	}
+	messageReadDAO := dao.NewMessageReadDAO(db)
+	messageReadService := service.NewMessageReadService(messageReadDAO)
+	groupDAO := dao.NewGroupDAO(db)
+	wsHandler := &handler.WSHandler{
+		MessageService:     messageService,
+		MessageReadService: messageReadService,
+		GroupDAO:           groupDAO,
+	}
 	handlers := &server.Handlers{
-		Auth: auth,
-		Map:  handlerMap,
+		Auth:    auth,
+		Map:     handlerMap,
+		Message: messageHandler,
+		WS:      wsHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
