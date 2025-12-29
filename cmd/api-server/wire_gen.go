@@ -42,9 +42,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MapService: mapService,
 		OssService: iOssService,
 	}
+	noteDAO := dao.NewNoteDAO(db)
+	noteService := &service.NoteService{
+		NoteDAO: noteDAO,
+	}
 	note := &handler.Note{
-		OssService: iOssService,
-		Config:     cfg,
+		OssService:  iOssService,
+		NoteService: noteService,
+		Config:      cfg,
 	}
 	handlers := &server.Handlers{
 		Auth: auth,

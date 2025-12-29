@@ -2,32 +2,39 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"net/http"
 	"path"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	_ "golang.org/x/image/webp"
 )
 
 type Note struct {
-	OssService service.IOssService
-	Config     *config.Config
+	OssService  service.IOssService
+	NoteService service.INoteService
+	Config      *config.Config
 }
 
 func (n *Note) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
 	g.POST("/upload", context.Wrap(n.UploadImage))
+	g.POST("/create", authorize, context.Wrap(n.CreateNote))
+	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 }
 func (n *Note) UploadImage(c *gin.Context) error {
 	header, err := c.FormFile("image")
@@ -79,6 +86,84 @@ func (n *Note) UploadImage(c *gin.Context) error {
 			objectKey),
 		Width:  width,
 		Height: height,
+	})
+	return nil
+}
+
+// CreateNote 创建笔记
+func (n *Note) CreateNote(c *gin.Context) error {
+	// 从 context 获取用户 ID
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 绑定请求参数
+	var req types.CreateNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
+	}
+
+	// 调用 Service 层创建笔记
+	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
+	}
+
+	// 返回成功响应
+	response.Success(c, types.CreateNoteResponse{
+		NoteID: noteID,
+	})
+	return nil
+}
+
+// GetMyNotes 查询自己的笔记列表
+func (n *Note) GetMyNotes(c *gin.Context) error {
+	// 1. 获取当前登录用户ID
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	// fmt.Printf("[GetMyNotes] 查询用户ID: %d\n", userID)
+
+	// 2. 绑定查询参数
+	var req types.GetMyNotesRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	// 3. 设置默认值
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 20
+	}
+	// 仅当未提供 status 参数时，默认查询公开状态
+	if c.Query("status") == "" {
+		req.Status = 1
+	}
+	// 计算 limit 和 offset
+	limit := req.PageSize
+	offset := (req.Page - 1) * req.PageSize
+	// fmt.Printf("[GetMyNotes] 查询参数 - Status: %d, Page: %d, PageSize: %d, Offset: %d\n", req.Status, req.Page, req.PageSize, offset)
+
+	// 4. 调用 Service 层查询
+	notes, err := n.NoteService.GetUserNotes(c.Request.Context(), uint64(userID), req.Status, limit, offset)
+	if err != nil {
+		// fmt.Printf("[GetMyNotes] 查询错误: %v\n", err)
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
+	}
+	// fmt.Printf("[GetMyNotes] 查询结果数量: %d\n", len(notes))
+
+	// 5. 返回成功响应
+	total := 0
+	if notes != nil {
+		total = len(notes)
+	}
+	response.Success(c, types.GetMyNotesResponse{
+		Notes: notes,
+		Total: total,
 	})
 	return nil
 }
