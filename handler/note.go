@@ -145,7 +145,9 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	}
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
+		req.Page = 1
 	}
+
 	// 仅当未提供 status 参数时，默认查询公开状态
 	if c.Query("status") == "" {
 		req.Status = types.NoteStatusDefaultQuery
