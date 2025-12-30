@@ -48,6 +48,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Map.RegisterRouter(r)
 	h.Message.RegisterRouter(r)
 	h.WS.RegisterRouter(r)
+	h.Note.RegisterRouter(r)
 	return r
 }
 

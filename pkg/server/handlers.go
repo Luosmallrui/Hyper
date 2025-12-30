@@ -9,4 +9,6 @@ type Handlers struct {
 	Map     *handler.Map
 	Message *handler.MessageHandler
 	WS      *handler.WSHandler
+	Note    *handler.Note
+
 }
