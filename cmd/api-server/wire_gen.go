@@ -42,6 +42,19 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MapService: mapService,
 		OssService: iOssService,
 	}
+	messageDAO := dao.NewMessageDAO(db)
+	messageService := service.NewMessageService(messageDAO)
+	messageHandler := &handler.MessageHandler{
+		Service: messageService,
+	}
+	messageReadDAO := dao.NewMessageReadDAO(db)
+	messageReadService := service.NewMessageReadService(messageReadDAO)
+	groupDAO := dao.NewGroupDAO(db)
+	wsHandler := &handler.WSHandler{
+		MessageService:     messageService,
+		MessageReadService: messageReadService,
+		GroupDAO:           groupDAO,
+	}
 	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
@@ -52,9 +65,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:      cfg,
 	}
 	handlers := &server.Handlers{
-		Auth: auth,
-		Map:  handlerMap,
-		Note: note,
+		Auth:    auth,
+		Map:     handlerMap,
+		Message: messageHandler,
+		WS:      wsHandler,
+		Note:    note,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

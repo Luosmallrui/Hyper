@@ -5,7 +5,10 @@ import (
 )
 
 type Handlers struct {
-	Auth *handler.Auth
-	Map  *handler.Map
-	Note *handler.Note
+	Auth    *handler.Auth
+	Map     *handler.Map
+	Message *handler.MessageHandler
+	WS      *handler.WSHandler
+	Note    *handler.Note
+
 }
