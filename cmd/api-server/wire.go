@@ -29,13 +29,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.MessageHandler), "*"),
 		wire.Struct(new(handler.WSHandler), "*"),
 
-
 		dao.ProviderSet,
-		dao.MessageProviderSet,
-		dao.NewMessageReadDAO,
 
 		service.ProviderSet,
-		service.MessageProviderSet,
 		service.NewMessageReadService,
 	)
 	return nil

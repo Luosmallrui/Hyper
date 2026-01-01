@@ -43,7 +43,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		OssService: iOssService,
 	}
 	messageDAO := dao.NewMessageDAO(db)
-	messageService := service.NewMessageService(messageDAO)
+	messageService := &service.MessageService{
+		dao: messageDAO,
+	}
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
 	}

@@ -6,15 +6,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/google/wire"
 )
 
 type MessageService struct {
 	dao *dao.MessageDAO
 }
 
-func NewMessageService(dao *dao.MessageDAO) *MessageService {
-	return &MessageService{dao: dao}
+var _ IMessageService = (*MessageService)(nil)
+
+type IMessageService interface {
+	SendMessage(msg *models.Message) error
+	SendGroupMessage(msg *models.Message) error
+	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
+	PullOfflineMessages(userID string) ([]models.Message, error)
+	SendSystemMessage(targetID string, content string) error
+	AckMessages(msgIDs []string) error
+	GetMessageByID(msgID string) (*models.Message, error)
 }
 
 // 发送消息
@@ -64,10 +71,6 @@ func (s *MessageService) SendSystemMessage(targetID string, content string) erro
 	}
 	return s.dao.Save(msg)
 }
-
-var MessageProviderSet = wire.NewSet(
-	NewMessageService,
-)
 
 // ack
 func (s *MessageService) AckMessages(msgIDs []string) error {

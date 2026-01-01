@@ -3,15 +3,15 @@ package handler
 import (
 	"Hyper/models"
 	"Hyper/pkg/context"
+	"Hyper/pkg/response"
 	"Hyper/service"
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 type MessageHandler struct {
-	Service *service.MessageService
+	Service service.IMessageService
 }
 
 func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
@@ -20,22 +20,17 @@ func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
 	message.GET("/list", context.Wrap(h.GetRecentMessages))
 }
 
-func NewMessageHandler(s *service.MessageService) *MessageHandler {
-	return &MessageHandler{Service: s}
-}
-
 // POST /api/message/send
 func (h *MessageHandler) SendMessage(c *gin.Context) error {
 	var msg models.Message
 	if err := c.ShouldBindJSON(&msg); err != nil {
-		return err
+		return response.NewError(500, err.Error())
 	}
 
 	if err := h.Service.SendMessage(&msg); err != nil {
-		return err
+		return response.NewError(500, err.Error())
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "发送成功"})
+	response.Success(c, msg)
 	return nil
 }
 
@@ -46,9 +41,8 @@ func (h *MessageHandler) GetRecentMessages(c *gin.Context) error {
 
 	msgs, err := h.Service.GetRecentMessages(targetID, limit)
 	if err != nil {
-		return err
+		return response.NewError(500, err.Error())
 	}
-
-	c.JSON(http.StatusOK, gin.H{"messages": msgs})
+	response.Success(c, msgs)
 	return nil
 }
