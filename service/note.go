@@ -62,9 +62,9 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		TopicIDs:    string(topicIDsJSON),
 		Location:    locationJSON,
 		MediaData:   string(mediaDataJSON),
-		Type:        int8(req.Type),
+		Type:        req.Type,
 		Status:      0, // 默认审核中
-		VisibleConf: int8(req.VisibleConf),
+		VisibleConf: req.VisibleConf,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}

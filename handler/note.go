@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -161,8 +162,29 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	if notes != nil {
 		total = len(notes)
 	}
+
+	res := make([]*types.Note, 0)
+	for _, note := range notes {
+
+		k := &types.Note{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			Type:        note.Type,
+			Status:      note.Status,
+			VisibleConf: note.VisibleConf,
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
+		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &k.TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &k.Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &k.MediaData)
+		res = append(res, k)
+	}
+
 	response.Success(c, types.GetMyNotesResponse{
-		Notes: notes,
+		Notes: res,
 		Total: total,
 	})
 	return nil
