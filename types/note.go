@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+const (
+	VisibleUnspecified = 0 // 未指定
+	VisiblePublic      = 1 // 公开
+	VisiblePrivate     = 2 // 私有（如果以后需要）
+)
+
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
 	ID       int64   `gorm:"primaryKey" json:"id"`           // 雪花算法ID
