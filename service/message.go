@@ -9,7 +9,7 @@ import (
 )
 
 type MessageService struct {
-	dao *dao.MessageDAO
+	MessageDao *dao.MessageDAO
 }
 
 var _ IMessageService = (*MessageService)(nil)
@@ -34,22 +34,22 @@ func (s *MessageService) SendMessage(msg *models.Message) error {
 	if msg.Status == 0 {
 		msg.Status = 0
 	}
-	return s.dao.Save(msg)
+	return s.MessageDao.Save(msg)
 }
 
 func (s *MessageService) SendGroupMessage(msg *models.Message) error {
 	// 群消息仍然只存一条
-	return s.dao.Save(msg)
+	return s.MessageDao.Save(msg)
 }
 
 // 查询某个用户/群的最近消息
 func (s *MessageService) GetRecentMessages(targetID string, limit int) ([]models.Message, error) {
-	return s.dao.GetMessagesByTarget(targetID, limit)
+	return s.MessageDao.GetMessagesByTarget(targetID, limit)
 }
 
 // PullOfflineMessages 拉取需要补发的消息
 func (s *MessageService) PullOfflineMessages(userID string) ([]models.Message, error) {
-	msgs, err := s.dao.GetOfflineMessages(userID, 100)
+	msgs, err := s.MessageDao.GetOfflineMessages(userID, 100)
 	if err != nil {
 		return nil, err
 	}
@@ -69,15 +69,15 @@ func (s *MessageService) SendSystemMessage(targetID string, content string) erro
 		Status:      1,
 		Ext:         "{}",
 	}
-	return s.dao.Save(msg)
+	return s.MessageDao.Save(msg)
 }
 
 // ack
 func (s *MessageService) AckMessages(msgIDs []string) error {
-	return s.dao.MarkMessagesRead(msgIDs)
+	return s.MessageDao.MarkMessagesRead(msgIDs)
 }
 
 // 已读回执
 func (s *MessageService) GetMessageByID(msgID string) (*models.Message, error) {
-	return s.dao.GetByID(msgID)
+	return s.MessageDao.GetByID(msgID)
 }
