@@ -3,7 +3,6 @@ package dao
 import (
 	"time"
 
-	"github.com/google/wire"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +24,3 @@ func (d *MessageReadDAO) MarkRead(msgID, userID string) error {
 		time.Now().UnixMilli(),
 	).Error
 }
-
-// ProviderSet（注意名字）
-var MessageReadProviderSet = wire.NewSet(NewMessageReadDAO)

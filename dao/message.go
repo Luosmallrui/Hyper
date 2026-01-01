@@ -3,7 +3,6 @@ package dao
 import (
 	"Hyper/models"
 
-	"github.com/google/wire"
 	"gorm.io/gorm"
 )
 
@@ -37,12 +36,6 @@ func (d *MessageDAO) GetOfflineMessages(userID string, limit int) ([]models.Mess
 		Find(&msgs).Error
 	return msgs, err
 }
-
-// ProviderSet 单独命名，避免与其他 ProviderSet 冲突
-var MessageProviderSet = wire.NewSet(
-	NewMessageDAO,
-	NewGroupDAO,
-)
 
 // ack
 func (d *MessageDAO) MarkMessagesRead(msgIDs []string) error {
