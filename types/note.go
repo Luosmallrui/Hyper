@@ -1,7 +1,6 @@
 package types
 
 import (
-	"Hyper/models"
 	"time"
 )
 
@@ -13,14 +12,14 @@ const (
 
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
-	ID       int64   `gorm:"primaryKey" json:"id"`           // 雪花算法ID
-	UserID   int64   `gorm:"index" json:"user_id"`           // 作者ID
-	Title    string  `gorm:"type:varchar(100)" json:"title"` // 标题
-	Content  string  `gorm:"type:text" json:"content"`       // 正文内容
-	TopicIDs []int64 `gorm:"type:json" json:"topic_ids"`     // 话题列表
-	Location string  `gorm:"type:json" json:"location"`      // 地理位置{lat, lng, name}
+	ID       int64    `gorm:"primaryKey" json:"id"`           // 雪花算法ID
+	UserID   int64    `gorm:"index" json:"user_id"`           // 作者ID
+	Title    string   `gorm:"type:varchar(100)" json:"title"` // 标题
+	Content  string   `gorm:"type:text" json:"content"`       // 正文内容
+	TopicIDs []int64  `gorm:"type:json" json:"topic_ids"`     // 话题列表
+	Location Location `gorm:"type:json" json:"location"`      // 地理位置{lat, lng, name}
 
-	MediaData string `gorm:"type:json" json:"media_data"`
+	MediaData []NoteMedia `gorm:"type:json" json:"media_data"`
 
 	Type        int `json:"type"`         // 1-图文, 2-视频
 	Status      int `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
@@ -86,6 +85,6 @@ type GetMyNotesRequest struct {
 
 // GetMyNotesResponse 笔记列表响应
 type GetMyNotesResponse struct {
-	Notes []*models.Note `json:"notes"` // 笔记列表
-	Total int            `json:"total"` // 总数
+	Notes []*Note `json:"notes"` // 笔记列表
+	Total int     `json:"total"` // 总数
 }
