@@ -40,6 +40,9 @@ func init() {
 		serverId = id
 	})
 }
+func GetServerId() string {
+	return serverId
+}
 
 func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
