@@ -2,11 +2,11 @@ package main
 
 import (
 	"Hyper/config"
-	"Hyper/handler"
 	"Hyper/pkg/server"
-	"github.com/urfave/cli/v2"
 	"log"
 	"os"
+
+	"github.com/urfave/cli/v2"
 )
 
 func main() {
@@ -19,8 +19,6 @@ func main() {
 				Name:  "serve",
 				Usage: "start http server",
 				Action: func(ctx *cli.Context) error {
-
-					handler.StartOnlineChecker()
 					return server.Run(ctx, appProvider)
 				},
 			},
