@@ -3,7 +3,7 @@ package socket
 import (
 	"log"
 
-	"chatroom/utils"
+	"Hyper/pkg/utils"
 )
 
 type IEvent interface {
