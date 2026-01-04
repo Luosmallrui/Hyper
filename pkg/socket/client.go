@@ -161,7 +161,7 @@ func (c *Client) Write(data *ClientResponse) error {
 	if data.IsAck && data.Ackid == "" {
 		data.Ackid = strings.ReplaceAll(uuid.New().String(), "-", "")
 	}
-	c.outChan <- data //ack的content
+	c.outChan <- data
 
 	return nil
 }
