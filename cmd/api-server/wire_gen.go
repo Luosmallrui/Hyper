@@ -10,6 +10,7 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/handler"
+	"Hyper/pkg/client"
 	"Hyper/pkg/database"
 	"Hyper/pkg/server"
 	"Hyper/service"
@@ -38,9 +39,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapService := &service.MapService{
 		MapDao: mapDao,
 	}
+	redisClient := client.NewRedisClient(cfg)
 	handlerMap := &handler.Map{
 		MapService: mapService,
 		OssService: iOssService,
+		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
 	messageService := &service.MessageService{
