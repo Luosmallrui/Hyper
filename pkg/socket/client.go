@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"Hyper/pkg/server"
+
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
@@ -88,18 +89,7 @@ func NewClient(conn IConn, option *ClientOption, event IEvent) error {
 		client.cid = defaultIdGenerator.IdGen()
 	}
 
-	// 设置客户端连接关闭回调事件
 	conn.SetCloseHandler(client.hookClose)
-
-	// 绑定客户端映射关系
-	//  能一秒调用500次 QPS 1000   1500  //成本高了 看现在的流量情况 扩容
-	// 两台机器 A B
-	//
-	// A： 1 B ：2 C： D
-
-	// 服务器1  kkk   服务器2   lll
-
-	// 登陆 client 1：kkk
 
 	if client.storage != nil {
 
@@ -110,7 +100,6 @@ func NewClient(conn IConn, option *ClientOption, event IEvent) error {
 			return err
 		}
 	}
-	//消息 redis publish 留到了Redis上 现在每个服务器 两台 机器 都会去解析推送上来的数据
 
 	// 注册客户端
 	client.channel.addClient(client)

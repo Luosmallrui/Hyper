@@ -1,0 +1,39 @@
+//go:build wireinject
+
+package socket
+
+import (
+	"Hyper/pkg/socket"
+	"Hyper/socket/handler"
+	"Hyper/socket/handler/event"
+	"Hyper/socket/process"
+
+	//"Hyper/socket/process"
+	"Hyper/socket/router"
+
+	"github.com/google/wire"
+)
+
+var ProviderSet = wire.NewSet(
+	//business.ProviderSet,
+	router.NewRouter,
+	socket.NewRoomStorage,
+	wire.Struct(new(handler.Handler), "*"),
+
+	// process
+	wire.Struct(new(process.SubServers), "*"),
+	process.NewServer,
+	process.NewHealthSubscribe,
+	//process.NewMessageSubscribe,
+	//wire.Struct(new(process.QueueSubscribe), "*"),
+	//wire.Struct(new(queue.GlobalMessage), "*"),
+	//wire.Struct(new(queue.LocalMessage), "*"),
+	//wire.Struct(new(queue.RoomControl), "*"),
+
+	handler.ProviderSet,
+	event.ProviderSet,
+	//consume.ProviderSet,
+
+	// AppProvider
+	wire.Struct(new(AppProvider), "*"),
+)
