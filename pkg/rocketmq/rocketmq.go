@@ -6,15 +6,17 @@ import (
 	"log"
 
 	"github.com/apache/rocketmq-client-go/v2"
+	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
 )
 
 type Rocketmq struct {
 	RocketmqProducer rocketmq.Producer
+	RocketmqConsumer rocketmq.PushConsumer
 }
 
-func InitRocketmqClient() *Rocketmq {
+func InitProducer() rocketmq.Producer {
 	p, err := rocketmq.NewProducer(
 		producer.WithNameServer([]string{"8.156.86.220:9876"}),
 		producer.WithRetry(2),
@@ -23,12 +25,24 @@ func InitRocketmqClient() *Rocketmq {
 	if err != nil {
 		panic(err)
 	}
-	err = p.Start()
+
+	if err = p.Start(); err != nil {
+		return nil
+	}
+
+	log.Println("RocketMQ Producer 启动成功")
+	return p
+}
+func InitConsumer() rocketmq.PushConsumer {
+	c, err := rocketmq.NewPushConsumer(
+		consumer.WithNameServer([]string{"8.156.86.220:9876"}),
+		consumer.WithGroupName("IM_STORAGE_GROUP"),
+	)
 	if err != nil {
 		panic(err)
 	}
-	log.Println("RocketMQ Producer 启动成功")
-	return &Rocketmq{RocketmqProducer: p}
+
+	return c
 }
 
 func (p *Rocketmq) SendMsg(topic string, body []byte) error {

@@ -21,7 +21,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		database.NewDB,
 		client.NewRedisClient,
 		config.ProvideOssConfig,
-		rocketmq.InitRocketmqClient,
+		rocketmq.InitProducer,
 		server.NewGinEngine,
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),

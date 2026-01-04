@@ -9,6 +9,7 @@ import (
 	"Hyper/dao/cache"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
+	"Hyper/pkg/rocketmq"
 	"Hyper/service"
 	"Hyper/socket"
 
@@ -20,6 +21,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		database.NewDB,
 		client.NewRedisClient,
 		dao.ProviderSet,
+		rocketmq.InitConsumer,
 		cache.ProviderSet,
 		socket.ProviderSet,
 		service.ProviderSet,

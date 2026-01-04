@@ -47,10 +47,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
-	rocketmqRocketmq := rocketmq.InitRocketmqClient()
+	producer := rocketmq.InitProducer()
 	messageService := &service.MessageService{
 		MessageDao: messageDAO,
-		RocketMQ:   rocketmqRocketmq,
+		MqProducer: producer,
 		Redis:      redisClient,
 	}
 	messageHandler := &handler.MessageHandler{

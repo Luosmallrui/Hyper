@@ -24,7 +24,7 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(process.SubServers), "*"),
 	process.NewServer,
 	process.NewHealthSubscribe,
-	//process.NewMessageSubscribe,
+	wire.Struct(new(process.MessageSubscribe), "*"),
 	//wire.Struct(new(process.QueueSubscribe), "*"),
 	//wire.Struct(new(queue.GlobalMessage), "*"),
 	//wire.Struct(new(queue.LocalMessage), "*"),
