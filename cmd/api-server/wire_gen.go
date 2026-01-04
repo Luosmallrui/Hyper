@@ -12,6 +12,7 @@ import (
 	"Hyper/handler"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
+	"Hyper/pkg/rocketmq"
 	"Hyper/pkg/server"
 	"Hyper/service"
 )
@@ -46,19 +47,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
+	rocketmqRocketmq := rocketmq.InitRocketmqClient()
 	messageService := &service.MessageService{
 		MessageDao: messageDAO,
+		RocketMQ:   rocketmqRocketmq,
+		Redis:      redisClient,
 	}
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
-	}
-	messageReadDAO := dao.NewMessageReadDAO(db)
-	messageReadService := service.NewMessageReadService(messageReadDAO)
-	groupDAO := dao.NewGroupDAO(db)
-	wsHandler := &handler.WSHandler{
-		MessageService:     messageService,
-		MessageReadService: messageReadService,
-		GroupDAO:           groupDAO,
 	}
 	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
@@ -73,7 +69,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Auth:    auth,
 		Map:     handlerMap,
 		Message: messageHandler,
-		WS:      wsHandler,
 		Note:    note,
 	}
 	engine := server.NewGinEngine(handlers)

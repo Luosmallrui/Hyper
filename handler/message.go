@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
+	"Hyper/types"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +22,7 @@ func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
 
 // POST /api/message/send
 func (h *MessageHandler) SendMessage(c *gin.Context) error {
-	var msg models.Message
+	var msg types.Message
 	if err := c.ShouldBindJSON(&msg); err != nil {
 		return response.NewError(500, err.Error())
 	}

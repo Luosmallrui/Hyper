@@ -9,6 +9,7 @@ import (
 	"Hyper/handler"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
+	"Hyper/pkg/rocketmq"
 	"Hyper/pkg/server"
 	"Hyper/service"
 
@@ -20,6 +21,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		database.NewDB,
 		client.NewRedisClient,
 		config.ProvideOssConfig,
+		rocketmq.InitRocketmqClient,
 		server.NewGinEngine,
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
@@ -29,12 +31,12 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(server.Handlers), "*"),
 
 		wire.Struct(new(handler.MessageHandler), "*"),
-		wire.Struct(new(handler.WSHandler), "*"),
+		//wire.Struct(new(handler.WSHandler), "*"),
 
 		dao.ProviderSet,
 
 		service.ProviderSet,
-		service.NewMessageReadService,
+		//service.NewMessageReadService,
 	)
 	return nil
 }
