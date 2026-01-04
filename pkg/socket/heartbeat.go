@@ -37,8 +37,6 @@ func (h *heartbeat) Start(ctx context.Context) error {
 	return errors.New("heartbeat exit")
 }
 
-//  2s  5s 32s 35s 62 65s
-
 func (h *heartbeat) insert(c *Client) {
 	h.timeWheel.Add(strconv.FormatInt(c.cid, 10), c, time.Duration(heartbeatInterval)*time.Second)
 }
@@ -48,21 +46,31 @@ func (h *heartbeat) delete(c *Client) {
 }
 
 func (h *heartbeat) handle(timeWheel *timewheel.SimpleTimeWheel[*Client], key string, c *Client) {
-
 	if c.Closed() {
 		return
 	}
 
-	interval := int(time.Now().Unix() - c.lastTime)
+	now := time.Now().Unix()
+	interval := int(now - c.lastTime)
+
 	if interval > heartbeatTimeout {
-		c.Close(2000, "心跳检测超时，连接自动关闭")
+		c.Close(2000, "心跳检测超时")
 		return
 	}
 
-	// 超过心跳间隔时间则主动推送一次消息
-	if interval > heartbeatInterval {
+	if interval >= heartbeatInterval {
 		_ = c.Write(&ClientResponse{Event: "ping"})
 	}
 
-	timeWheel.Add(key, c, time.Duration(heartbeatInterval)*time.Second)
+	nextCheck := heartbeatInterval
+	if interval < heartbeatInterval {
+		nextCheck = heartbeatInterval - interval + 1
+	} else {
+		nextCheck = heartbeatInterval
+	}
+	if nextCheck <= 0 {
+		nextCheck = 1
+	}
+
+	timeWheel.Add(key, c, time.Duration(nextCheck)*time.Second)
 }
