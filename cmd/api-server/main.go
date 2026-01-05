@@ -3,6 +3,7 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/pkg/server"
+	"fmt"
 	"log"
 	"os"
 
@@ -10,7 +11,12 @@ import (
 )
 
 func main() {
-	cfg := config.New("configs/config.dev.yaml")
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "dev"
+	}
+	path := fmt.Sprintf("configs/config.%s.yaml", env)
+	cfg := config.New(path)
 	appProvider := InitServer(cfg)
 	cliApp := &cli.App{
 		Name: "api-server",
