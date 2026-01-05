@@ -2,6 +2,9 @@ package types
 
 const (
 	ImTopicChat = "IM_CHAT_MSGS"
+
+	SingleChat = 1 //私聊
+	GroupChat  = 2 //群聊
 )
 
 type Message struct {

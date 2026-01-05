@@ -54,7 +54,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 	msg.Id = snowflake.GenID()
 
-	if msg.SessionType == 1 { // 假设 1 是单聊
+	if msg.SessionType == types.SingleChat { // 假设 1 是单聊
 		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
 	}
