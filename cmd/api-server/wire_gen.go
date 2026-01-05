@@ -10,7 +10,9 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/handler"
+	"Hyper/pkg/client"
 	"Hyper/pkg/database"
+	"Hyper/pkg/rocketmq"
 	"Hyper/pkg/server"
 	"Hyper/service"
 )
@@ -38,31 +40,40 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapService := &service.MapService{
 		MapDao: mapDao,
 	}
+
+	redisClient := client.NewRedisClient(cfg)
 	handlerMap := &handler.Map{
 		MapService: mapService,
 		OssService: iOssService,
+		Redis:      redisClient,
+	}
+	messageDAO := dao.NewMessageDAO(db)
+	producer := rocketmq.InitProducer()
+	messageService := &service.MessageService{
+		MessageDao: messageDAO,
+		MqProducer: producer,
+		Redis:      redisClient,
+	}
+	messageHandler := &handler.MessageHandler{
+		Service: messageService,
+
 	}
 	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
-	noteLikeDAO := dao.NewNoteLikeDAO(db)
-	noteStatsDAO := dao.NewNoteStatsDAO(db)
-	likeService := &service.LikeService{
-		LikeDAO:  noteLikeDAO,
-		StatsDAO: noteStatsDAO,
-		NoteDAO:  noteDAO,
-	}
+
 	note := &handler.Note{
 		OssService:  iOssService,
 		NoteService: noteService,
-		LikeService: likeService,
 		Config:      cfg,
 	}
 	handlers := &server.Handlers{
-		Auth: auth,
-		Map:  handlerMap,
-		Note: note,
+		Auth:    auth,
+		Map:     handlerMap,
+		Message: messageHandler,
+		Note:    note,
+
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

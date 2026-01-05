@@ -11,3 +11,6 @@ func init() {
 func GenUserID() int64 {
 	return node.Generate().Int64()
 }
+func GenID() int64 {
+	return node.Generate().Int64()
+}

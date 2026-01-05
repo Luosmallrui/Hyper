@@ -7,17 +7,23 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/handler"
+	"Hyper/pkg/client"
 	"Hyper/pkg/database"
+	"Hyper/pkg/rocketmq"
 	"Hyper/pkg/server"
 	"Hyper/service"
+
 	"github.com/google/wire"
 )
 
 func InitServer(cfg *config.Config) *server.AppProvider {
 	wire.Build(
 		database.NewDB,
-		//client.NewRedisClient,
+
+		client.NewRedisClient,
 		config.ProvideOssConfig,
+		rocketmq.InitProducer,
+
 		server.NewGinEngine,
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
@@ -27,7 +33,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(server.Handlers), "*"),
 
 		dao.ProviderSet,
+
 		service.ProviderSet,
+		//service.NewMessageReadService,
 	)
 	return nil
 }

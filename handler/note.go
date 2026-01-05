@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -26,7 +27,9 @@ import (
 type Note struct {
 	OssService  service.IOssService
 	NoteService service.INoteService
+
 	LikeService service.ILikeService
+
 	Config      *config.Config
 }
 
@@ -36,11 +39,13 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.POST("/upload", context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
+
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
 	g.GET("/:note_id/like", authorize, context.Wrap(n.GetLikeStatus))
 	g.GET("/:note_id/likes/count", context.Wrap(n.GetLikeCount))
+
 }
 func (n *Note) UploadImage(c *gin.Context) error {
 	header, err := c.FormFile("image")
@@ -140,6 +145,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 
 	// 3. 设置默认值
 	if req.Page == 0 {
+
 		req.Page = types.DefaultPage
 	}
 	if req.PageSize == 0 {
@@ -148,6 +154,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	// 仅当未提供 status 参数时，默认查询公开状态
 	if c.Query("status") == "" {
 		req.Status = types.NoteStatusDefaultQuery
+
 	}
 	// 计算 limit 和 offset
 	limit := req.PageSize
@@ -167,12 +174,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	if notes != nil {
 		total = len(notes)
 	}
-	response.Success(c, types.GetMyNotesResponse{
-		Notes: notes,
-		Total: total,
-	})
-	return nil
-}
+
 
 // Like 点赞笔记
 func (n *Note) Like(c *gin.Context) error {
@@ -263,5 +265,32 @@ func (n *Note) GetLikeCount(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, gin.H{"like_count": cnt})
+
+
+	res := make([]*types.Note, 0)
+	for _, note := range notes {
+
+		k := &types.Note{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			Type:        note.Type,
+			Status:      note.Status,
+			VisibleConf: note.VisibleConf,
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
+		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &k.TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &k.Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &k.MediaData)
+		res = append(res, k)
+	}
+
+	response.Success(c, types.GetMyNotesResponse{
+		Notes: res,
+		Total: total,
+	})
+
 	return nil
 }

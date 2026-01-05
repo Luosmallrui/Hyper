@@ -197,7 +197,9 @@ const createNote = async () => {
   });
   
   const data = await response.json();
-  return data.data.note_id;
+
+=======
+  console.log('创建的笔记 ID:', data.data.note_id);
 };
 ```
 
@@ -210,7 +212,6 @@ const createNote = async () => {
 5. 新创建的笔记默认状态为 0（审核中）
 6. topic_ids、location 和 media_data 可以为空数组或 null
 7. 图片上传建议先调用 `/v1/note/upload` 接口上传图片，获取 URL 后再创建笔记
-
 ---
 
 # 点赞接口文档

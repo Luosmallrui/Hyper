@@ -9,6 +9,10 @@ var ProviderSet = wire.NewSet(
 	NewUsers,
 	NewMapDao,
 	NewNoteDAO,
-	NewNoteLikeDAO,
-	NewNoteStatsDAO,
+
+	NewMessageDAO,
+	NewGroupDAO,
+	NewMessageReadDAO,
+	NewGroupMember,
+
 )

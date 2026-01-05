@@ -3,9 +3,10 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/pkg/server"
-	"github.com/urfave/cli/v2"
 	"log"
 	"os"
+
+	"github.com/urfave/cli/v2"
 )
 
 func main() {
