@@ -84,7 +84,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 
 // GetUserNotes 获取用户的笔记列表
 func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error) {
-	return s.NoteDAO.FindByUserID(ctx, userID, status, limit, offset)
+	return nil
 }
 
 // UpdateNoteStatus 更新笔记状态
