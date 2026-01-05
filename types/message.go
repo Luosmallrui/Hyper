@@ -11,8 +11,8 @@ type Message struct {
 	TargetID    int64  `json:"target_id,string"` // 接收者ID或群ID
 	SessionType int    `json:"session_type"`     // 1-单聊, 2-群聊
 
-	SessionHash int64  `json:"-"`          // 数据库索引专用，不需要返回给前端
-	SessionID   string `json:"session_id"` // 原始会话ID，用于碰撞校验和展示
+	SessionHash int64  `json:"session_hash"` // 数据库索引专用，不需要返回给前端
+	SessionID   string `json:"session_id"`   // 原始会话ID，用于碰撞校验和展示
 
 	MsgType     int    `json:"msg_type"` // 1-文本, 2-图片等
 	Content     string `json:"content"`  // 消息内容
