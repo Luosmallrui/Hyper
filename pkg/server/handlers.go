@@ -9,5 +9,4 @@ type Handlers struct {
 	Map     *handler.Map
 	Message *handler.MessageHandler
 	Note    *handler.Note
-
 }
