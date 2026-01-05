@@ -4,17 +4,11 @@ import (
 	"time"
 )
 
-<<<<<<< HEAD
-const (
-	VisibleUnspecified = 0 // 未指定
-	VisiblePublic      = 1 // 公开
-	VisiblePrivate     = 2 // 私有（如果以后需要）
-=======
 // VisibleConf 笔记可见性常量
 const (
-	VisibleConfPublic        int8 = 1 // 公开
-	VisibleConfFollowersOnly int8 = 2 // 粉丝可见
-	VisibleConfPrivate       int8 = 3 // 自己可见
+	VisibleConfPublic        int = 1 // 公开
+	VisibleConfFollowersOnly int = 2 // 粉丝可见
+	VisibleConfPrivate       int = 3 // 自己可见
 )
 
 // Pagination 分页常量
@@ -25,8 +19,7 @@ const (
 
 // NoteStatus 笔记状态常量
 const (
-	NoteStatusDefaultQuery int8 = 1 // 查询笔记列表时的默认状态（公开）
->>>>>>> 3bc8e5d (实现点赞、取消点赞、查询点赞次数、查询用户自己是否已经点赞接口)
+	NoteStatusDefaultQuery int = 1 // 查询笔记列表时的默认状态（公开）
 )
 
 // Note 笔记主表：存储核心文字和状态
@@ -97,9 +90,9 @@ type CreateNoteResponse struct {
 
 // GetMyNotesRequest 查询自己笔记的请求
 type GetMyNotesRequest struct {
-	Status   int8 `form:"status" binding:"omitempty,oneof=0 1 2 3"`   // 笔记状态筛选（可选）
-	Page     int  `form:"page" binding:"omitempty,min=1"`             // 页码（从1开始）
-	PageSize int  `form:"pagesize" binding:"omitempty,min=1,max=100"` // 每页数量
+	Status   int `form:"status" binding:"omitempty,oneof=0 1 2 3"`   // 笔记状态筛选（可选）
+	Page     int `form:"page" binding:"omitempty,min=1"`             // 页码（从1开始）
+	PageSize int `form:"pagesize" binding:"omitempty,min=1,max=100"` // 每页数量
 }
 
 // GetMyNotesResponse 笔记列表响应
