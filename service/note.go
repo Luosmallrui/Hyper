@@ -7,7 +7,6 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
-	"context"
 	"errors"
 	"time"
 )
@@ -16,8 +15,8 @@ var _ INoteService = (*NoteService)(nil)
 
 type INoteService interface {
 	CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error)
-	GetUserNotes(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error)
-	UpdateNoteStatus(ctx context.Context, noteID uint64, status int8) error
+	GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error)
+	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
 }
 
 type NoteService struct {
@@ -70,15 +69,9 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		UpdatedAt:   time.Now(),
 	}
 
-	// 如果未指定可见性，默认为公开
-<<<<<<< HEAD
-	if note.VisibleConf == types.VisibleUnspecified {
-		note.VisibleConf = types.VisiblePublic
-=======
 	if note.VisibleConf == 0 {
-		note.VisibleConf = int8(types.VisibleConfPublic)
+		note.VisibleConf = types.VisibleConfPublic
 	}
->>>>>>> 3bc8e5d (实现点赞、取消点赞、查询点赞次数、查询用户自己是否已经点赞接口)
 
 	// 保存到数据库
 	if err := s.NoteDAO.Create(ctx, note); err != nil {
@@ -89,11 +82,11 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 }
 
 // GetUserNotes 获取用户的笔记列表
-func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error) {
-	return nil
+func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error) {
+	return s.NoteDAO.FindByUserID(ctx, userID, status, limit, offset)
 }
 
 // UpdateNoteStatus 更新笔记状态
-func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int8) error {
+func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error {
 	return s.NoteDAO.UpdateStatus(ctx, noteID, status)
 }
