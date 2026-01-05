@@ -87,3 +87,12 @@ type UserStats struct {
 type BindPhoneRep struct {
 	PhoneNumber string `json:"phone_number"`
 }
+
+type SendSmsRequest struct {
+	Mobile string `json:"mobile" binding:"required,len=11"` // 手机号
+}
+
+type UpdatePhoneRequest struct {
+	Mobile string `json:"mobile" binding:"required,len=11"` // 手机号
+	Code   string `json:"code" binding:"required,len=6"`    // 验证码
+}

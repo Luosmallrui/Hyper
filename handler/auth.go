@@ -23,8 +23,11 @@ type Auth struct {
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
 	auth := r.Group("/")
-	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
-	auth.POST("/api/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.POST("/api/auth/wx-login", context.Wrap(u.Login))                     // 微信登录
+	auth.POST("/api/auth/bind-phone", authorize, context.Wrap(u.BindPhone))    //微信获取手机号
+	auth.POST("api/auth/send-sms", authorize, context.Wrap(u.SendSms))         //发送验证码
+	auth.POST("api/auth/update-phone", authorize, context.Wrap(u.UpdatePhone)) //更新手机号
+	//auth.POST("/api/auth/update-phone", authorize, context.Wrap(u.UpdatePhone)) //更新手机号
 	auth.GET("/token", context.Wrap(u.GetToken))
 }
 
@@ -99,5 +102,37 @@ func (u *Auth) BindPhone(c *gin.Context) error {
 	}
 
 	response.Success(c, types.BindPhoneRep{PhoneNumber: phone})
+	return nil
+}
+
+// 发送验证码
+func (u *Auth) SendSms(c *gin.Context) error {
+	var req types.SendSmsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	err := u.UserService.SendVerifyCode(c.Request.Context(), req.Mobile)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "验证码发送成功")
+	return nil
+}
+
+// 更新手机号
+func (u *Auth) UpdatePhone(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	var req types.UpdatePhoneRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	err = u.UserService.UpdateMobileWithSms(c.Request.Context(), req.Mobile, int(userId), req.Code)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "手机号更新成功")
 	return nil
 }
