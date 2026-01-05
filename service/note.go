@@ -15,8 +15,8 @@ var _ INoteService = (*NoteService)(nil)
 
 type INoteService interface {
 	CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error)
-	GetUserNotes(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error)
-	UpdateNoteStatus(ctx context.Context, noteID uint64, status int8) error
+	GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error)
+	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
 }
 
 type NoteService struct {
@@ -69,9 +69,8 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		UpdatedAt:   time.Now(),
 	}
 
-	// 如果未指定可见性，默认为公开
-	if note.VisibleConf == types.VisibleUnspecified {
-		note.VisibleConf = types.VisiblePublic
+	if note.VisibleConf == 0 {
+		note.VisibleConf = types.VisibleConfPublic
 	}
 
 	// 保存到数据库
@@ -83,11 +82,11 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 }
 
 // GetUserNotes 获取用户的笔记列表
-func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error) {
+func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error) {
 	return s.NoteDAO.FindByUserID(ctx, userID, status, limit, offset)
 }
 
 // UpdateNoteStatus 更新笔记状态
-func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int8) error {
+func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error {
 	return s.NoteDAO.UpdateStatus(ctx, noteID, status)
 }

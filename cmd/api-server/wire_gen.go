@@ -60,9 +60,17 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
+	noteLikeDAO := dao.NewNoteLikeDAO(db)
+	noteStatsDAO := dao.NewNoteStatsDAO(db)
+	likeService := &service.LikeService{
+		LikeDAO:  noteLikeDAO,
+		StatsDAO: noteStatsDAO,
+		NoteDAO:  noteDAO,
+	}
 	note := &handler.Note{
 		OssService:  iOssService,
 		NoteService: noteService,
+		LikeService: likeService,
 		Config:      cfg,
 	}
 	handlers := &server.Handlers{

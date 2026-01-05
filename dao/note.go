@@ -21,7 +21,7 @@ func (d *NoteDAO) Create(ctx context.Context, note *models.Note) error {
 }
 
 // FindByUserID 根据用户ID查询笔记列表
-func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int8, limit, offset int) ([]*models.Note, error) {
+func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error) {
 	var notes []*models.Note
 	err := d.Db.WithContext(ctx).
 		// Debug().
@@ -34,7 +34,7 @@ func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int8, 
 }
 
 // UpdateStatus 更新笔记状态
-func (d *NoteDAO) UpdateStatus(ctx context.Context, noteID uint64, status int8) error {
+func (d *NoteDAO) UpdateStatus(ctx context.Context, noteID uint64, status int) error {
 	return d.Db.WithContext(ctx).
 		Model(&models.Note{}).
 		Where("id = ?", noteID).

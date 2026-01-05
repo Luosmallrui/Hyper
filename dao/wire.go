@@ -2,7 +2,9 @@
 
 package dao
 
-import "github.com/google/wire"
+import (
+	"github.com/google/wire"
+)
 
 var ProviderSet = wire.NewSet(
 	NewAdmin,
@@ -13,4 +15,6 @@ var ProviderSet = wire.NewSet(
 	NewGroupDAO,
 	NewMessageReadDAO,
 	NewGroupMember,
+	NewNoteLikeDAO,
+	NewNoteStatsDAO,
 )
