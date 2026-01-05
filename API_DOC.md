@@ -233,6 +233,39 @@ const createNote = async () => {
   - 说明：查询指定笔记的点赞总数
   - 成功响应：`{"code":200,"msg":"success","data":{"like_count":123}}`
 
+# 收藏接口文档
+
+## 接口列表
+
+- POST /v1/note/:note_id/collect （需要认证）
+  - 说明：收藏指定笔记
+  - 成功响应：`{"code":200,"msg":"success","data":{"collected":true}}`
+
+- DELETE /v1/note/:note_id/collect （需要认证）
+  - 说明：取消收藏指定笔记
+  - 成功响应：`{"code":200,"msg":"success","data":{"collected":false}}`
+
+- GET /v1/note/:note_id/collect （需要认证）
+  - 说明：查询当前用户是否已收藏该笔记
+  - 成功响应：`{"code":200,"msg":"success","data":{"collected":true}}`
+
+- GET /v1/note/:note_id/collections/count （无需认证）
+  - 说明：查询指定笔记的收藏总数
+  - 成功响应：`{"code":200,"msg":"success","data":{"collect_count":123}}`
+
+## 请求头
+
+```
+Authorization: Bearer <token>   // 仅认证接口需要
+Content-Type: application/json
+```
+
+## 说明
+
+- 收藏状态记录在 `note_collections` 表（唯一键：note_id + user_id，status=1/0）。
+- 收藏计数通过 `note_stats.coll_count` 维护，幂等且防负数。
+- 接口响应结构与点赞保持一致：`{code, msg, data}`。
+
 ## 请求头
 
 ```
