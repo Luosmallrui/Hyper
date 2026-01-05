@@ -40,7 +40,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapService := &service.MapService{
 		MapDao: mapDao,
 	}
-
 	redisClient := client.NewRedisClient(cfg)
 	handlerMap := &handler.Map{
 		MapService: mapService,
@@ -56,13 +55,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
-
 	}
 	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
-
 	note := &handler.Note{
 		OssService:  iOssService,
 		NoteService: noteService,
@@ -73,7 +70,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Map:     handlerMap,
 		Message: messageHandler,
 		Note:    note,
-
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

@@ -62,7 +62,6 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		TopicIDs:    string(topicIDsJSON),
 		Location:    locationJSON,
 		MediaData:   string(mediaDataJSON),
-
 		Type:        req.Type,
 		Status:      0, // 默认审核中
 		VisibleConf: req.VisibleConf,
@@ -73,7 +72,6 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	// 如果未指定可见性，默认为公开
 	if note.VisibleConf == types.VisibleUnspecified {
 		note.VisibleConf = types.VisiblePublic
-
 	}
 
 	// 保存到数据库
