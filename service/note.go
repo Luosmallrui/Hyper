@@ -71,8 +71,14 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	}
 
 	// 如果未指定可见性，默认为公开
+<<<<<<< HEAD
 	if note.VisibleConf == types.VisibleUnspecified {
 		note.VisibleConf = types.VisiblePublic
+=======
+	if note.VisibleConf == 0 {
+		note.VisibleConf = int8(types.VisibleConfPublic)
+	}
+>>>>>>> 3bc8e5d (实现点赞、取消点赞、查询点赞次数、查询用户自己是否已经点赞接口)
 
 	// 保存到数据库
 	if err := s.NoteDAO.Create(ctx, note); err != nil {
