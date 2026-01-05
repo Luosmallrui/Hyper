@@ -3,6 +3,7 @@ package types
 import (
 	"time"
 )
+
 const (
 	VisibleUnspecified = 0 // 未指定
 	VisiblePublic      = 1 // 公开
@@ -11,7 +12,6 @@ const (
 
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
-
 	ID       int64    `gorm:"primaryKey" json:"id"`           // 雪花算法ID
 	UserID   int64    `gorm:"index" json:"user_id"`           // 作者ID
 	Title    string   `gorm:"type:varchar(100)" json:"title"` // 标题

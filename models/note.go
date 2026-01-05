@@ -12,7 +12,6 @@ type Note struct {
 	TopicIDs    string    `gorm:"column:topic_ids;type:json" json:"topic_ids"`
 	Location    string    `gorm:"column:location;type:json" json:"location"`
 	MediaData   string    `gorm:"column:media_data;type:json" json:"media_data"`
-
 	Type        int       `gorm:"column:type;not null;default:1" json:"type"`
 	Status      int       `gorm:"column:status;not null;default:0;index:idx_userid_status" json:"status"`
 	VisibleConf int       `gorm:"column:visible_conf;not null;default:1" json:"visible_conf"`
