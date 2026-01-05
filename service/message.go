@@ -13,7 +13,6 @@ import (
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,6 +25,7 @@ type MessageService struct {
 var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
+	SaveMessage(msg *models.ImSingleMessage) error
 	SendMessage(msg *types.Message) error
 	SendGroupMessage(msg *models.Message) error
 	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
@@ -35,6 +35,10 @@ type IMessageService interface {
 	GetMessageByID(msgID string) (*models.Message, error)
 }
 
+func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
+	// 执行插入
+	return s.MessageDao.Save(msg)
+}
 func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Timestamp = time.Now().UnixMilli()
 	msg.Status = 0 // 发送中
@@ -73,7 +77,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 func (s *MessageService) SendGroupMessage(msg *models.Message) error {
 	// 群消息仍然只存一条
-	return s.MessageDao.Save(msg)
+	return nil
 }
 
 // 查询某个用户/群的最近消息
@@ -92,18 +96,18 @@ func (s *MessageService) PullOfflineMessages(userID string) ([]models.Message, e
 
 // 发送系统消息
 func (s *MessageService) SendSystemMessage(targetID string, content string) error {
-	msg := &models.Message{
-		MsgID:       uuid.NewString(),
-		SenderID:    "system",
-		TargetID:    targetID,
-		SessionType: 3,
-		MsgType:     1,
-		Content:     content,
-		Timestamp:   time.Now().UnixMilli(),
-		Status:      1,
-		Ext:         "{}",
-	}
-	return s.MessageDao.Save(msg)
+	//msg := &models.Message{
+	//	MsgID:       uuid.NewString(),
+	//	SenderID:    "system",
+	//	TargetID:    targetID,
+	//	SessionType: 3,
+	//	MsgType:     1,
+	//	Content:     content,
+	//	Timestamp:   time.Now().UnixMilli(),
+	//	Status:      1,
+	//	Ext:         "{}",
+	//}
+	return nil
 }
 
 // ack
