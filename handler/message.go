@@ -15,7 +15,7 @@ type MessageHandler struct {
 }
 
 func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
-	message := r.Group("/api/message")
+	message := r.Group("/message")
 	message.POST("/send", context.Wrap(h.SendMessage))
 	message.GET("/list", context.Wrap(h.GetRecentMessages))
 }

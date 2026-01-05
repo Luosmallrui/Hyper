@@ -25,7 +25,7 @@ func NewRouter(conf *config.Config, handle *handler.Handler) *gin.Engine {
 
 	authorize := middleware.Auth([]byte(conf.Jwt.Secret))
 
-	router.GET("/wss", authorize, context.Wrap(handle.Chat.Conn))
+	router.GET("/im/wss", authorize, context.Wrap(handle.Chat.Conn))
 
 	router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, map[string]any{"ok": "success"})
