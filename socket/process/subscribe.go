@@ -5,6 +5,7 @@ import (
 	"Hyper/pkg/server"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
+	"Hyper/service"
 	"Hyper/types"
 	"context"
 	"encoding/json"
@@ -13,8 +14,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"Hyper/service"
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
@@ -81,32 +80,34 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 		// 即使 API 层有 Redis 去重，Consumer 也要通过数据库唯一索引或 Redis 再次确认
 		// 如果数据库 im_single_messages 的 msg_id 是主键，Create 报错则说明已存在
 
-		immsg := &models.ImSingleMessage{
-			Id:          imMsg.Id,
-			SessionHash: imMsg.SessionHash,
-			SessionId:   imMsg.SessionID,
-			SenderId:    imMsg.SenderID,
-			TargetId:    imMsg.TargetID,
-			MsgType:     imMsg.MsgType,
-			Content:     imMsg.Content,
-			ParentMsgId: imMsg.ParentMsgID,
-			Status:      imMsg.Status,
-			CreatedAt:   time.Now().Unix(),
-			UpdatedAt:   time.Now(),
-		}
-		// 3. 持久化到 MySQL
-		if err := m.MessageService.SaveMessage(immsg); err != nil {
-			log.Printf("[MQ] 消息入库失败: %v", err)
-			// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
-			return consumer.SuspendCurrentQueueAMoment, err
+		if imMsg.SessionType == types.SingleChat {
+			immsg := &models.ImSingleMessage{
+				Id:          imMsg.Id,
+				SessionHash: imMsg.SessionHash,
+				SessionId:   imMsg.SessionID,
+				SenderId:    imMsg.SenderID,
+				TargetId:    imMsg.TargetID,
+				MsgType:     imMsg.MsgType,
+				Content:     imMsg.Content,
+				ParentMsgId: imMsg.ParentMsgID,
+				Status:      imMsg.Status,
+				CreatedAt:   time.Now().Unix(),
+				UpdatedAt:   time.Now(),
+			}
+			if err := m.MessageService.SaveMessage(immsg); err != nil {
+				log.Printf("[MQ] 消息入库失败: %v", err)
+				// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
+				return consumer.SuspendCurrentQueueAMoment, err
+			}
+
+			//// 4. 异步处理会话更新 (不阻塞主消费流程)
+			//// 包括更新未读数、最后一条消息摘要等
+			//go m.updateConversation(&imMsg)
+			//
+			//// 5. 实时推送分发
+			m.dispatchMessage(&imMsg)
 		}
 
-		//// 4. 异步处理会话更新 (不阻塞主消费流程)
-		//// 包括更新未读数、最后一条消息摘要等
-		//go m.updateConversation(&imMsg)
-		//
-		//// 5. 实时推送分发
-		m.dispatchMessage(&imMsg)
 	}
 
 	return consumer.ConsumeSuccess, nil
