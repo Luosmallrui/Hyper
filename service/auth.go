@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -28,6 +29,8 @@ type IUserService interface {
 	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
 	GetUserAvatar(ctx context.Context, uid int64) (string, string, error)
 	GetUserInfo(ctx context.Context, uid int) (*models.Users, error)
+	SendVerifyCode(ctx context.Context, mobile string) error
+	UpdateMobileWithSms(ctx context.Context, mobile string, UserId int, inputCode string) error
 }
 
 type UserService struct {
@@ -59,12 +62,10 @@ func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber 
 	if PhoneNumber == "" {
 		return errors.New("手机号不能为空")
 	}
-
 	user, err := s.UsersRepo.FindById(ctx, UserId)
 	if err != nil || user.Id == 0 {
 		return errors.New("用户不存在")
 	}
-
 	err = s.UsersRepo.UpdateById(ctx, int64(user.Id), map[string]any{
 		"mobile":     PhoneNumber,
 		"updated_at": time.Now(),
@@ -245,4 +246,45 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 	}
 
 	return result
+}
+
+// Modify send sms code 模拟发送短信验证码
+func (s *UserService) SendVerifyCode(ctx context.Context, mobile string) error {
+	//先定一个验证码，
+	code := "222444"
+	//存入redis
+	err := s.Redis.Set(ctx, "sms:bind"+mobile, code, 5*time.Minute).Err()
+	if err != nil {
+		return err
+	}
+	println("模拟发送短信验证码，验证码为：", code)
+	return nil
+}
+
+func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, UserId int, inputCode string) error {
+	//校验
+	cachedCode, err := s.Redis.Get(ctx, "sms:bind"+mobile).Result()
+	if err != nil {
+		errors.New("验证码已过期或着未发送")
+	}
+	if cachedCode != inputCode {
+		return errors.New("验证码错误")
+	}
+
+	existUser, err := s.UsersRepo.FindByMobile(ctx, mobile)
+	if err == nil {
+		if int(existUser.Id) != UserId {
+			return errors.New("该手机号已被绑定")
+		}
+	}
+	err = s.UsersRepo.UpdateById(ctx, int64(UserId), map[string]any{
+		"mobile":     mobile,
+		"updated_at": time.Now(),
+	})
+
+	if err == nil {
+		s.Redis.Del(ctx, "sms:bind"+mobile)
+	}
+	return err
+
 }
