@@ -7,6 +7,7 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
+	"context"
 	"errors"
 	"time"
 )
@@ -72,7 +73,6 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	// 如果未指定可见性，默认为公开
 	if note.VisibleConf == types.VisibleUnspecified {
 		note.VisibleConf = types.VisiblePublic
-	}
 
 	// 保存到数据库
 	if err := s.NoteDAO.Create(ctx, note); err != nil {
