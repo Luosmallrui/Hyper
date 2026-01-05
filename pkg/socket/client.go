@@ -95,6 +95,7 @@ func NewClient(conn IConn, option *ClientOption, event IEvent) error {
 
 		// 用户id 和 机器id绑定
 		err := client.storage.Bind(context.Background(), server.GetServerId(), client.channel.Name(), client.cid, client.uid)
+		fmt.Println(server.GetServerId(), client.channel.Name(), client.cid, client.uid)
 		if err != nil {
 			log.Println("[ERROR] bind client err: ", err.Error())
 			return err
