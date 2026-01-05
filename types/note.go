@@ -5,6 +5,24 @@ import (
 	"time"
 )
 
+// VisibleConf 笔记可见性常量
+const (
+	VisibleConfPublic        int8 = 1 // 公开
+	VisibleConfFollowersOnly int8 = 2 // 粉丝可见
+	VisibleConfPrivate       int8 = 3 // 自己可见
+)
+
+// Pagination 分页常量
+const (
+	DefaultPage     int = 1  // 默认页码
+	DefaultPageSize int = 20 // 默认每页数量
+)
+
+// NoteStatus 笔记状态常量
+const (
+	NoteStatusDefaultQuery int8 = 1 // 查询笔记列表时的默认状态（公开）
+)
+
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
 	ID       int64   `gorm:"primaryKey" json:"id"`           // 雪花算法ID

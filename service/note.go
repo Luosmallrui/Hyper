@@ -71,7 +71,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 
 	// 如果未指定可见性，默认为公开
 	if note.VisibleConf == 0 {
-		note.VisibleConf = 1
+		note.VisibleConf = int8(types.VisibleConfPublic)
 	}
 
 	// 保存到数据库
