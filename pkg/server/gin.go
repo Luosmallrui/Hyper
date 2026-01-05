@@ -47,10 +47,11 @@ func GetServerId() string {
 func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
-	h.Auth.RegisterRouter(r)
-	h.Map.RegisterRouter(r)
-	h.Message.RegisterRouter(r)
-	h.Note.RegisterRouter(r)
+	api := r.Group("/api")
+	h.Auth.RegisterRouter(api)
+	h.Map.RegisterRouter(api)
+	h.Message.RegisterRouter(api)
+	h.Note.RegisterRouter(api)
 	return r
 }
 
