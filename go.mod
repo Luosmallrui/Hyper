@@ -4,7 +4,9 @@ go 1.24.4
 
 require (
 	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.3.0
+
 	github.com/apache/rocketmq-client-go/v2 v2.1.2
+
 	github.com/bwmarrin/snowflake v0.3.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
@@ -12,10 +14,12 @@ require (
 	github.com/google/wire v0.7.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/matoous/go-nanoid/v2 v2.1.0
+
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/sourcegraph/conc v0.3.0
 	github.com/tidwall/gjson v1.18.0
+
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/crypto v0.44.0
 	golang.org/x/image v0.34.0
@@ -33,7 +37,9 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+
 	github.com/emirpasic/gods v1.12.0 // indirect
+
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -72,7 +78,9 @@ require (
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
+
 	golang.org/x/term v0.37.0 // indirect
+
 	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
 	golang.org/x/tools v0.39.0 // indirect

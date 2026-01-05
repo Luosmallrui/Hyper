@@ -197,6 +197,8 @@ const createNote = async () => {
   });
   
   const data = await response.json();
+
+=======
   console.log('创建的笔记 ID:', data.data.note_id);
 };
 ```
@@ -210,3 +212,37 @@ const createNote = async () => {
 5. 新创建的笔记默认状态为 0（审核中）
 6. topic_ids、location 和 media_data 可以为空数组或 null
 7. 图片上传建议先调用 `/v1/note/upload` 接口上传图片，获取 URL 后再创建笔记
+---
+
+# 点赞接口文档
+
+## 接口列表
+
+- POST /v1/note/:note_id/like （需要认证）
+  - 说明：对指定笔记点赞
+  - 成功响应：`{"code":200,"msg":"success","data":{"liked":true}}`
+
+- DELETE /v1/note/:note_id/like （需要认证）
+  - 说明：取消对指定笔记的点赞
+  - 成功响应：`{"code":200,"msg":"success","data":{"liked":false}}`
+
+- GET /v1/note/:note_id/like （需要认证）
+  - 说明：查询当前用户是否已点赞该笔记
+  - 成功响应：`{"code":200,"msg":"success","data":{"liked":true}}`
+
+- GET /v1/note/:note_id/likes/count （无需认证）
+  - 说明：查询指定笔记的点赞总数
+  - 成功响应：`{"code":200,"msg":"success","data":{"like_count":123}}`
+
+## 请求头
+
+```
+Authorization: Bearer <token>   // 仅认证接口需要
+Content-Type: application/json
+```
+
+## 说明
+
+- 点赞状态通过 `note_likes` 表记录（唯一键：note_id + user_id）。
+- 点赞计数通过 `note_stats.like_count` 维护，支持幂等更新与防负数。
+- 所有接口均返回统一响应结构：`{code, msg, data}`。

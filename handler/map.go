@@ -4,16 +4,20 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
+
 	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+
 )
 
 type Map struct {
 	MapService service.IMapService
 	OssService service.IOssService
+
 	Redis      *redis.Client
+
 }
 
 func (m *Map) RegisterRouter(r gin.IRouter) {
@@ -26,7 +30,9 @@ func (m *Map) Test(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
+
 	fmt.Println(m.Redis, 55)
+
 	response.Success(c, mapData)
 	return nil
 }
