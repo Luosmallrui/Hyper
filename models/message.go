@@ -44,7 +44,6 @@ func (m *MessageExt) Scan(value interface{}) error {
 // ImSingleMessage 单聊消息结构体
 type ImSingleMessage struct {
 	Id          int64      `gorm:"primaryKey;column:id" json:"msg_id,string"`
-	ClientMsgId string     `gorm:"uniqueIndex:uk_client_msg_id;column:client_msg_id" json:"client_msg_id"`
 	SessionHash int64      `gorm:"index:idx_session_time;column:session_hash" json:"session_hash"` // 内部索引，不返回前端
 	SessionId   string     `gorm:"column:session_id" json:"session_id"`
 	SenderId    int64      `gorm:"column:sender_id" json:"sender_id,string"`

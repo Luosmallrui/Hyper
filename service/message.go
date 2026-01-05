@@ -43,14 +43,14 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Timestamp = time.Now().UnixMilli()
 	msg.Status = 0 // 发送中
 
-	cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
-	isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
-	if err != nil {
-		return err
-	}
-	if !isNew {
-		return nil
-	}
+	//cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
+	//isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
+	//if err != nil {
+	//	return err
+	//}
+	//if !isNew {
+	//	return nil
+	//}
 
 	msg.Id = snowflake.GenID()
 
@@ -58,6 +58,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
 	}
+	msg.Channel = "chat"
 
 	body, _ := json.Marshal(msg)
 	mqMsg := &primitive.Message{
@@ -65,10 +66,10 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		Body:  body,
 	}
 	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	_, err = s.MqProducer.SendSync(context.Background(), mqMsg)
+	_, err := s.MqProducer.SendSync(context.Background(), mqMsg)
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
 	if err != nil {
-		s.Redis.Del(context.Background(), cacheKey)
+		//s.Redis.Del(context.Background(), cacheKey)
 		return err
 	}
 

@@ -20,4 +20,5 @@ type Message struct {
 	Timestamp   int64  `json:"timestamp"`     // 服务端生成的时间戳
 	Status      int    `json:"status"`        // 0-发送中, 1-成功, 2-已读, 3-撤回
 	Ext         string `json:"ext,omitempty"` // 扩展字段 (JSON字符串)
+	Channel     string `json:"channel"`
 }

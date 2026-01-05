@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"Hyper/service"
@@ -22,6 +23,21 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
+
+var clientCache sync.Map // map[string]pushservice.Client
+
+func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error) {
+	if cli, ok := clientCache.Load(addr); ok {
+		return cli.(pushservice.Client), nil
+	}
+	// 创建新 Client 开启多路复用
+	newCli, err := pushservice.NewClient("im_push_service", client.WithHostPorts(addr))
+	if err != nil {
+		return nil, err
+	}
+	clientCache.Store(addr, newCli)
+	return newCli, nil
+}
 
 type MessageSubscribe struct {
 	Redis          *redis.Client
@@ -67,7 +83,6 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 
 		immsg := &models.ImSingleMessage{
 			Id:          imMsg.Id,
-			ClientMsgId: imMsg.ClientMsgID,
 			SessionHash: imMsg.SessionHash,
 			SessionId:   imMsg.SessionID,
 			SenderId:    imMsg.SenderID,
@@ -97,45 +112,66 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 	return consumer.ConsumeSuccess, nil
 }
 
+type RouterKey struct{}
+
+func (RouterKey) UserLocation(uid int) string {
+	return fmt.Sprintf("ws:user:location:%d", uid)
+}
+
+func (RouterKey) UserClients(sid, channel string, uid int) string {
+	return fmt.Sprintf("ws:%s:%s:user:%d", sid, channel, uid)
+}
+
+func (RouterKey) ClientMap(sid, channel string) string {
+	return fmt.Sprintf("ws:%s:%s:client", sid, channel)
+}
+
 func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
 	ctx := context.Background()
+	key := RouterKey{}
+	uid := int(msg.TargetID)
 
-	// 1. 从 Redis 获取目标用户所在的服务器地址
-	// 假设你存的 key 是 online:server:uid
-	serverAddr, err := m.Redis.Get(ctx, fmt.Sprintf("online:server:%d", msg.TargetID)).Result()
-	if err != nil || serverAddr == "" {
-		log.Printf("[MQ] 用户 %d 不在线，放弃推送", msg.TargetID)
+	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+	if err != nil || len(sids) == 0 {
+		log.Printf("[MQ] 用户 %d 不在线", uid)
 		return
 	}
 
-	// 2. 获取该用户的所有客户端 ID (Cid)
-	// 对应你登录时的 SAdd(c.userKey(...), clientId)
-	userKey := fmt.Sprintf("user:clients:%d", msg.TargetID)
-	cids, _ := m.Redis.SMembers(ctx, userKey).Result()
+	payload, _ := json.Marshal(msg)
 
-	// 3. 构造 Kitex Client 调用目标服务器
-	// 生产环境建议给每个 serverAddr 缓存一个 client 对象，不要每次都 NewClient
-	cli, err := pushservice.NewClient("im_push_service", client.WithHostPorts(serverAddr))
-	if err != nil {
-		log.Printf("[RPC] 创建客户端失败: %v", err)
-		return
-	}
+	for _, sid := range sids {
+		userKey := key.UserClients(sid, msg.Channel, uid)
+		cids, _ := m.Redis.SMembers(ctx, userKey).Result()
 
-	// 4. 给该用户的所有设备发送消息
-	for _, cidStr := range cids {
-		cid, _ := strconv.ParseInt(cidStr, 10, 64)
+		if len(cids) == 0 {
+			// 如果某台机器上已经没客户端了，顺手清理一下 Hash
+			m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+			continue
+		}
 
-		payload, _ := json.Marshal(msg)
+		// 获取 RPC Client 并推送
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			continue
+		}
 
-		resp, err := cli.PushToClient(ctx, &push.PushRequest{
-			Cid:     cid,
-			Uid:     int32(msg.TargetID),
-			Payload: string(payload),
-			Event:   "chat", // 或者是 "like"
-		})
+		for _, cidStr := range cids {
+			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+			_, err := cli.PushToClient(ctx, &push.PushRequest{
+				Cid:     cid,
+				Uid:     int32(uid),
+				Payload: string(payload),
+				Event:   "chat",
+			})
+			if err != nil {
+				log.Printf("[RPC] 目标服务不可达，正在清理脏路由: %s", sid)
 
-		if err != nil || !resp.Success {
-			log.Printf("[RPC] 推送给设备 %d 失败: %v", cid, err)
+				// 立即从该用户的 Location Hash 中移除该 sid
+				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+
+				// 同时清理 RPC 客户端缓存
+				clientCache.Delete(sid)
+			}
 		}
 	}
 }
