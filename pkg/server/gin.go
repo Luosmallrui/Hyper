@@ -40,14 +40,17 @@ func init() {
 		serverId = id
 	})
 }
+func GetServerId() string {
+	return serverId
+}
 
 func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 	h.Auth.RegisterRouter(r)
 	h.Map.RegisterRouter(r)
+	h.Message.RegisterRouter(r)
 	h.Note.RegisterRouter(r)
-
 	return r
 }
 

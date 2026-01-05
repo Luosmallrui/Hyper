@@ -12,9 +12,10 @@ type Note struct {
 	TopicIDs    string    `gorm:"column:topic_ids;type:json" json:"topic_ids"`
 	Location    string    `gorm:"column:location;type:json" json:"location"`
 	MediaData   string    `gorm:"column:media_data;type:json" json:"media_data"`
-	Type        int8      `gorm:"column:type;not null;default:1" json:"type"`
-	Status      int8      `gorm:"column:status;not null;default:0;index:idx_userid_status" json:"status"`
-	VisibleConf int8      `gorm:"column:visible_conf;not null;default:1" json:"visible_conf"`
+
+	Type        int       `gorm:"column:type;not null;default:1" json:"type"`
+	Status      int       `gorm:"column:status;not null;default:0;index:idx_userid_status" json:"status"`
+	VisibleConf int       `gorm:"column:visible_conf;not null;default:1" json:"visible_conf"`
 	CreatedAt   time.Time `gorm:"column:created_at;index:idx_created_at" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updated_at"`
 }

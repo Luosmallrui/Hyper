@@ -1,38 +1,25 @@
 package types
 
 import (
-	"Hyper/models"
 	"time"
 )
-
-// VisibleConf 笔记可见性常量
 const (
-	VisibleConfPublic        int8 = 1 // 公开
-	VisibleConfFollowersOnly int8 = 2 // 粉丝可见
-	VisibleConfPrivate       int8 = 3 // 自己可见
-)
-
-// Pagination 分页常量
-const (
-	DefaultPage     int = 1  // 默认页码
-	DefaultPageSize int = 20 // 默认每页数量
-)
-
-// NoteStatus 笔记状态常量
-const (
-	NoteStatusDefaultQuery int8 = 1 // 查询笔记列表时的默认状态（公开）
+	VisibleUnspecified = 0 // 未指定
+	VisiblePublic      = 1 // 公开
+	VisiblePrivate     = 2 // 私有（如果以后需要）
 )
 
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
-	ID       int64   `gorm:"primaryKey" json:"id"`           // 雪花算法ID
-	UserID   int64   `gorm:"index" json:"user_id"`           // 作者ID
-	Title    string  `gorm:"type:varchar(100)" json:"title"` // 标题
-	Content  string  `gorm:"type:text" json:"content"`       // 正文内容
-	TopicIDs []int64 `gorm:"type:json" json:"topic_ids"`     // 话题列表
-	Location string  `gorm:"type:json" json:"location"`      // 地理位置{lat, lng, name}
 
-	MediaData string `gorm:"type:json" json:"media_data"`
+	ID       int64    `gorm:"primaryKey" json:"id"`           // 雪花算法ID
+	UserID   int64    `gorm:"index" json:"user_id"`           // 作者ID
+	Title    string   `gorm:"type:varchar(100)" json:"title"` // 标题
+	Content  string   `gorm:"type:text" json:"content"`       // 正文内容
+	TopicIDs []int64  `gorm:"type:json" json:"topic_ids"`     // 话题列表
+	Location Location `gorm:"type:json" json:"location"`      // 地理位置{lat, lng, name}
+
+	MediaData []NoteMedia `gorm:"type:json" json:"media_data"`
 
 	Type        int `json:"type"`         // 1-图文, 2-视频
 	Status      int `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
@@ -98,6 +85,6 @@ type GetMyNotesRequest struct {
 
 // GetMyNotesResponse 笔记列表响应
 type GetMyNotesResponse struct {
-	Notes []*models.Note `json:"notes"` // 笔记列表
-	Total int            `json:"total"` // 总数
+	Notes []*Note `json:"notes"` // 笔记列表
+	Total int     `json:"total"` // 总数
 }
