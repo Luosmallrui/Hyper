@@ -67,17 +67,36 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
 	}
+	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
+	collectService := &service.CollectService{
+		CollectionDAO: noteCollectionDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+	}
 	note := &handler.Note{
-		OssService:  iOssService,
-		NoteService: noteService,
-		LikeService: likeService,
-		Config:      cfg,
+		OssService:     iOssService,
+		NoteService:    noteService,
+		LikeService:    likeService,
+		CollectService: collectService,
+		Config:         cfg,
+	}
+	userFollowDAO := dao.NewUserFollowDAO(db)
+	userStatsDAO := dao.NewUserStatsDAO(db)
+	followService := &service.FollowService{
+		FollowDAO: userFollowDAO,
+		StatsDAO:  userStatsDAO,
+		UserDAO:   users,
+	}
+	follow := &handler.Follow{
+		Config:        cfg,
+		FollowService: followService,
 	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
 		Message: messageHandler,
 		Note:    note,
+		Follow:  follow,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

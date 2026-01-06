@@ -40,3 +40,15 @@ func (d *NoteDAO) UpdateStatus(ctx context.Context, noteID uint64, status int) e
 		Where("id = ?", noteID).
 		Update("status", status).Error
 }
+
+// FindByIDs 根据 ID 列表查询笔记
+func (d *NoteDAO) FindByIDs(ctx context.Context, ids []uint64) ([]*models.Note, error) {
+	if len(ids) == 0 {
+		return []*models.Note{}, nil
+	}
+	var notes []*models.Note
+	err := d.Db.WithContext(ctx).
+		Where("id IN ?", ids).
+		Find(&notes).Error
+	return notes, err
+}

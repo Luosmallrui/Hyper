@@ -24,7 +24,7 @@ type IUserService interface {
 
 type UserService struct {
 	UsersRepo *dao.Users
-	//Redis     *redis.Client
+	// Redis     *redis.Client
 }
 
 func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error {

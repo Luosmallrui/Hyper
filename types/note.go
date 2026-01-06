@@ -100,3 +100,14 @@ type GetMyNotesResponse struct {
 	Notes []*Note `json:"notes"` // 笔记列表
 	Total int     `json:"total"` // 总数
 }
+
+// GetMyCollectionsRequest 查询自己收藏的笔记请求
+type GetMyCollectionsRequest struct {
+	Page     int `form:"page" binding:"omitempty,min=1"`
+	PageSize int `form:"pagesize" binding:"omitempty,min=1,max=100"`
+}
+
+type GetMyCollectionsResponse struct {
+	Notes []*Note `json:"notes"`
+	Total int     `json:"total"`
+}
