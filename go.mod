@@ -13,10 +13,10 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/sourcegraph/conc v0.3.0
+	github.com/speps/go-hashids/v2 v2.0.1
 	github.com/tidwall/gjson v1.18.0
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/crypto v0.44.0
