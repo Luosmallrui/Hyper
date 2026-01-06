@@ -63,10 +63,18 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	engine := router.NewRouter(cfg, handlerHandler)
 	healthSubscribe := process.NewHealthSubscribe(serverStorage)
 	pushConsumer := rocketmq.InitConsumer()
-	messageSubscribe := &process.MessageSubscribe{
+	messageDAO := dao.NewMessageDAO(db)
+	producer := rocketmq.InitProducer()
+	messageService := &service.MessageService{
+		MessageDao: messageDAO,
+		MqProducer: producer,
 		Redis:      redisClient,
-		MqConsumer: pushConsumer,
-		DB:         db,
+	}
+	messageSubscribe := &process.MessageSubscribe{
+		Redis:          redisClient,
+		MqConsumer:     pushConsumer,
+		DB:             db,
+		MessageService: messageService,
 	}
 	subServers := &process.SubServers{
 		HealthSubscribe:  healthSubscribe,

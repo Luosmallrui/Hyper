@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/redis/go-redis/v9"
@@ -93,9 +94,21 @@ func (c *ClientStorage) set(ctx context.Context, sid, channel string, clientId i
 		pipe.HSet(ctx, c.clientKey(sid, channel), clientId, uid)
 		// 命令2: 存储用户的所有客户端
 		pipe.SAdd(ctx, c.userKey(sid, channel, strconv.Itoa(uid)), clientId)
+		pipe.HIncrBy(ctx, c.userLocationKey(uid), sid, 1)
 		return nil
 	})
 	return err
+}
+
+func (c *ClientStorage) userLocationKey(uid int) string {
+	return fmt.Sprintf("ws:user:location:%d", uid)
+}
+func (c *ClientStorage) clientKey(sid, channel string) string {
+	return fmt.Sprintf("ws:%s:%s:client", sid, channel)
+}
+
+func (c *ClientStorage) userKey(sid, channel, uid string) string {
+	return fmt.Sprintf("ws:%s:%s:user:%s", sid, channel, uid)
 }
 
 // 删除客户端与用户绑定关系
@@ -103,19 +116,38 @@ func (c *ClientStorage) set(ctx context.Context, sid, channel string, clientId i
 // @params fd       客户端连接ID
 func (c *ClientStorage) del(ctx context.Context, sid, channel, fd string) error {
 	key := c.clientKey(sid, channel)
-	uid, _ := c.redis.HGet(ctx, key, fd).Result()
-	_, err := c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+
+	// 1. 先获取该客户端对应的 UID (string 类型)
+	uidStr, err := c.redis.HGet(ctx, key, fd).Result()
+	if err != nil {
+		return err
+	}
+
+	// 2. 将 string 转换为 int，以便调用 userLocationKey
+	uid, err := strconv.Atoi(uidStr)
+	if err != nil {
+		log.Printf("[ERROR] uid 转换失败: %v", err)
+		return err
+	}
+
+	_, err = c.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		// 3. 删除客户端与用户的映射
 		pipe.HDel(ctx, key, fd)
-		pipe.SRem(ctx, c.userKey(sid, channel, uid), fd)
+
+		// 4. 从用户设备集合中移除 (注意这里传 uidStr 或 uid 视你 userKey 定义而定)
+		pipe.SRem(ctx, c.userKey(sid, channel, uidStr), fd)
+
+		// 5. 核心：用户位置计数减 1
+		locationKey := c.userLocationKey(uid)
+		pipe.HIncrBy(ctx, locationKey, sid, -1)
+
 		return nil
 	})
+	// 6. 延时检查：如果该 sid 计数归零，彻底删除该 field
+	// 放在 Pipeline 外执行是为了确保获取到最新的计数
+	count, _ := c.redis.HGet(ctx, c.userLocationKey(uid), sid).Int64()
+	if count <= 0 {
+		c.redis.HDel(ctx, c.userLocationKey(uid), sid)
+	}
 	return err
-}
-
-func (c *ClientStorage) clientKey(sid, channel string) string {
-	return fmt.Sprintf("ws:%s:%s:client", sid, channel)
-}
-
-func (c *ClientStorage) userKey(sid, channel, uid string) string {
-	return fmt.Sprintf("ws:%s:%s:user:%s", sid, channel, uid)
 }
