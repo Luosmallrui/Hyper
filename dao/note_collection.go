@@ -62,3 +62,15 @@ func (d *NoteCollectionDAO) IsCollected(ctx context.Context, noteID uint64, user
 	}
 	return exist, nil
 }
+
+// ListNoteIDsByUser 查询用户收藏的笔记ID列表，按收藏时间倒序
+func (d *NoteCollectionDAO) ListNoteIDsByUser(ctx context.Context, userID uint64, limit, offset int) ([]uint64, int64, error) {
+	var total int64
+	base := d.Db.WithContext(ctx).Model(&models.NoteCollection{}).Where("user_id = ? AND status = 1", int(userID))
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var ids []uint64
+	err := base.Select("note_id").Order("created_at DESC").Limit(limit).Offset(offset).Scan(&ids).Error
+	return ids, total, err
+}

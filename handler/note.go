@@ -38,6 +38,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.POST("/upload", context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
+	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
@@ -198,6 +199,40 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	response.Success(c, types.GetMyNotesResponse{
 		Notes: res,
 		Total: total,
+	})
+	return nil
+}
+
+// GetMyCollections 查询自己的收藏列表
+func (n *Note) GetMyCollections(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+
+	var req types.GetMyCollectionsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	if req.Page == 0 {
+		req.Page = types.DefaultPage
+	}
+	if req.PageSize == 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+
+	limit := req.PageSize
+	offset := (req.Page - 1) * req.PageSize
+
+	notes, total, err := n.CollectService.GetUserCollections(c.Request.Context(), uint64(userID), limit, offset)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
+	}
+
+	response.Success(c, types.GetMyCollectionsResponse{
+		Notes: notes,
+		Total: int(total),
 	})
 	return nil
 }
