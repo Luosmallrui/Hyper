@@ -68,6 +68,7 @@ func (u *Auth) Login(c *gin.Context) error {
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
 			Nickname:    user.Nickname,
 			PhoneNumber: user.Mobile,
+			AvatarURL:   user.Avatar,
 		},
 		Stats: types.UserStats{
 			Following: 25,
