@@ -13,7 +13,6 @@ import (
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,6 +25,7 @@ type MessageService struct {
 var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
+	SaveMessage(msg *models.ImSingleMessage) error
 	SendMessage(msg *types.Message) error
 	SendGroupMessage(msg *models.Message) error
 	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
@@ -35,25 +35,30 @@ type IMessageService interface {
 	GetMessageByID(msgID string) (*models.Message, error)
 }
 
+func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
+	// 执行插入
+	return s.MessageDao.Save(msg)
+}
 func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Timestamp = time.Now().UnixMilli()
 	msg.Status = 0 // 发送中
 
-	cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
-	isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
-	if err != nil {
-		return err
-	}
-	if !isNew {
-		return nil
-	}
+	//cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
+	//isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
+	//if err != nil {
+	//	return err
+	//}
+	//if !isNew {
+	//	return nil
+	//}
 
 	msg.Id = snowflake.GenID()
 
-	if msg.SessionType == 1 { // 假设 1 是单聊
+	if msg.SessionType == types.SingleChat { // 假设 1 是单聊
 		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
 	}
+	msg.Channel = "chat"
 
 	body, _ := json.Marshal(msg)
 	mqMsg := &primitive.Message{
@@ -61,10 +66,10 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		Body:  body,
 	}
 	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	_, err = s.MqProducer.SendSync(context.Background(), mqMsg)
+	_, err := s.MqProducer.SendSync(context.Background(), mqMsg)
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
 	if err != nil {
-		s.Redis.Del(context.Background(), cacheKey)
+		//s.Redis.Del(context.Background(), cacheKey)
 		return err
 	}
 
@@ -73,7 +78,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 func (s *MessageService) SendGroupMessage(msg *models.Message) error {
 	// 群消息仍然只存一条
-	return s.MessageDao.Save(msg)
+	return nil
 }
 
 // 查询某个用户/群的最近消息
@@ -92,18 +97,18 @@ func (s *MessageService) PullOfflineMessages(userID string) ([]models.Message, e
 
 // 发送系统消息
 func (s *MessageService) SendSystemMessage(targetID string, content string) error {
-	msg := &models.Message{
-		MsgID:       uuid.NewString(),
-		SenderID:    "system",
-		TargetID:    targetID,
-		SessionType: 3,
-		MsgType:     1,
-		Content:     content,
-		Timestamp:   time.Now().UnixMilli(),
-		Status:      1,
-		Ext:         "{}",
-	}
-	return s.MessageDao.Save(msg)
+	//msg := &models.Message{
+	//	MsgID:       uuid.NewString(),
+	//	SenderID:    "system",
+	//	TargetID:    targetID,
+	//	SessionType: 3,
+	//	MsgType:     1,
+	//	Content:     content,
+	//	Timestamp:   time.Now().UnixMilli(),
+	//	Status:      1,
+	//	Ext:         "{}",
+	//}
+	return nil
 }
 
 // ack

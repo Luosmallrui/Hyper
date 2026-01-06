@@ -3,6 +3,7 @@
 package socket
 
 import (
+	"Hyper/pkg/rocketmq"
 	"Hyper/pkg/socket"
 	"Hyper/socket/handler"
 	"Hyper/socket/handler/event"
@@ -18,6 +19,7 @@ var ProviderSet = wire.NewSet(
 	//business.ProviderSet,
 	router.NewRouter,
 	socket.NewRoomStorage,
+	rocketmq.InitProducer,
 	wire.Struct(new(handler.Handler), "*"),
 
 	// process
