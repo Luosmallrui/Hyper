@@ -80,11 +80,23 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		Config:         cfg,
 	}
+	userFollowDAO := dao.NewUserFollowDAO(db)
+	userStatsDAO := dao.NewUserStatsDAO(db)
+	followService := &service.FollowService{
+		FollowDAO: userFollowDAO,
+		StatsDAO:  userStatsDAO,
+		UserDAO:   users,
+	}
+	follow := &handler.Follow{
+		Config:        cfg,
+		FollowService: followService,
+	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
 		Message: messageHandler,
 		Note:    note,
+		Follow:  follow,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
