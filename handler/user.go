@@ -89,7 +89,7 @@ func (u *User) UploadAvatar(c *gin.Context) error {
 	if err := u.OssService.UploadReader(c.Request.Context(), file, objectKey); err != nil {
 		return response.NewError(500, "上传云端失败")
 	}
-	fullUrl := fmt.Sprintf("https://cdn.hypercn.cn/%s?x-oss-process=image/resize,h_100,w_100", objectKey)
+	fullUrl := fmt.Sprintf("https://cdn.hypercn.cn/%s", objectKey)
 	response.Success(c, types.UploadAvatarRes{Url: fullUrl})
 	return nil
 }
