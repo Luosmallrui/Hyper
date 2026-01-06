@@ -2,6 +2,7 @@ package service
 
 import (
 	"Hyper/dao"
+	"Hyper/models"
 	"Hyper/types"
 	"context"
 	"encoding/json"
@@ -104,8 +105,20 @@ func (s *CollectService) GetUserCollections(ctx context.Context, userID uint64, 
 	if err != nil {
 		return nil, 0, err
 	}
-	result := make([]*types.Note, 0, len(notes))
+	// 按照收藏时间顺序（从 ids 中的顺序，晚到早）排列笔记
+	noteMap := make(map[uint64]*models.Note)
 	for _, note := range notes {
+		noteMap[note.ID] = note
+	}
+	orderedNotes := make([]*models.Note, 0, len(ids))
+	for _, id := range ids {
+		if note, exists := noteMap[id]; exists {
+			orderedNotes = append(orderedNotes, note)
+		}
+	}
+
+	result := make([]*types.Note, 0, len(orderedNotes))
+	for _, note := range orderedNotes {
 		k := &types.Note{
 			ID:          int64(note.ID),
 			UserID:      int64(note.UserID),
