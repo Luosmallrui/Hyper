@@ -253,6 +253,13 @@ const createNote = async () => {
   - 说明：查询指定笔记的收藏总数
   - 成功响应：`{"code":200,"msg":"success","data":{"collect_count":123}}`
 
+## 查询自己的收藏列表
+
+- GET /v1/note/my/collects （需要认证）
+  - 说明：分页查询当前用户收藏的笔记
+  - 查询参数：`page`（默认1），`pagesize`（默认20，最大100）
+  - 成功响应：`{"code":200,"msg":"success","data":{"notes":[...],"total":10}}`
+
 ## 请求头
 
 ```

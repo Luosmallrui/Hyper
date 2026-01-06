@@ -2,7 +2,9 @@ package service
 
 import (
 	"Hyper/dao"
+	"Hyper/types"
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -13,6 +15,7 @@ type ICollectService interface {
 	Uncollect(ctx context.Context, userID uint64, noteID uint64) error
 	IsCollected(ctx context.Context, userID uint64, noteID uint64) (bool, error)
 	GetCollectionCount(ctx context.Context, noteID uint64) (int64, error)
+	GetUserCollections(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error)
 }
 
 type CollectService struct {
@@ -86,4 +89,38 @@ func (s *CollectService) GetCollectionCount(ctx context.Context, noteID uint64) 
 		return 0, errors.New("stat not found")
 	}
 	return int64(stat.CollCount), nil
+}
+
+// GetUserCollections 查询用户收藏的笔记列表（分页）
+func (s *CollectService) GetUserCollections(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error) {
+	ids, total, err := s.CollectionDAO.ListNoteIDsByUser(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(ids) == 0 {
+		return []*types.Note{}, total, nil
+	}
+	notes, err := s.NoteDAO.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	result := make([]*types.Note, 0, len(notes))
+	for _, note := range notes {
+		k := &types.Note{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			Type:        int(note.Type),
+			Status:      int(note.Status),
+			VisibleConf: int(note.VisibleConf),
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
+		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &k.TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &k.Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &k.MediaData)
+		result = append(result, k)
+	}
+	return result, total, nil
 }
