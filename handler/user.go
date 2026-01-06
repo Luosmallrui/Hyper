@@ -8,6 +8,7 @@ import (
 	"Hyper/service"
 	"Hyper/types"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 
@@ -46,36 +47,49 @@ func (u *User) UpdateUserInfo(c *gin.Context) error {
 	response.Success(c, "更新成功")
 	return nil
 }
+
 func (u *User) UploadAvatar(c *gin.Context) error {
-	userID, _ := context.GetUserID(c) // 获取当前用户ID
+	userID, _ := context.GetUserID(c)
 
 	header, err := c.FormFile("image")
 	if err != nil {
 		return response.NewError(400, "请选择图片")
 	}
 
-	// 1. 散列目录设计：按 userID % 100 分层
-	// 2. 唯一文件名：UUID + 时间戳
-	// 路径格式：avatars/hash/userID/uuid.ext
-	objectKey := fmt.Sprintf("avatars/%02d/%d/%s%s",
+	//  大小校验（10MB）
+	if header.Size > 10<<20 {
+		return response.NewError(400, "图片不能超过10MB")
+	}
+
+	file, err := header.Open()
+	if err != nil {
+		return response.NewError(400, "读取文件失败")
+	}
+	defer file.Close()
+
+	buf := make([]byte, 512)
+	_, _ = file.Read(buf)
+	file.Seek(0, io.SeekStart)
+
+	contentType := http.DetectContentType(buf)
+	switch contentType {
+	case "image/jpeg", "image/png", "image/webp":
+	default:
+		return response.NewError(400, "不支持的图片格式")
+	}
+
+	objectKey := fmt.Sprintf(
+		"avatars/%02d/%d/%s%s",
 		userID%100,
 		userID,
 		uuid.NewString()[:8],
 		path.Ext(header.Filename),
 	)
 
-	file, _ := header.Open()
-	defer file.Close()
-
-	// 执行上传
 	if err := u.OssService.UploadReader(c.Request.Context(), file, objectKey); err != nil {
 		return response.NewError(500, "上传云端失败")
 	}
-
-	// 返回图片地址，前端拿到这个 Url 后，再调用 UpdateUserInfo 接口
-	fullUrl := fmt.Sprintf("https://%s.%s/%s", u.Config.Oss.Bucket, u.Config.Oss.Endpoint, objectKey)
-	response.Success(c, gin.H{
-		"url": fullUrl,
-	})
+	fullUrl := fmt.Sprintf("https://cdn.hypercn.cn/%s", objectKey)
+	response.Success(c, types.UploadAvatarRes{Url: fullUrl})
 	return nil
 }

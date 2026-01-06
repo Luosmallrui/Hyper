@@ -19,3 +19,7 @@ type UpdateUserReq struct {
 	Birthday *string `json:"birthday"`
 	// 手机号、邮箱、密码通常通过专门的修改接口（需验证码或旧密码）
 }
+
+type UploadAvatarRes struct {
+	Url string `json:"url"`
+}
