@@ -25,6 +25,15 @@ func (d *NoteStatsDAO) IncrLikeCount(ctx context.Context, noteID uint64, delta i
 	).Error
 }
 
+// IncrCollCount 收藏计数增减，避免负数
+func (d *NoteStatsDAO) IncrCollCount(ctx context.Context, noteID uint64, delta int64) error {
+	return d.Db.WithContext(ctx).Exec(
+		"INSERT INTO note_stats (note_id, coll_count, updated_at) VALUES (?, GREATEST(?, 0), NOW()) "+
+			"ON DUPLICATE KEY UPDATE coll_count = GREATEST(coll_count + ?, 0), updated_at = NOW()",
+		noteID, delta, delta,
+	).Error
+}
+
 func (d *NoteStatsDAO) GetByNoteID(ctx context.Context, noteID uint64) (*models.NoteStats, error) {
 	var item models.NoteStats
 	err := d.Db.WithContext(ctx).Where("note_id = ?", noteID).Limit(1).Find(&item).Error

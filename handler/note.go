@@ -25,10 +25,11 @@ import (
 )
 
 type Note struct {
-	OssService  service.IOssService
-	NoteService service.INoteService
-	LikeService service.ILikeService
-	Config      *config.Config
+	OssService     service.IOssService
+	NoteService    service.INoteService
+	LikeService    service.ILikeService
+	CollectService service.ICollectService
+	Config         *config.Config
 }
 
 func (n *Note) RegisterRouter(r gin.IRouter) {
@@ -37,11 +38,17 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.POST("/upload", context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
+	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
 	g.GET("/:note_id/like", authorize, context.Wrap(n.GetLikeStatus))
 	g.GET("/:note_id/likes/count", context.Wrap(n.GetLikeCount))
+	// Collection APIs
+	g.POST("/:note_id/collect", authorize, context.Wrap(n.Collect))
+	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
+	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
+	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
 }
 func (n *Note) UploadImage(c *gin.Context) error {
 	header, err := c.FormFile("image")
@@ -145,9 +152,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	}
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
-		req.Page = 1
 	}
-
 	// 仅当未提供 status 参数时，默认查询公开状态
 	if c.Query("status") == "" {
 		req.Status = types.NoteStatusDefaultQuery
@@ -194,6 +199,40 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	response.Success(c, types.GetMyNotesResponse{
 		Notes: res,
 		Total: total,
+	})
+	return nil
+}
+
+// GetMyCollections 查询自己的收藏列表
+func (n *Note) GetMyCollections(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+
+	var req types.GetMyCollectionsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	if req.Page == 0 {
+		req.Page = types.DefaultPage
+	}
+	if req.PageSize == 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+
+	limit := req.PageSize
+	offset := (req.Page - 1) * req.PageSize
+
+	notes, total, err := n.CollectService.GetUserCollections(c.Request.Context(), uint64(userID), limit, offset)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
+	}
+
+	response.Success(c, types.GetMyCollectionsResponse{
+		Notes: notes,
+		Total: int(total),
 	})
 	return nil
 }
@@ -287,5 +326,97 @@ func (n *Note) GetLikeCount(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, gin.H{"like_count": cnt})
+	return nil
+}
+
+// Collect 收藏笔记
+func (n *Note) Collect(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	noteIDParam := c.Param("note_id")
+	if noteIDParam == "" {
+		return response.NewError(http.StatusBadRequest, "缺少 note_id")
+	}
+	var noteID uint64
+	_, err = fmt.Sscanf(noteIDParam, "%d", &noteID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
+	}
+
+	err = n.CollectService.Collect(c.Request.Context(), uint64(userID), noteID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"collected": true})
+	return nil
+}
+
+// Uncollect 取消收藏
+func (n *Note) Uncollect(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	noteIDParam := c.Param("note_id")
+	if noteIDParam == "" {
+		return response.NewError(http.StatusBadRequest, "缺少 note_id")
+	}
+	var noteID uint64
+	_, err = fmt.Sscanf(noteIDParam, "%d", &noteID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
+	}
+
+	err = n.CollectService.Uncollect(c.Request.Context(), uint64(userID), noteID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"collected": false})
+	return nil
+}
+
+// GetCollectStatus 查询是否已收藏
+func (n *Note) GetCollectStatus(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	noteIDParam := c.Param("note_id")
+	if noteIDParam == "" {
+		return response.NewError(http.StatusBadRequest, "缺少 note_id")
+	}
+	var noteID uint64
+	_, err = fmt.Sscanf(noteIDParam, "%d", &noteID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
+	}
+
+	collected, err := n.CollectService.IsCollected(c.Request.Context(), uint64(userID), noteID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"collected": collected})
+	return nil
+}
+
+// GetCollectCount 查询收藏数量
+func (n *Note) GetCollectCount(c *gin.Context) error {
+	noteIDParam := c.Param("note_id")
+	if noteIDParam == "" {
+		return response.NewError(http.StatusBadRequest, "缺少 note_id")
+	}
+	var noteID uint64
+	_, err := fmt.Sscanf(noteIDParam, "%d", &noteID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
+	}
+
+	cnt, err := n.CollectService.GetCollectionCount(c.Request.Context(), noteID)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"collect_count": cnt})
 	return nil
 }
