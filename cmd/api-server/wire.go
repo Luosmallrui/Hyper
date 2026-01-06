@@ -18,7 +18,7 @@ import (
 
 func InitServer(cfg *config.Config) *server.AppProvider {
 	wire.Build(
-		database.NewDB,
+
 		client.NewRedisClient,
 		config.ProvideOssConfig,
 		rocketmq.InitProducer,
@@ -26,6 +26,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
 		wire.Struct(new(handler.Note), "*"),
+		wire.Struct(new(handler.Follow), "*"),
 
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
@@ -36,6 +37,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		dao.ProviderSet,
 
 		service.ProviderSet,
+		database.NewDB,
 		//service.NewMessageReadService,
 	)
 	return nil

@@ -18,4 +18,6 @@ var ProviderSet = wire.NewSet(
 	NewNoteLikeDAO,
 	NewNoteStatsDAO,
 	NewNoteCollectionDAO,
+	NewUserFollowDAO,
+	NewUserStatsDAO,
 )
