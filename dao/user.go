@@ -3,6 +3,7 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -50,4 +51,20 @@ func (u *Users) UpdateById(
 		Where("id = ?", id).
 		Updates(data).Error
 
+}
+
+func (u *Users) Update(ctx context.Context, userID uint, updates map[string]interface{}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	err := u.Db.WithContext(ctx).
+		Model(&models.Users{}).
+		Where("id = ?", userID).
+		Updates(updates).Error
+
+	if err != nil {
+		return fmt.Errorf("dao.User.Update error: %w", err)
+	}
+
+	return nil
 }
