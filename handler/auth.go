@@ -6,6 +6,7 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
+	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
@@ -64,8 +65,8 @@ func (u *Auth) Login(c *gin.Context) error {
 
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
-			UserID:      231255123123,
-			Nickname:    "邪修的马路路",
+			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
+			Nickname:    user.Nickname,
 			PhoneNumber: user.Mobile,
 		},
 		Stats: types.UserStats{

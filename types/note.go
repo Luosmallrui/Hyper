@@ -60,7 +60,7 @@ type NoteStat struct {
 }
 
 type UploadResponse struct {
-	Key    string `json:"key"`    // OSS 路径
+	Url    string `json:"url"`    // OSS 路径
 	Width  int    `json:"width"`  // 原始宽度
 	Height int    `json:"height"` // 原始高度
 }
