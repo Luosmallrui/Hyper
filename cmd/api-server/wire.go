@@ -26,6 +26,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
 		wire.Struct(new(handler.Note), "*"),
+		wire.Struct(new(handler.Follow), "*"),
 
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
