@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
@@ -32,18 +32,33 @@ var (
 
 func init() {
 	once.Do(func() {
-		id, err := gonanoid.Generate("0123456789abcdefghjklmnpqrstuvwxyz", 10)
+		ip, err := getLocalIP() // 获取本机内网 IP
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("获取本地IP失败: %v", err))
 		}
-
-		serverId = id
+		// 最终 sid 格式为: 192.168.1.10:8083
+		serverId = fmt.Sprintf("%s:%d", ip, 8083)
 	})
 }
 func GetServerId() string {
 	return serverId
 }
 
+func getLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, address := range addrs {
+		// 检查 ip 网络地址，排除回环地址
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+	return "", errors.New("no ip address found")
+}
 func NewGinEngine(h *Handlers) *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
