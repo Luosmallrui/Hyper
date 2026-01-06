@@ -67,11 +67,18 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
 	}
+	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
+	collectService := &service.CollectService{
+		CollectionDAO: noteCollectionDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+	}
 	note := &handler.Note{
-		OssService:  iOssService,
-		NoteService: noteService,
-		LikeService: likeService,
-		Config:      cfg,
+		OssService:     iOssService,
+		NoteService:    noteService,
+		LikeService:    likeService,
+		CollectService: collectService,
+		Config:         cfg,
 	}
 	handlers := &server.Handlers{
 		Auth:    auth,
