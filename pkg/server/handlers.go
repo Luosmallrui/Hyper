@@ -10,4 +10,5 @@ type Handlers struct {
 	Message *handler.MessageHandler
 	Note    *handler.Note
 	Follow  *handler.Follow
+	User    *handler.User
 }
