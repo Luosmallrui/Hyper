@@ -100,7 +100,7 @@ func (d *UserFollowDAO) GetFollowingList(ctx context.Context, userID uint64, lim
 	// 联接用户表获取用户信息，按创建时间倒序
 	err = d.Db.WithContext(ctx).
 		Table("user_follow uf").
-		Select("u.id as user_id, u.nickname").
+		Select("u.id as user_id, u.nickname, u.avatar as avatar, uf.updated_at as updated_at").
 		Joins("LEFT JOIN users u ON uf.followee_id = u.id").
 		Where("uf.follower_id = ? AND uf.status = 1", userID).
 		Order("uf.created_at DESC").
