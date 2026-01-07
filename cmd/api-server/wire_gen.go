@@ -80,6 +80,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
 	}
+	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
