@@ -285,3 +285,31 @@ Content-Type: application/json
 - 点赞状态通过 `note_likes` 表记录（唯一键：note_id + user_id）。
 - 点赞计数通过 `note_stats.like_count` 维护，支持幂等更新与防负数。
 - 所有接口均返回统一响应结构：`{code, msg, data}`。
+
+---
+
+# 关注接口文档
+
+## 查询关注列表
+
+- GET `/v1/user/:user_id/following/list` （需要认证）
+  - 说明：分页查询指定用户已关注的用户列表
+  - 查询参数：`page`（默认1），`page_size`（默认20，最大100）
+  - 成功响应示例：
+  ```json
+  {
+    "code": 200,
+    "message": "success",
+    "data": {
+      "list": [
+        {
+          "user_id": 123,
+          "nickname": "张三",
+          "avatar": "https://example.com/avatar.jpg",
+          "updated_at": "2026-01-07 12:34:56"
+        }
+      ],
+      "total": 1
+    }
+  }
+  ```
