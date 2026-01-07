@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 type CreateUserRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`
@@ -89,8 +91,10 @@ type BindPhoneRep struct {
 }
 
 type FollowingUser struct {
-	UserID   int64  `json:"user_id"`
-	Nickname string `json:"nickname"`
+	UserID    int64     `json:"user_id"`
+	Nickname  string    `json:"nickname"`
+	Avatar    string    `json:"avatar"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type GetFollowingListRequest struct {
