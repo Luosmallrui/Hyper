@@ -19,6 +19,7 @@ type Auth struct {
 	UserService   service.IUserService
 	WeChatService service.IWeChatService
 	OssService    service.IOssService
+	FollowService service.FollowService
 }
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
@@ -63,6 +64,8 @@ func (u *Auth) Login(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
+	followingCount, _ := u.FollowService.GetFollowingCount(c, uint64(user.Id))
+	followerCount, _ := u.FollowService.GetFollowerCount(c, uint64(user.Id))
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
@@ -71,8 +74,8 @@ func (u *Auth) Login(c *gin.Context) error {
 			AvatarURL:   user.Avatar,
 		},
 		Stats: types.UserStats{
-			Following: 25,
-			Follower:  115,
+			Following: followingCount,
+			Follower:  followerCount,
 			Likes:     25,
 		},
 		Token: token,
