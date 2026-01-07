@@ -202,8 +202,8 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 	// --- B. 更新双方的会话列表摘要 (Last Message) ---
 	// 无论是发送方还是接收方，会话列表展示的最后一条消息必须是最新的
 	summary := &cache.LastCacheMessage{
-		Content:  truncateContent(msg.Content, 50), // 截断内容防止浪费内存
-		Datetime: strconv.FormatInt(msg.Timestamp, 10),
+		Content:   truncateContent(msg.Content, 50), // 截断内容防止浪费内存
+		Timestamp: msg.Timestamp,
 	}
 
 	m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)

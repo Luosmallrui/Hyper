@@ -8,4 +8,6 @@ type SessionDTO struct {
 	Unread      uint32 `json:"unread"`
 	IsTop       int    `json:"is_top"`
 	IsMute      int    `json:"is_mute"`
+	PeerAvatar  string `json:"peer_avatar"`
+	PeerName    string `json:"peer_name"`
 }

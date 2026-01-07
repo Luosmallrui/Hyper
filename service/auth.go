@@ -6,10 +6,12 @@ import (
 	"Hyper/pkg/encrypt"
 	"Hyper/types"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -23,11 +25,13 @@ type IUserService interface {
 	UpdatePassword(uid int, oldPassword string, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
+	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
 }
 
 type UserService struct {
 	UsersRepo *dao.Users
-	// Redis     *redis.Client
+	Redis     *redis.Client
+	DB        *gorm.DB
 }
 
 func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error {
@@ -166,4 +170,58 @@ func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateU
 		return fmt.Errorf("db update failed: %w", err)
 	}
 	return nil
+}
+
+type UserInfo struct {
+	Avatar   string `json:"avatar"`
+	Nickname string `json:"nickname"`
+}
+
+func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo {
+	result := make(map[uint64]UserInfo)
+	if len(uids) == 0 {
+		return result
+	}
+
+	// 1. Redis MGet 批量获取
+	keys := make([]string, len(uids))
+	for i, id := range uids {
+		keys[i] = fmt.Sprintf("user:info:%d", id)
+	}
+
+	cacheRes, _ := s.Redis.MGet(ctx, keys...).Result()
+
+	missingIds := make([]uint64, 0)
+	for i, val := range cacheRes {
+		if val != nil {
+			var info UserInfo
+			_ = json.Unmarshal([]byte(val.(string)), &info)
+			result[uids[i]] = info
+		} else {
+			missingIds = append(missingIds, uids[i])
+		}
+	}
+
+	// 2. 如果有缓存缺失，查数据库
+	if len(missingIds) > 0 {
+		var dbUsers []struct {
+			Id       uint64
+			Avatar   string
+			Nickname string
+		}
+		s.DB.Table("users").Where("id IN ?", missingIds).Find(&dbUsers)
+
+		pipe := s.Redis.Pipeline()
+		for _, user := range dbUsers {
+			info := UserInfo{Avatar: user.Avatar, Nickname: user.Nickname}
+			result[user.Id] = info
+
+			// 写入缓存供下次使用
+			data, _ := json.Marshal(info)
+			pipe.Set(ctx, fmt.Sprintf("user:info:%d", user.Id), data, 24*time.Hour)
+		}
+		_, _ = pipe.Exec(ctx)
+	}
+
+	return result
 }

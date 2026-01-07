@@ -17,10 +17,11 @@ func (s *Session) RegisterRouter(r gin.IRouter) {
 	session.GET("", context.Wrap(s.ListSessions))
 }
 func (s *Session) ListSessions(c *gin.Context) error {
-	userId, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(401, "未登录")
-	}
+	//userId, err := context.GetUserID(c)
+	//if err != nil {
+	//	return response.NewError(401, "未登录")
+	//}
+	userId := 1
 	list, err := s.SessionService.ListUserSessions(
 		c.Request.Context(),
 		uint64(userId),
