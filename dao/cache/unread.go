@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"Hyper/models"
 	"context"
 	"fmt"
 	"time"
@@ -73,4 +74,27 @@ func (u *UnreadStorage) Reset(ctx context.Context, uid, mode, sender int) {
 // im:unread:uid:mode_sender
 func (u *UnreadStorage) name(uid, mode, sender int) string {
 	return fmt.Sprintf("im:unread:%d:%d_%d", uid, mode, sender)
+}
+
+func (u *UnreadStorage) BatchGet(ctx context.Context, userId uint64, convs []models.Session) map[uint64]uint32 {
+	resMap := make(map[uint64]uint32)
+	pipe := u.redis.Pipeline()
+
+	// 假设未读数 Key 是 "unread:123"
+	key := fmt.Sprintf("unread:%d", userId)
+	for _, c := range convs {
+		// 【关键】这里的 field 构造逻辑必须和 PipeIncr 时一致
+		// 如果 PipeIncr 存的是 "1_1001" (talkType_peerId)
+		field := fmt.Sprintf("%d_%d", c.SessionType, c.PeerId)
+		pipe.HGet(ctx, key, field)
+	}
+
+	cmds, _ := pipe.Exec(ctx)
+	for i, cmd := range cmds {
+		val, err := cmd.(*redis.StringCmd).Int()
+		if err == nil {
+			resMap[convs[i].PeerId] = uint32(val)
+		}
+	}
+	return resMap
 }

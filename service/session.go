@@ -6,7 +6,6 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
-	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +17,7 @@ type SessionService struct {
 	DB             *gorm.DB
 	MessageStorage *cache.MessageStorage
 	UnreadStorage  *cache.UnreadStorage
+	UserService    IUserService
 }
 
 type ISessionService interface {
@@ -138,6 +138,7 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 		limit = 50
 	}
 
+	// 1. 批量查询会话表
 	var convs []models.Session
 	err := s.DB.WithContext(ctx).
 		Where("user_id = ?", userId).
@@ -148,28 +149,49 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 		return nil, err
 	}
 
-	result := make([]*types.SessionDTO, 0, len(convs))
+	if len(convs) == 0 {
+		return []*types.SessionDTO{}, nil
+	}
 
+	// 2. 提取所有需要查询的 PeerId (去重)
+	peerIds := make([]uint64, 0, len(convs))
 	for _, c := range convs {
+		peerIds = append(peerIds, c.PeerId)
+	}
+
+	// 3. 批量获取用户信息 (从 Redis + DB 回源)
+	// 建议封装成我们之前讨论的 BatchGetUserInfo
+	userInfoMap := s.UserService.BatchGetUserInfo(ctx, peerIds)
+
+	// 4. 批量获取 Redis 中的未读数和最后一条消息
+	// 注意：这里推荐在 Service 内部实现一个 Pipeline 批量获取方法
+	unreadMap := s.UnreadStorage.BatchGet(ctx, userId, convs)
+	lastMsgMap := s.MessageStorage.BatchGet(ctx, userId, convs)
+
+	// 5. 在内存中组装结果
+	result := make([]*types.SessionDTO, 0, len(convs))
+	for _, c := range convs {
+		info := userInfoMap[c.PeerId]
 		dto := &types.SessionDTO{
 			SessionType: c.SessionType,
 			PeerId:      c.PeerId,
-			LastMsg:     c.LastMsgContent,
-			LastMsgTime: c.LastMsgTime,
-			Unread:      c.UnreadCount,
 			IsTop:       c.IsTop,
 			IsMute:      c.IsMute,
+			PeerName:    info.Nickname,
+			PeerAvatar:  info.Avatar,
 		}
 
-		unread := s.UnreadStorage.Get(ctx, int(userId), c.SessionType, int(c.PeerId))
-		dto.Unread = uint32(unread)
-		last, err := s.MessageStorage.Get(ctx, c.SessionType, int(userId), int(c.PeerId))
-		if err == nil {
+		// 优先使用 Redis 中的实时数据，如果不存在再用数据库里的兜底
+		if last, ok := lastMsgMap[c.PeerId]; ok {
 			dto.LastMsg = last.Content
-			if ts, err := strconv.ParseInt(last.Datetime, 10, 64); err == nil {
-				dto.LastMsgTime = ts
-			}
+			dto.LastMsgTime = last.Timestamp
+		} else {
+			dto.LastMsg = c.LastMsgContent
+			dto.LastMsgTime = c.LastMsgTime
 		}
+
+		dto.Unread = unreadMap[c.PeerId]
+
 		result = append(result, dto)
 	}
 
