@@ -15,10 +15,13 @@ import (
 )
 
 type Auth struct {
-	Config        *config.Config
-	UserService   service.IUserService
-	WeChatService service.IWeChatService
-	OssService    service.IOssService
+	Config         *config.Config
+	UserService    service.IUserService
+	WeChatService  service.IWeChatService
+	OssService     service.IOssService
+	FollowService  service.IFollowService
+	LikeService    service.ILikeService
+	CollectService service.ICollectService
 }
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
@@ -27,10 +30,46 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
 	auth.POST("/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.GET("/token", context.Wrap(u.GetToken))
+	// auth.GET("/test1", context.Wrap(u.test1))
 }
 
+// func (u *Auth) test1(c *gin.Context) error {
+// 	userid := 1
+// 	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		following = 0
+// 	}
+
+// 	// 获取粉丝数
+// 	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		follower = 0
+// 	}
+
+// 	// 获取用户帖子的总点赞数 + 总收藏数
+// 	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		totalLikes = 0
+// 	}
+
+// 	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		totalCollects = 0
+// 	}
+
+// 	rep := types.UserProfileResp{
+// 		Stats: types.UserStats{
+// 			Following: following,
+// 			Follower:  follower,
+// 			Likes:     totalLikes + totalCollects,
+// 		},
+// 	}
+// 	response.Success(c, rep)
+// 	return nil
+// }
+
 func (u *Auth) GetToken(c *gin.Context) error {
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 2, "XXX")
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XXX")
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -63,6 +102,29 @@ func (u *Auth) Login(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
+	// 获取关注数
+	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		following = 0
+	}
+
+	// 获取粉丝数
+	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		follower = 0
+	}
+
+	// 获取用户帖子的总点赞数 + 总收藏数
+	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		totalLikes = 0
+	}
+
+	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		totalCollects = 0
+	}
+
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
@@ -71,9 +133,9 @@ func (u *Auth) Login(c *gin.Context) error {
 			AvatarURL:   user.Avatar,
 		},
 		Stats: types.UserStats{
-			Following: 25,
-			Follower:  115,
-			Likes:     25,
+			Following: following,
+			Follower:  follower,
+			Likes:     totalLikes + totalCollects,
 		},
 		Token: token,
 	}
