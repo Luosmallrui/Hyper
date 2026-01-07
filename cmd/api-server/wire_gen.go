@@ -88,6 +88,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:    userService,
 		Config:         cfg,
 	}
+	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
