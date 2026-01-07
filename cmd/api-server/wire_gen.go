@@ -30,11 +30,19 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	ossConfig := config.ProvideOssConfig(cfg)
 	iOssService := service.NewOssService(ossConfig)
+	userFollowDAO := dao.NewUserFollowDAO(db)
+	userStatsDAO := dao.NewUserStatsDAO(db)
+	followService := service.FollowService{
+		FollowDAO: userFollowDAO,
+		StatsDAO:  userStatsDAO,
+		UserDAO:   users,
+	}
 	auth := &handler.Auth{
 		Config:        cfg,
 		UserService:   userService,
 		WeChatService: weChatService,
 		OssService:    iOssService,
+		FollowService: followService,
 	}
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
@@ -80,16 +88,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		Config:         cfg,
 	}
-	userFollowDAO := dao.NewUserFollowDAO(db)
-	userStatsDAO := dao.NewUserStatsDAO(db)
-	followService := &service.FollowService{
+	serviceFollowService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
 	}
 	follow := &handler.Follow{
 		Config:        cfg,
-		FollowService: followService,
+		FollowService: serviceFollowService,
 	}
 	user := &handler.User{
 		Config:      cfg,
