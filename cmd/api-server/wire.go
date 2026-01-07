@@ -6,6 +6,7 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/dao"
+	"Hyper/dao/cache"
 	"Hyper/handler"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
@@ -23,11 +24,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		config.ProvideOssConfig,
 		rocketmq.InitProducer,
 		server.NewGinEngine,
+		cache.ProviderSet,
 		wire.Struct(new(handler.Auth), "*"),
 		wire.Struct(new(handler.Map), "*"),
 		wire.Struct(new(handler.Note), "*"),
 		wire.Struct(new(handler.Follow), "*"),
 		wire.Struct(new(handler.User), "*"),
+		wire.Struct(new(handler.Session), "*"),
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
 

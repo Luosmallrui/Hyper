@@ -1,6 +1,7 @@
 package process
 
 import (
+	"Hyper/dao/cache"
 	"Hyper/models"
 	"Hyper/pkg/server"
 	"Hyper/rpc/kitex_gen/im/push"
@@ -23,6 +24,16 @@ import (
 	"gorm.io/gorm"
 )
 
+type MessageSubscribe struct {
+	Redis          *redis.Client
+	MqConsumer     rocketmq.PushConsumer
+	DB             *gorm.DB
+	MessageService service.IMessageService
+	MessageStorage *cache.MessageStorage
+	SessionService service.ISessionService
+	UnreadStorage  *cache.UnreadStorage
+}
+
 var clientCache sync.Map // map[string]pushservice.Client
 
 func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error) {
@@ -36,13 +47,6 @@ func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error)
 	}
 	clientCache.Store(addr, newCli)
 	return newCli, nil
-}
-
-type MessageSubscribe struct {
-	Redis          *redis.Client
-	MqConsumer     rocketmq.PushConsumer
-	DB             *gorm.DB
-	MessageService service.IMessageService
 }
 
 func (m *MessageSubscribe) Setup(ctx context.Context) error {
@@ -71,16 +75,13 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 		var imMsg types.Message
 		if err := json.Unmarshal(msg.Body, &imMsg); err != nil {
 			log.Printf("[MQ] 解析消息失败: %v, Body: %s", err, string(msg.Body))
-			continue // 解析失败的消息通常直接跳过，避免阻塞队列
+			continue
 		}
 		b, _ := json.Marshal(imMsg)
 		log.Printf("[MQ] 解析成功: %s", string(b))
+		extBytes, _ := json.Marshal(imMsg.Ext)
 
-		// 2. 数据库幂等校验 (防止 Consumer 层面重复消费)
-		// 即使 API 层有 Redis 去重，Consumer 也要通过数据库唯一索引或 Redis 再次确认
-		// 如果数据库 im_single_messages 的 msg_id 是主键，Create 报错则说明已存在
-
-		if imMsg.SessionType == types.SingleChat {
+		if imMsg.SessionType == types.SessionTypeSingle {
 			immsg := &models.ImSingleMessage{
 				Id:          imMsg.Id,
 				SessionHash: imMsg.SessionHash,
@@ -90,8 +91,9 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 				MsgType:     imMsg.MsgType,
 				Content:     imMsg.Content,
 				ParentMsgId: imMsg.ParentMsgID,
-				Status:      imMsg.Status,
+				Status:      types.MsgStatusSuccess,
 				CreatedAt:   time.Now().Unix(),
+				Ext:         string(extBytes),
 				UpdatedAt:   time.Now(),
 			}
 			if err := m.MessageService.SaveMessage(immsg); err != nil {
@@ -99,13 +101,13 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 				// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
 				return consumer.SuspendCurrentQueueAMoment, err
 			}
-
-			//// 4. 异步处理会话更新 (不阻塞主消费流程)
-			//// 包括更新未读数、最后一条消息摘要等
-			//go m.updateConversation(&imMsg)
-			//
-			//// 5. 实时推送分发
-			m.dispatchMessage(&imMsg)
+			if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
+				return consumer.SuspendCurrentQueueAMoment, err
+			}
+			go func(imMsg types.Message) {
+				m.updateUserCache(ctx, &imMsg)
+				m.dispatchMessage(&imMsg)
+			}(imMsg)
 		}
 
 	}
@@ -131,6 +133,7 @@ func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
 	ctx := context.Background()
 	key := RouterKey{}
 	uid := int(msg.TargetID)
+	msg.Status = types.MsgStatusSuccess
 
 	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
 	if err != nil || len(sids) == 0 {
@@ -175,4 +178,48 @@ func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
 			}
 		}
 	}
+}
+
+func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Message) {
+	// 1. 确定接收者 ID
+	// 这里的逻辑要小心：如果是单聊，接收者是 TargetID；
+	// 如果是自己发给自己的同步消息，则不需要增加未读数
+	if msg.SenderID == msg.TargetID {
+		return
+	}
+
+	receiverID := int(msg.TargetID)
+	senderID := int(msg.SenderID)
+
+	// 2. 开启管道
+	pipe := m.Redis.Pipeline()
+
+	// --- A. 更新接收方的未读数 ---
+	// Key 设计: unread:{user_id} -> Hash { "1_single_1001": 5 }
+	// 表示：用户 receiverID 收到来自 1001 的单聊消息，未读数为 5
+	m.UnreadStorage.PipeIncr(ctx, pipe, receiverID, types.SessionTypeSingle, senderID)
+
+	// --- B. 更新双方的会话列表摘要 (Last Message) ---
+	// 无论是发送方还是接收方，会话列表展示的最后一条消息必须是最新的
+	summary := &cache.LastCacheMessage{
+		Content:  truncateContent(msg.Content, 50), // 截断内容防止浪费内存
+		Datetime: strconv.FormatInt(msg.Timestamp, 10),
+	}
+
+	m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)
+	m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary)
+
+	// 3. 执行管道
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		log.Printf("[Cache] 更新用户 %d 的缓存失败: %v", receiverID, err)
+	}
+}
+
+func truncateContent(content string, maxLen int) string {
+	runes := []rune(content)
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "..."
+	}
+	return content
 }

@@ -14,12 +14,14 @@ import (
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 type MessageService struct {
 	MessageDao *dao.MessageDAO
 	MqProducer rocketmq.Producer
 	Redis      *redis.Client
+	DB         *gorm.DB
 }
 
 var _ IMessageService = (*MessageService)(nil)
@@ -33,6 +35,59 @@ type IMessageService interface {
 	SendSystemMessage(targetID string, content string) error
 	AckMessages(msgIDs []string) error
 	GetMessageByID(msgID string) (*models.Message, error)
+	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error)
+}
+
+func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error) {
+
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	sessionHash := GetSessionHash(int64(userId), int64(peerId))
+
+	q := s.DB.WithContext(ctx).
+		Model(&models.ImSingleMessage{}).
+		Where("session_hash = ?", sessionHash)
+	if cursor > 0 {
+		q = q.Where("created_at < ?", cursor)
+	}
+
+	var msgs []models.ImSingleMessage
+	if err := q.
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&msgs).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]types.ListMessageReq, 0, len(msgs))
+
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+
+		ext := make(map[string]interface{})
+		if m.Ext != "" {
+			if err := json.Unmarshal([]byte(m.Ext), &ext); err != nil {
+				ext = make(map[string]interface{})
+			}
+		}
+		if ext == nil {
+			ext = make(map[string]interface{})
+		}
+		item := types.ListMessageReq{
+			Id:       uint64(m.Id),
+			SenderId: uint64(m.SenderId),
+			Content:  m.Content,
+			MsgType:  m.MsgType,
+			Ext:      ext,
+			Time:     m.CreatedAt,
+		}
+
+		result = append(result, item)
+	}
+
+	return result, nil
 }
 
 func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
@@ -54,7 +109,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 	msg.Id = snowflake.GenID()
 
-	if msg.SessionType == types.SingleChat { // 假设 1 是单聊
+	if msg.SessionType == types.SessionTypeSingle { // 假设 1 是单聊
 		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
 	}
