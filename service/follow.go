@@ -14,6 +14,7 @@ type IFollowService interface {
 	IsFollowing(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetFollowerCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingCount(ctx context.Context, userID uint64) (int64, error)
+	GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error)
 }
 
 type FollowService struct {
@@ -128,4 +129,8 @@ func (s *FollowService) GetFollowingCount(ctx context.Context, userID uint64) (i
 		return 0, nil
 	}
 	return int64(stats.FollowingCount), nil
+}
+
+func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
+	return s.FollowDAO.GetFollowingList(ctx, userID, limit, offset)
 }
