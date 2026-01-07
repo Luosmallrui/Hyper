@@ -13,6 +13,7 @@ type ILikeService interface {
 	Unlike(ctx context.Context, userID uint64, noteID uint64) error
 	IsLiked(ctx context.Context, userID uint64, noteID uint64) (bool, error)
 	GetLikeCount(ctx context.Context, noteID uint64) (int64, error)
+	GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error)
 }
 
 type LikeService struct {
@@ -96,4 +97,8 @@ func (s *LikeService) GetLikeCount(ctx context.Context, noteID uint64) (int64, e
 		return 0, errors.New("stat not found")
 	}
 	return int64(stat.LikeCount), nil
+}
+
+func (s *LikeService) GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error) {
+	return s.StatsDAO.GetUserTotalLikes(ctx, userID)
 }
