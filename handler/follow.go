@@ -9,6 +9,7 @@ import (
 	"Hyper/types"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -196,10 +197,17 @@ func (f *Follow) GetFollowingList(c *gin.Context) error {
 			continue
 		}
 		nickname, _ := follow["nickname"].(string)
+		avatar, _ := follow["avatar"].(string)
+		var updatedAt time.Time
+		if t, ok := follow["updated_at"].(time.Time); ok {
+			updatedAt = t
+		}
 
 		result = append(result, &types.FollowingUser{
-			UserID:   userID,
-			Nickname: nickname,
+			UserID:    userID,
+			Nickname:  nickname,
+			Avatar:    avatar,
+			UpdatedAt: updatedAt,
 		})
 	}
 
