@@ -33,17 +33,33 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	iOssService := service.NewOssService(ossConfig)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
-	followService := service.FollowService{
+	followService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
 	}
+	noteLikeDAO := dao.NewNoteLikeDAO(db)
+	noteStatsDAO := dao.NewNoteStatsDAO(db)
+	noteDAO := dao.NewNoteDAO(db)
+	likeService := &service.LikeService{
+		LikeDAO:  noteLikeDAO,
+		StatsDAO: noteStatsDAO,
+		NoteDAO:  noteDAO,
+	}
+	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
+	collectService := &service.CollectService{
+		CollectionDAO: noteCollectionDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+	}
 	auth := &handler.Auth{
-		Config:        cfg,
-		UserService:   userService,
-		WeChatService: weChatService,
-		OssService:    iOssService,
-		FollowService: followService,
+		Config:         cfg,
+		UserService:    userService,
+		WeChatService:  weChatService,
+		OssService:     iOssService,
+		FollowService:  followService,
+		LikeService:    likeService,
+		CollectService: collectService,
 	}
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
@@ -66,22 +82,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
 	}
-	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
-	}
-	noteLikeDAO := dao.NewNoteLikeDAO(db)
-	noteStatsDAO := dao.NewNoteStatsDAO(db)
-	likeService := &service.LikeService{
-		LikeDAO:  noteLikeDAO,
-		StatsDAO: noteStatsDAO,
-		NoteDAO:  noteDAO,
-	}
-	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
-	collectService := &service.CollectService{
-		CollectionDAO: noteCollectionDAO,
-		StatsDAO:      noteStatsDAO,
-		NoteDAO:       noteDAO,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -90,14 +92,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		Config:         cfg,
 	}
-	serviceFollowService := &service.FollowService{
-		FollowDAO: userFollowDAO,
-		StatsDAO:  userStatsDAO,
-		UserDAO:   users,
-	}
 	follow := &handler.Follow{
 		Config:        cfg,
-		FollowService: serviceFollowService,
+		FollowService: followService,
 	}
 	user := &handler.User{
 		Config:      cfg,
