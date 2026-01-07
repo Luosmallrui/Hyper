@@ -4,8 +4,10 @@ import (
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/encrypt"
+	"Hyper/types"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -20,6 +22,7 @@ type IUserService interface {
 	Forget(opt *UserForgetOpt) (bool, error)
 	UpdatePassword(uid int, oldPassword string, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
+	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
 }
 
 type UserService struct {
@@ -134,4 +137,33 @@ func (s *UserService) UpdatePassword(uid int, oldPassword string, password strin
 	}
 
 	return err
+}
+
+func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateUserReq) error {
+	updates := make(map[string]interface{})
+
+	if req.Nickname != nil {
+		updates["nickname"] = *req.Nickname
+	}
+	if req.Avatar != nil {
+		updates["avatar"] = *req.Avatar
+	}
+	if req.Gender != nil {
+		updates["gender"] = *req.Gender
+	}
+	if req.Motto != nil {
+		updates["motto"] = *req.Motto
+	}
+	if req.Birthday != nil {
+		updates["birthday"] = *req.Birthday
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+	err := s.UsersRepo.Update(ctx, uint(userID), updates)
+	if err != nil {
+		return fmt.Errorf("db update failed: %w", err)
+	}
+	return nil
 }

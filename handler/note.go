@@ -95,7 +95,7 @@ func (n *Note) UploadImage(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, types.UploadResponse{
-		Key: fmt.Sprintf("https://%s.%s/%s",
+		Url: fmt.Sprintf("https://%s.%s/%s",
 			n.Config.Oss.Bucket, n.Config.Oss.Endpoint,
 			objectKey),
 		Width:  width,

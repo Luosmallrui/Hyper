@@ -65,6 +65,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
 	h.Map.RegisterRouter(api)
+	h.User.RegisterRouter(api)
 	h.Message.RegisterRouter(api)
 	h.Note.RegisterRouter(api)
 	h.Follow.RegisterRouter(api)

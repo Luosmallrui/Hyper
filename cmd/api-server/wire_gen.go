@@ -91,12 +91,18 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:        cfg,
 		FollowService: followService,
 	}
+	user := &handler.User{
+		Config:      cfg,
+		UserService: userService,
+		OssService:  iOssService,
+	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
 		Message: messageHandler,
 		Note:    note,
 		Follow:  follow,
+		User:    user,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

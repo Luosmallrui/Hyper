@@ -35,6 +35,7 @@ func (s *PushServiceImpl) PushToClient(ctx context.Context, req *push.PushReques
 	}
 
 	err = client.Write(&socket.ClientResponse{
+		IsAck:   ok,
 		Event:   req.Event,
 		Content: payload,
 	})
