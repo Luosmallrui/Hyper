@@ -5,6 +5,7 @@ import (
 	"Hyper/rpc"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 	s "Hyper/socket"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -14,7 +15,12 @@ import (
 )
 
 func main() {
-	cfg := config.New("configs/config.dev.yaml")
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "dev"
+	}
+	path := fmt.Sprintf("configs/config.%s.yaml", env)
+	cfg := config.New(path)
 	conn := InitSocketServer(cfg)
 
 	cliApp := &cli.App{
