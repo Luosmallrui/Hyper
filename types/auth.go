@@ -71,7 +71,7 @@ type UserProfileResp struct {
 }
 
 type UserBasicInfo struct {
-	UserID      int64  `json:"user_id"`    // Snowflake ID（对外）
+	UserID      string `json:"user_id"`    // Snowflake ID（对外）
 	Nickname    string `json:"nickname"`   // 邪修的马路路
 	AvatarURL   string `json:"avatar_url"` // 头像
 	VipLevel    string `json:"vip_level"`  // gold / silver / none

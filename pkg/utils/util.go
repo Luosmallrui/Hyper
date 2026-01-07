@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"runtime"
 	"time"
+
+	"github.com/speps/go-hashids/v2"
 )
 
 // MtRand 生成指定范围内的随机数
@@ -25,4 +27,12 @@ func PanicTrace(err interface{}) string {
 		fmt.Fprintf(buf, "%s:%d (0x%x)\n", file, line, pc)
 	}
 	return buf.String()
+}
+func GenHashID(salt string, id int) string {
+	hd := hashids.NewData()
+	hd.Salt = salt
+	hd.MinLength = 12
+	h, _ := hashids.NewWithData(hd)
+	e, _ := h.Encode([]int{id})
+	return e
 }
