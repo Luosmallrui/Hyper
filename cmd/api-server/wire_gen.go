@@ -9,6 +9,7 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/dao"
+	"Hyper/dao/cache"
 	"Hyper/handler"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
@@ -60,6 +61,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MessageDao: messageDAO,
 		MqProducer: producer,
 		Redis:      redisClient,
+		DB:         db,
 	}
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
@@ -102,6 +104,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService: userService,
 		OssService:  iOssService,
 	}
+	messageStorage := cache.NewMessageStorage(redisClient)
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	sessionService := &service.SessionService{
+		DB:             db,
+		MessageStorage: messageStorage,
+		UnreadStorage:  unreadStorage,
+	}
+	session := &handler.Session{
+		SessionService: sessionService,
+	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
@@ -109,6 +121,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Note:    note,
 		Follow:  follow,
 		User:    user,
+		Session: session,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

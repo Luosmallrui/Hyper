@@ -70,11 +70,21 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		MqProducer: producer,
 		Redis:      redisClient,
 	}
+	messageStorage := cache.NewMessageStorage(redisClient)
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	sessionService := &service.SessionService{
+		DB:             db,
+		MessageStorage: messageStorage,
+		UnreadStorage:  unreadStorage,
+	}
 	messageSubscribe := &process.MessageSubscribe{
 		Redis:          redisClient,
 		MqConsumer:     pushConsumer,
 		DB:             db,
 		MessageService: messageService,
+		MessageStorage: messageStorage,
+		SessionService: sessionService,
+		UnreadStorage:  unreadStorage,
 	}
 	subServers := &process.SubServers{
 		HealthSubscribe:  healthSubscribe,

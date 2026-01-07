@@ -11,4 +11,5 @@ type Handlers struct {
 	Note    *handler.Note
 	Follow  *handler.Follow
 	User    *handler.User
+	Session *handler.Session
 }
