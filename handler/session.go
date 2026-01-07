@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
@@ -10,10 +12,13 @@ import (
 
 type Session struct {
 	SessionService service.ISessionService
+	Config         *config.Config
 }
 
 func (s *Session) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
 	session := r.Group("/v1/session/")
+	session.Use(authorize)
 	session.GET("", context.Wrap(s.ListSessions))
 }
 func (s *Session) ListSessions(c *gin.Context) error {

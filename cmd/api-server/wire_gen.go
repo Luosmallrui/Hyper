@@ -83,6 +83,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	messageHandler := &handler.MessageHandler{
 		Service: messageService,
+		Config:  cfg,
 	}
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
@@ -113,6 +114,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	session := &handler.Session{
 		SessionService: sessionService,
+		Config:         cfg,
 	}
 	handlers := &server.Handlers{
 		Auth:    auth,
