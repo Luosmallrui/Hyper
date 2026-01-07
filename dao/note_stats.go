@@ -45,3 +45,31 @@ func (d *NoteStatsDAO) GetByNoteID(ctx context.Context, noteID uint64) (*models.
 	}
 	return &item, nil
 }
+
+// GetUserTotalLikes 统计用户所有笔记的总点赞数
+func (d *NoteStatsDAO) GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error) {
+	var total int64
+	err := d.Db.WithContext(ctx).
+		Raw(`
+			SELECT COALESCE(SUM(ns.like_count), 0) as total
+			FROM note_stats ns
+			INNER JOIN notes n ON ns.note_id = n.id
+			WHERE n.user_id = ?
+		`, userID).
+		Scan(&total).Error
+	return total, err
+}
+
+// GetUserTotalCollects 统计用户所有笔记的总收藏数
+func (d *NoteStatsDAO) GetUserTotalCollects(ctx context.Context, userID uint64) (int64, error) {
+	var total int64
+	err := d.Db.WithContext(ctx).
+		Raw(`
+			SELECT COALESCE(SUM(ns.coll_count), 0) as total
+			FROM note_stats ns
+			INNER JOIN notes n ON ns.note_id = n.id
+			WHERE n.user_id = ?
+		`, userID).
+		Scan(&total).Error
+	return total, err
+}
