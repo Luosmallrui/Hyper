@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
@@ -12,10 +14,13 @@ import (
 
 type MessageHandler struct {
 	Service service.IMessageService
+	Config  *config.Config
 }
 
 func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	message := r.Group("/v1/message")
+	message.Use(authorize)
 	message.POST("/send", context.Wrap(h.SendMessage))
 	message.GET("/list", context.Wrap(h.ListMessages))
 }
