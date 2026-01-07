@@ -17,6 +17,7 @@ type ICollectService interface {
 	IsCollected(ctx context.Context, userID uint64, noteID uint64) (bool, error)
 	GetCollectionCount(ctx context.Context, noteID uint64) (int64, error)
 	GetUserCollections(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error)
+	GetUserTotalCollects(ctx context.Context, userID uint64) (int64, error)
 }
 
 type CollectService struct {
@@ -136,4 +137,8 @@ func (s *CollectService) GetUserCollections(ctx context.Context, userID uint64, 
 		result = append(result, k)
 	}
 	return result, total, nil
+}
+
+func (s *CollectService) GetUserTotalCollects(ctx context.Context, userID uint64) (int64, error) {
+	return s.StatsDAO.GetUserTotalCollects(ctx, userID)
 }
