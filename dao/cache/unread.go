@@ -76,25 +76,47 @@ func (u *UnreadStorage) name(uid, mode, sender int) string {
 	return fmt.Sprintf("im:unread:%d:%d_%d", uid, mode, sender)
 }
 
-func (u *UnreadStorage) BatchGet(ctx context.Context, userId uint64, convs []models.Session) map[uint64]uint32 {
+func (u *UnreadStorage) BatchGet(
+	ctx context.Context,
+	userId uint64,
+	convs []models.Session,
+) map[uint64]uint32 {
+
 	resMap := make(map[uint64]uint32)
 	pipe := u.redis.Pipeline()
 
-	// 假设未读数 Key 是 "unread:123"
-	key := fmt.Sprintf("unread:%d", userId)
-	for _, c := range convs {
-		// 【关键】这里的 field 构造逻辑必须和 PipeIncr 时一致
-		// 如果 PipeIncr 存的是 "1_1001" (talkType_peerId)
-		field := fmt.Sprintf("%d_%d", c.SessionType, c.PeerId)
-		pipe.HGet(ctx, key, field)
+	type item struct {
+		peerId uint64
+		cmd    *redis.StringCmd
 	}
 
-	cmds, _ := pipe.Exec(ctx)
-	for i, cmd := range cmds {
-		val, err := cmd.(*redis.StringCmd).Int()
-		if err == nil {
-			resMap[convs[i].PeerId] = uint32(val)
-		}
+	items := make([]item, 0, len(convs))
+
+	for _, c := range convs {
+		key := u.name(
+			int(userId),
+			c.SessionType,
+			int(c.PeerId),
+		)
+		cmd := pipe.Get(ctx, key)
+		items = append(items, item{
+			peerId: c.PeerId,
+			cmd:    cmd,
+		})
 	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return resMap
+	}
+
+	for _, it := range items {
+		val, err := it.cmd.Int()
+		if err == nil {
+			resMap[it.peerId] = uint32(val)
+		}
+		// redis.Nil => 未读为 0，忽略
+	}
+
 	return resMap
 }
