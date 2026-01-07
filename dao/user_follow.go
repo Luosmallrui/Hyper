@@ -82,3 +82,31 @@ func (d *UserFollowDAO) GetFollowingCount(ctx context.Context, userID uint64) (i
 		Count(&count).Error
 	return count, err
 }
+
+// GetFollowingList 获取用户关注的用户列表（按关注时间倒序）
+func (d *UserFollowDAO) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
+	var follows []map[string]interface{}
+	var total int64
+
+	// 查询关注关系总数
+	err := d.Db.WithContext(ctx).
+		Model(&models.UserFollow{}).
+		Where("follower_id = ? AND status = 1", userID).
+		Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 联接用户表获取用户信息，按创建时间倒序
+	err = d.Db.WithContext(ctx).
+		Table("user_follow uf").
+		Select("u.id as user_id, u.nickname").
+		Joins("LEFT JOIN users u ON uf.followee_id = u.id").
+		Where("uf.follower_id = ? AND uf.status = 1", userID).
+		Order("uf.created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Scan(&follows).Error
+
+	return follows, total, err
+}
