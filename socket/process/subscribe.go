@@ -109,6 +109,7 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 			go func(imMsg types.Message) {
 				m.updateUserCache(ctx, &imMsg)
 				m.dispatchMessage(&imMsg)
+				m.pushToUser(ctx, int(immsg.SenderId), &imMsg)
 			}(imMsg)
 		}
 
@@ -129,6 +130,41 @@ func (RouterKey) UserClients(sid, channel string, uid int) string {
 
 func (RouterKey) ClientMap(sid, channel string) string {
 	return fmt.Sprintf("ws:%s:%s:client", sid, channel)
+}
+
+func (m *MessageSubscribe) pushToUser(ctx context.Context, uid int, msg *types.Message) {
+	key := RouterKey{}
+	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+	if err != nil || len(sids) == 0 {
+		return
+	}
+
+	payload, _ := json.Marshal(msg)
+
+	for _, sid := range sids {
+		userKey := key.UserClients(sid, msg.Channel, uid)
+		cids, _ := m.Redis.SMembers(ctx, userKey).Result()
+
+		if len(cids) == 0 {
+			m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+			continue
+		}
+
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			continue
+		}
+
+		for _, cidStr := range cids {
+			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+			cli.PushToClient(ctx, &push.PushRequest{
+				Cid:     cid,
+				Uid:     int32(uid),
+				Payload: string(payload),
+				Event:   "chat",
+			})
+		}
+	}
 }
 
 func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {

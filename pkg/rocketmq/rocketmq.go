@@ -18,7 +18,8 @@ type Rocketmq struct {
 }
 
 func init() {
-	initRocketMQLogger()
+	rlog.SetLogLevel("info")
+	rlog.SetOutputPath("/root/logs/rocketmq.log")
 }
 
 func InitProducer() rocketmq.Producer {
@@ -63,9 +64,4 @@ func (p *Rocketmq) SendMsg(topic string, body []byte) error {
 	}
 	fmt.Printf("发送成功: %s \n", res.MsgID)
 	return nil
-}
-
-func initRocketMQLogger() {
-	rlog.SetLogLevel("info")
-	rlog.SetOutputPath("/root/logs/rocketmq.log")
 }
