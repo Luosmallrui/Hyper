@@ -52,9 +52,9 @@ type Message struct {
 	MsgType     int                    `json:"msg_type"` // 1-文本, 2-图片等
 	Content     string                 `json:"content"`  // 消息内容
 	ParentMsgID int64                  `json:"parent_msg_id,string"`
-	Timestamp   int64                  `json:"timestamp"`     // 服务端生成的时间戳
-	Status      int                    `json:"status"`        // 0-发送中, 1-成功, 2-已读, 3-撤回
-	Ext         map[string]interface{} `json:"ext,omitempty"` // 扩展字段 (JSON字符串)
+	Timestamp   int64                  `json:"timestamp"` // 服务端生成的时间戳
+	Status      int                    `json:"status"`    // 0-发送中, 1-成功, 2-已读, 3-撤回
+	Ext         map[string]interface{} `json:"ext"`       // 扩展字段 (JSON字符串)
 	Channel     string                 `json:"channel"`
 }
 
