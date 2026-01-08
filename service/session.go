@@ -164,7 +164,7 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 	userInfoMap := s.UserService.BatchGetUserInfo(ctx, peerIds)
 
 	// 4. 批量获取 Redis 中的未读数和最后一条消息
-	// 注意：这里推荐在 Service 内部实现一个 Pipeline 批量获取方法
+	// 注意：这里推荐在 MessageService 内部实现一个 Pipeline 批量获取方法
 	unreadMap := s.UnreadStorage.BatchGet(ctx, userId, convs)
 	lastMsgMap := s.MessageStorage.BatchGet(ctx, userId, convs)
 

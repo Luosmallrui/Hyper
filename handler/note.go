@@ -118,7 +118,7 @@ func (n *Note) CreateNote(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
 	}
 
-	// 调用 Service 层创建笔记
+	// 调用 MessageService 层创建笔记
 	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
@@ -162,7 +162,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	offset := (req.Page - 1) * req.PageSize
 	// fmt.Printf("[GetMyNotes] 查询参数 - Status: %d, Page: %d, PageSize: %d, Offset: %d\n", req.Status, req.Page, req.PageSize, offset)
 
-	// 4. 调用 Service 层查询
+	// 4. 调用 MessageService 层查询
 	notes, err := n.NoteService.GetUserNotes(c.Request.Context(), uint64(userID), req.Status, limit, offset)
 	if err != nil {
 		// fmt.Printf("[GetMyNotes] 查询错误: %v\n", err)

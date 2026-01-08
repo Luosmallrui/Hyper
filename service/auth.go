@@ -26,12 +26,26 @@ type IUserService interface {
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
 	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
+	GetUserAvatar(ctx context.Context, uid int64) (string, string, error)
 }
 
 type UserService struct {
 	UsersRepo *dao.Users
 	Redis     *redis.Client
 	DB        *gorm.DB
+}
+
+func (s *UserService) GetUserAvatar(ctx context.Context, uid int64) (string, string, error) {
+	var user types.UserProfile
+	err := s.DB.WithContext(ctx).
+		Table("users").
+		Select("avatar", "nickname").
+		Where("id = ?", uid).
+		Take(&user).Error
+	if err != nil {
+		return "", "", err
+	}
+	return user.Avatar, user.Nickname, nil
 }
 
 func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error {
@@ -218,7 +232,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 			// 写入缓存供下次使用
 			data, _ := json.Marshal(info)
-			pipe.Set(ctx, fmt.Sprintf("user:info:%d", user.Id), data, 24*time.Hour)
+			pipe.Set(ctx, fmt.Sprintf("user:info:%d", user.Id), data, 1*time.Hour)
 		}
 		_, _ = pipe.Exec(ctx)
 	}

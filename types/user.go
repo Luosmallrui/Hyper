@@ -23,3 +23,8 @@ type UpdateUserReq struct {
 type UploadAvatarRes struct {
 	Url string `json:"url"`
 }
+
+type UserProfile struct {
+	Avatar   string `json:"avatar"`
+	Nickname string `json:"nickname"`
+}
