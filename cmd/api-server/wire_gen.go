@@ -81,9 +81,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 		DB:         db,
 	}
-	messageHandler := &handler.Message{
-		Service: messageService,
-		Config:  cfg,
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	message := &handler.Message{
+		Service:       messageService,
+		UnreadStorage: unreadStorage,
+		Config:        cfg,
 	}
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
@@ -105,7 +107,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		OssService:  iOssService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
-	unreadStorage := cache.NewUnreadStorage(redisClient)
 	sessionService := &service.SessionService{
 		DB:             db,
 		MessageStorage: messageStorage,
@@ -119,7 +120,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
-		Message: messageHandler,
+		Message: message,
 		Note:    note,
 		Follow:  follow,
 		User:    user,
