@@ -6,6 +6,7 @@ import (
 	"Hyper/pkg/server"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
+
 	"Hyper/service"
 	"Hyper/types"
 	"context"
@@ -208,11 +209,20 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 		Timestamp: msg.Timestamp,
 	}
 
-	m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)
-	m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary)
+	fmt.Printf("%+v\n 5555", summary)
 
+	err := m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)
+	if err != nil {
+		log.Printf("failed to update user cache: %v", err)
+	}
+	log.Printf("update user cache")
+	err = m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary)
+	if err != nil {
+		log.Printf("failed to update user cache: %v", err)
+	}
+	log.Printf("update user cach1e1")
 	// 3. 执行管道
-	_, err := pipe.Exec(ctx)
+	_, err = pipe.Exec(ctx)
 	if err != nil {
 		log.Printf("[Cache] 更新用户 %d 的缓存失败: %v", receiverID, err)
 	}

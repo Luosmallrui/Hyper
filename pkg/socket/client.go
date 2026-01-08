@@ -263,6 +263,7 @@ func (c *Client) hookClose(code int, text string) error {
 func (c *Client) handleMessage(data []byte) {
 
 	event, err := c.validate(data)
+	fmt.Println("event: ", string(data), 55)
 	if err != nil {
 		log.Printf("[ERROR] validate err: %s \n", err.Error())
 		return

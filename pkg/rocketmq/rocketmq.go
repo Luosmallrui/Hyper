@@ -9,11 +9,16 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
+	"github.com/apache/rocketmq-client-go/v2/rlog"
 )
 
 type Rocketmq struct {
 	RocketmqProducer rocketmq.Producer
 	RocketmqConsumer rocketmq.PushConsumer
+}
+
+func init() {
+	initRocketMQLogger()
 }
 
 func InitProducer() rocketmq.Producer {
@@ -58,4 +63,9 @@ func (p *Rocketmq) SendMsg(topic string, body []byte) error {
 	}
 	fmt.Printf("发送成功: %s \n", res.MsgID)
 	return nil
+}
+
+func initRocketMQLogger() {
+	rlog.SetLogLevel("info")
+	rlog.SetOutputPath("/root/logs/rocketmq.log")
 }
