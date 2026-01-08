@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/dao/cache"
 	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
@@ -12,39 +13,57 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type MessageHandler struct {
-	Service service.IMessageService
-	Config  *config.Config
+type Message struct {
+	Service       service.IMessageService
+	UnreadStorage *cache.UnreadStorage
+	Config        *config.Config
 }
 
-func (h *MessageHandler) RegisterRouter(r gin.IRouter) {
-	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
+func (m *Message) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(m.Config.Jwt.Secret))
 	message := r.Group("/v1/message")
 	message.Use(authorize)
-	message.POST("/send", context.Wrap(h.SendMessage))
-	message.GET("/list", context.Wrap(h.ListMessages))
+	message.POST("/send", context.Wrap(m.SendMessage))
+	message.GET("/list", context.Wrap(m.ListMessages))
+	message.POST("/clear-unread", context.Wrap(m.ClearUnreadMessage)) // 清除会话未读数
+}
+func (m *Message) ClearUnreadMessage(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	in := &types.TalkSessionClearUnreadNumRequest{}
+	if err := c.ShouldBind(in); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	m.UnreadStorage.Reset(c.Request.Context(), int(userId), int(in.SessionType), int(in.PeerId))
+	return nil
 }
 
-// POST /api/message/send
-func (h *MessageHandler) SendMessage(c *gin.Context) error {
+func (m *Message) SendMessage(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
 	var msg types.Message
 	if err := c.ShouldBindJSON(&msg); err != nil {
 		return response.NewError(500, err.Error())
 	}
+	msg.SenderID = userId
 
-	if err := h.Service.SendMessage(&msg); err != nil {
+	if err := m.Service.SendMessage(&msg); err != nil {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, msg)
 	return nil
 }
 
-func (h *MessageHandler) GetRecentMessages(c *gin.Context) error {
+func (m *Message) GetRecentMessages(c *gin.Context) error {
 	targetID := c.Query("target_id")
 	limitStr := c.DefaultQuery("limit", "20")
 	limit, _ := strconv.Atoi(limitStr)
 
-	msgs, err := h.Service.GetRecentMessages(targetID, limit)
+	msgs, err := m.Service.GetRecentMessages(targetID, limit)
 	if err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -52,7 +71,7 @@ func (h *MessageHandler) GetRecentMessages(c *gin.Context) error {
 	return nil
 }
 
-func (h *MessageHandler) ListMessages(c *gin.Context) error {
+func (m *Message) ListMessages(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
 	if err != nil {
 		return response.NewError(401, "未登录")
@@ -66,13 +85,7 @@ func (h *MessageHandler) ListMessages(c *gin.Context) error {
 		return response.NewError(400, "peer_id 不能为空")
 	}
 
-	list, err := h.Service.ListMessages(
-		c.Request.Context(),
-		uint64(userId),
-		peerId,
-		cursor,
-		limit,
-	)
+	list, err := m.Service.ListMessages(c.Request.Context(), uint64(userId), peerId, cursor, limit)
 	if err != nil {
 		return response.NewError(500, "拉取消息失败")
 	}

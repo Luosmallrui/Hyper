@@ -96,7 +96,11 @@ func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
 }
 func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Timestamp = time.Now().UnixMilli()
-	msg.Status = 0 // 发送中
+	msg.Status = 0
+
+	if msg.Ext == nil {
+		msg.Ext = make(map[string]interface{})
+	}
 
 	//cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
 	//isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()

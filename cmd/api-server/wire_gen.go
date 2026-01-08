@@ -81,7 +81,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 		DB:         db,
 	}
-	messageHandler := &handler.MessageHandler{
+	messageHandler := &handler.Message{
 		Service: messageService,
 		Config:  cfg,
 	}
