@@ -25,6 +25,10 @@ func (s *PushServiceImpl) PushToClient(ctx context.Context, req *push.PushReques
 		return &push.PushResponse{Success: false, Msg: "client offline"}, nil
 	}
 
+	if req.Cid == client.Cid() {
+		return &push.PushResponse{Success: true}, nil
+	}
+
 	var m struct {
 		Id          int64                  `json:"msg_id,string"`
 		ClientMsgID string                 `json:"client_msg_id"`
