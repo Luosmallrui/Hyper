@@ -31,6 +31,7 @@ func (ch *ChatChannel) Conn(c *gin.Context) error {
 		return err
 	}
 
+	log.Printf("Connected WebSocket connection with token: %s", token)
 	return ch.NewClient(int(userID), conn)
 }
 
