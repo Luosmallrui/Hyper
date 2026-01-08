@@ -99,10 +99,11 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 			if err := m.MessageService.SaveMessage(immsg); err != nil {
 				log.Printf("[MQ] 消息入库失败: %v", err)
 				// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
-				return consumer.SuspendCurrentQueueAMoment, err
+				//return consumer.SuspendCurrentQueueAMoment, err
 			}
 			if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
-				return consumer.SuspendCurrentQueueAMoment, err
+				log.Printf("update session error: %v", err)
+				//return consumer.SuspendCurrentQueueAMoment, err
 			}
 			go func(imMsg types.Message) {
 				m.updateUserCache(ctx, &imMsg)
@@ -201,6 +202,7 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 
 	// --- B. 更新双方的会话列表摘要 (Last Message) ---
 	// 无论是发送方还是接收方，会话列表展示的最后一条消息必须是最新的
+	fmt.Println(msg.Content, 2131242141)
 	summary := &cache.LastCacheMessage{
 		Content:   truncateContent(msg.Content, 50), // 截断内容防止浪费内存
 		Timestamp: msg.Timestamp,

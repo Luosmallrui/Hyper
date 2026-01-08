@@ -38,6 +38,7 @@ func (m *Message) ClearUnreadMessage(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	m.UnreadStorage.Reset(c.Request.Context(), int(userId), int(in.SessionType), int(in.PeerId))
+	response.Success(c, "ok")
 	return nil
 }
 
