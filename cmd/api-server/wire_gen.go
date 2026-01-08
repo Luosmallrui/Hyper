@@ -9,6 +9,7 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/dao"
+	"Hyper/dao/cache"
 	"Hyper/handler"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
@@ -22,8 +23,11 @@ import (
 func InitServer(cfg *config.Config) *server.AppProvider {
 	db := database.NewDB(cfg)
 	users := dao.NewUsers(db)
+	redisClient := client.NewRedisClient(cfg)
 	userService := &service.UserService{
 		UsersRepo: users,
+		Redis:     redisClient,
+		DB:        db,
 	}
 	weChatService := &service.WeChatService{
 		Config: cfg,
@@ -64,7 +68,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapService := &service.MapService{
 		MapDao: mapDao,
 	}
-	redisClient := client.NewRedisClient(cfg)
 	handlerMap := &handler.Map{
 		MapService: mapService,
 		OssService: iOssService,
@@ -76,11 +79,15 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MessageDao: messageDAO,
 		MqProducer: producer,
 		Redis:      redisClient,
+		DB:         db,
 	}
-	messageHandler := &handler.MessageHandler{
-		Service: messageService,
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	message := &handler.Message{
+		MessageService: messageService,
+		UnreadStorage:  unreadStorage,
+		UserService:    userService,
+		Config:         cfg,
 	}
-	noteDAO := dao.NewNoteDAO(db)
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
 	}
@@ -100,13 +107,25 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService: userService,
 		OssService:  iOssService,
 	}
+	messageStorage := cache.NewMessageStorage(redisClient)
+	sessionService := &service.SessionService{
+		DB:             db,
+		MessageStorage: messageStorage,
+		UnreadStorage:  unreadStorage,
+		UserService:    userService,
+	}
+	session := &handler.Session{
+		SessionService: sessionService,
+		Config:         cfg,
+	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
-		Message: messageHandler,
+		Message: message,
 		Note:    note,
 		Follow:  follow,
 		User:    user,
+		Session: session,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
