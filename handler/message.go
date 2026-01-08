@@ -14,9 +14,10 @@ import (
 )
 
 type Message struct {
-	Service       service.IMessageService
-	UnreadStorage *cache.UnreadStorage
-	Config        *config.Config
+	MessageService service.IMessageService
+	UnreadStorage  *cache.UnreadStorage
+	UserService    service.IUserService
+	Config         *config.Config
 }
 
 func (m *Message) RegisterRouter(r gin.IRouter) {
@@ -51,7 +52,7 @@ func (m *Message) SendMessage(c *gin.Context) error {
 	}
 	msg.SenderID = userId
 
-	if err := m.Service.SendMessage(&msg); err != nil {
+	if err := m.MessageService.SendMessage(&msg); err != nil {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, msg)
@@ -63,7 +64,7 @@ func (m *Message) GetRecentMessages(c *gin.Context) error {
 	limitStr := c.DefaultQuery("limit", "20")
 	limit, _ := strconv.Atoi(limitStr)
 
-	msgs, err := m.Service.GetRecentMessages(targetID, limit)
+	msgs, err := m.MessageService.GetRecentMessages(targetID, limit)
 	if err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -85,13 +86,17 @@ func (m *Message) ListMessages(c *gin.Context) error {
 		return response.NewError(400, "peer_id 不能为空")
 	}
 
-	list, err := m.Service.ListMessages(c.Request.Context(), uint64(userId), peerId, cursor, limit)
+	list, err := m.MessageService.ListMessages(c.Request.Context(), uint64(userId), peerId, cursor, limit)
 	if err != nil {
 		return response.NewError(500, "拉取消息失败")
 	}
+	userInfo := m.UserService.BatchGetUserInfo(c.Request.Context(), []uint64{peerId, uint64(userId)})
 
 	response.Success(c, gin.H{
-		"list": list,
+		"avatar":      userInfo[peerId].Avatar,
+		"nickname":    userInfo[peerId].Nickname,
+		"self_avatar": userInfo[uint64(userId)].Avatar,
+		"list":        list,
 		"next_cursor": func() int64 {
 			if len(list) > 0 {
 				return list[0].Time // 最老一条

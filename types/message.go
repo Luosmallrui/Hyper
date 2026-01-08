@@ -81,6 +81,7 @@ type ListMessageReq struct {
 	MsgType  int                    `json:"msg_type"`
 	Ext      map[string]interface{} `json:"ext"`
 	Time     int64                  `json:"time"`
+	IsSelf   bool                   `json:"is_self"`
 }
 
 type TalkSessionClearUnreadNumRequest struct {

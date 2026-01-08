@@ -75,6 +75,7 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		if ext == nil {
 			ext = make(map[string]interface{})
 		}
+
 		item := types.ListMessageReq{
 			Id:       uint64(m.Id),
 			SenderId: uint64(m.SenderId),
@@ -82,6 +83,10 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 			MsgType:  m.MsgType,
 			Ext:      ext,
 			Time:     m.CreatedAt,
+			IsSelf:   false,
+		}
+		if m.SenderId == int64(userId) {
+			item.IsSelf = true
 		}
 
 		result = append(result, item)

@@ -83,9 +83,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	unreadStorage := cache.NewUnreadStorage(redisClient)
 	message := &handler.Message{
-		Service:       messageService,
-		UnreadStorage: unreadStorage,
-		Config:        cfg,
+		MessageService: messageService,
+		UnreadStorage:  unreadStorage,
+		UserService:    userService,
+		Config:         cfg,
 	}
 	noteService := &service.NoteService{
 		NoteDAO: noteDAO,
