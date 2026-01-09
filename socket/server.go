@@ -1,15 +1,14 @@
 package socket
 
 import (
+	"Hyper/pkg/log"
 	"Hyper/pkg/server"
 	"Hyper/socket/process"
 
-	//"Hyper/pkg/email"
 	"Hyper/pkg/socket"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,11 +16,11 @@ import (
 	"time"
 
 	"Hyper/config"
-	//"Hyper/pkg/core"
 	"Hyper/socket/handler"
 
 	"github.com/gin-gonic/gin"
 	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -62,10 +61,9 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 	time.AfterFunc(3*time.Second, func() {
 		app.Coroutine.Start(eg, groupCtx)
 	})
-
-	log.Printf("Server ID   :%s", server.GetServerId())
-	log.Printf("Server Pid  :%d", os.Getpid())
-	log.Printf("Websocket Listen Port :%d", app.Config.Server.Websocket)
+	log.L.Info("server_id", zap.String("server_id", server.GetServerId()))
+	log.L.Info("server Pid", zap.Any("server_pid", os.Getpid()))
+	log.L.Info("server Version", zap.Any("Websocket Listen Port ", app.Config.Server.Websocket))
 
 	return start(c, eg, groupCtx, app)
 }
@@ -87,14 +85,14 @@ func start(c chan os.Signal, eg *errgroup.Group, ctx context.Context, app *AppPr
 
 	eg.Go(func() (err error) {
 		defer func() {
-			log.Println("Shutting down serv...")
+			log.L.Info("Shutting down component...")
 
 			// 等待中断信号以优雅地关闭服务器（设置 5 秒的超时时间）
 			timeCtx, timeCancel := context.WithTimeout(context.TODO(), 3*time.Second)
 			defer timeCancel()
 
 			if err := serv.Shutdown(timeCtx); err != nil {
-				log.Printf("Websocket Shutdown Err: %s \n", err)
+				log.L.Error("Server Shutdown Failed", zap.Error(err))
 			}
 
 			err = ErrServerClosed
@@ -109,10 +107,10 @@ func start(c chan os.Signal, eg *errgroup.Group, ctx context.Context, app *AppPr
 	})
 
 	if err := eg.Wait(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ErrServerClosed) {
-		log.Fatalf("Server forced to shutdown: %s", err)
+		log.L.Error("Server forced to shutdown", zap.Error(err))
 	}
 
-	log.Println("Server exiting")
+	log.L.Info("Server exiting")
 
 	return nil
 }

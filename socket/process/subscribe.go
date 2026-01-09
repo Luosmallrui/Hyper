@@ -136,16 +136,23 @@ func (RouterKey) ClientMap(sid, channel string) string {
 
 func (m *MessageSubscribe) pushToUser(ctx context.Context, uid int, msg *types.Message) {
 	key := RouterKey{}
+
+	log.L.Info("push to self other device", zap.Any("msg", msg),
+		zap.String("user_id", strconv.Itoa(uid)),
+	)
 	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
 	if err != nil || len(sids) == 0 {
 		return
 	}
+	log.L.Info("server_ids", zap.Any("sids", sids))
 
 	payload, _ := json.Marshal(msg)
 
 	for _, sid := range sids {
 		userKey := key.UserClients(sid, msg.Channel, uid)
 		cids, _ := m.Redis.SMembers(ctx, userKey).Result()
+		log.L.Info("client_ids", zap.Any("cids", cids),
+			zap.String("user_id", strconv.Itoa(uid)), zap.String("server_id", sid))
 
 		if len(cids) == 0 {
 			m.Redis.HDel(ctx, key.UserLocation(uid), sid)

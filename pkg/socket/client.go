@@ -61,6 +61,7 @@ type ClientResponse struct {
 	Event   string `json:"event"`             // 事件名
 	Content any    `json:"payload,omitempty"` // 事件内容
 	Retry   int    `json:"-"`                 // 重试次数（0 默认不重试）
+	IsSelf  bool   `json:"is_self"`
 }
 
 // NewClient 初始化客户端信息

@@ -2,13 +2,15 @@ package handler
 
 import (
 	"Hyper/pkg/context"
+	"Hyper/pkg/log"
 	"Hyper/pkg/socket"
 	"Hyper/pkg/socket/adapter"
 	"Hyper/service"
 	"Hyper/socket/handler/event"
-	"log"
+	//"log"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type ChatChannel struct {
@@ -19,19 +21,21 @@ type ChatChannel struct {
 // Conn 初始化连接
 func (ch *ChatChannel) Conn(c *gin.Context) error {
 	token := c.Request.Header.Get("Authorization")
-	log.Printf("Attempting WebSocket connection with token: %s", token)
+
+	log.L.Info("Attempting WebSocket connection with token ", zap.String("token", token))
 	conn, err := adapter.NewWsAdapter(c.Writer, c.Request)
 	if err != nil {
-		log.Printf("websocket connect error: %s", err.Error())
+		log.L.Error("WebSocket connection error", zap.Error(err))
 		return err
 	}
 	userID, err := context.GetUserID(c)
 	if err != nil {
-		log.Printf("websocket connect error: %s", err.Error())
+		log.L.Error("WebSocket connection error", zap.Error(err))
 		return err
 	}
+	log.L.Info("Connected WebSocket connection with token",
+		zap.String("token", token), zap.Any("user_id", userID))
 
-	log.Printf("Connected WebSocket connection with token: %s", token)
 	return ch.NewClient(int(userID), conn)
 }
 

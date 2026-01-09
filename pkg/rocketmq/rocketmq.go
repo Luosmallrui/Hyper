@@ -1,15 +1,15 @@
 package rocketmq
 
 import (
+	"Hyper/pkg/log"
 	"context"
-	"fmt"
-	"log"
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
 	"github.com/apache/rocketmq-client-go/v2/rlog"
+	"go.uber.org/zap"
 )
 
 type Rocketmq struct {
@@ -35,8 +35,8 @@ func InitProducer() rocketmq.Producer {
 	if err = p.Start(); err != nil {
 		return nil
 	}
+	log.L.Info("init producer success")
 
-	log.Println("RocketMQ Producer 启动成功")
 	return p
 }
 func InitConsumer() rocketmq.PushConsumer {
@@ -62,6 +62,6 @@ func (p *Rocketmq) SendMsg(topic string, body []byte) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("发送成功: %s \n", res.MsgID)
+	log.L.Info("seed message success", zap.Any("msg", res.MsgID))
 	return nil
 }

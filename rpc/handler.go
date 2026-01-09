@@ -1,14 +1,16 @@
 package handler
 
 import (
+	"Hyper/pkg/log"
 	"Hyper/pkg/socket"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/types"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
+
+	"go.uber.org/zap"
 )
 
 // PushServiceImpl implements the last service interface defined in the IDL.
@@ -24,17 +26,18 @@ func (s *PushServiceImpl) PushToClient(
 	// trace 前缀：一条消息贯穿全链路
 	trace := fmt.Sprintf(
 		"[PUSH msg=%s uid=%d cid=%d event=%s]",
-		req.Payload, // 如果太长，下面会优化
+		req.Payload, //q 如果太长，下面会优化
 		req.Uid,
 		req.Cid,
 		req.Event,
 	)
-
-	log.Printf("%s enter PushToClient", trace)
+	log.L.Info("enter PushToClient", zap.Any("trace", trace))
+	//
+	//log.Printf("%s enter PushToClient", trace)
 
 	ch := socket.Session.Chat
 	if ch == nil {
-		log.Printf("%s chat channel not initialized", trace)
+		log.L.Error("ch is nil")
 		return &push.PushResponse{
 			Success: false,
 			Msg:     "chat channel not initialized",
@@ -43,7 +46,7 @@ func (s *PushServiceImpl) PushToClient(
 
 	client, ok := ch.Client(req.Cid)
 	if !ok {
-		log.Printf("%s client offline", trace)
+		log.L.Error("client  not found")
 		return &push.PushResponse{
 			Success: false,
 			Msg:     "client offline",
@@ -67,21 +70,16 @@ func (s *PushServiceImpl) PushToClient(
 	}
 
 	if err := json.Unmarshal([]byte(req.Payload), &m); err != nil {
-		log.Printf("%s invalid payload err=%v payload=%s", trace, err, req.Payload)
+		log.L.Error("unmarshal payload", zap.Error(err), zap.Any("payload", req.Payload))
 		return &push.PushResponse{
 			Success: false,
 			Msg:     "invalid payload",
 		}, err
 	}
 
-	log.Printf(
-		"%s parsed payload sender=%d target=%d msg_type=%d",
-		trace, m.SenderID, m.TargetID, m.MsgType,
-	)
-
 	extBytes, err := json.Marshal(m.Ext)
 	if err != nil {
-		log.Printf("%s ext marshal failed err=%v", trace, err)
+		log.L.Error("marshal ext", zap.Error(err), zap.Any("ext", m.Ext))
 		extBytes = []byte("{}")
 	}
 
@@ -103,25 +101,24 @@ func (s *PushServiceImpl) PushToClient(
 		dto.ParentMsgID = strconv.FormatInt(m.ParentMsgID, 10)
 	}
 
-	// 推送到 WebSocket
-	if err := client.Write(&socket.ClientResponse{
+	res := &socket.ClientResponse{
 		IsAck:   ok,
 		Event:   req.Event,
 		Content: dto,
-	}); err != nil {
+		IsSelf:  false,
+	}
 
-		log.Printf(
-			"%s write to client failed err=%v",
-			trace, err,
-		)
+	if m.TargetID == int64(client.Uid()) {
+		res.IsSelf = true
+	}
+	if err := client.Write(res); err != nil {
+
+		log.L.Error("write response", zap.Error(err))
 
 		return &push.PushResponse{
 			Success: false,
 			Msg:     err.Error(),
 		}, nil
 	}
-
-	log.Printf("%s push success", trace)
-
 	return &push.PushResponse{Success: true}, nil
 }
