@@ -13,8 +13,9 @@ import (
 
 // NewRouter 初始化配置路由
 func NewRouter(conf *config.Config, handle *handler.Handler) *gin.Engine {
-
-	router := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(middleware.GinZap(), gin.Recovery())
 	router.Use(gin.RecoveryWithWriter(gin.DefaultWriter, func(c *gin.Context, err any) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{"code": 500, "msg": "系统错误，请重试!!!"})
 	}))
