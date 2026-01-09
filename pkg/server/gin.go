@@ -80,6 +80,8 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Note.RegisterRouter(api)
 	h.Session.RegisterRouter(api)
 	h.Follow.RegisterRouter(api)
+	h.Group.RegisterRouter(api)
+	h.GroupMember.RegisterRouter(api)
 	return r
 }
 
