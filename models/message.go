@@ -17,9 +17,25 @@ type Message struct {
 	Ext         string `json:"ext,omitempty"` // JSON 字符串 // 扩展字段
 }
 
-// TableName 指定表名
-func (m Message) TableName() string {
-	return "im_message"
+// ImGroupMessage：群聊消息（落库到 im_group_messages）
+type ImGroupMessage struct {
+	Id          int64     `gorm:"primaryKey;column:id" json:"msg_id,string"`
+	SessionHash int64     `gorm:"index:idx_session_time;column:session_hash" json:"session_hash"` // 内部索引
+	SessionId   string    `gorm:"column:session_id" json:"session_id"`
+	SenderId    int64     `gorm:"column:sender_id" json:"sender_id,string"`
+	TargetId    int64     `gorm:"column:target_id" json:"target_id,string"` // 这里 TargetId = groupId
+	MsgType     int       `gorm:"column:msg_type;default:1" json:"msg_type"`
+	Content     string    `gorm:"column:content" json:"content"`
+	ParentMsgId int64     `gorm:"column:parent_msg_id;default:0" json:"parent_msg_id,string"`
+	Status      int       `gorm:"column:status;default:1" json:"status"`
+	Ext         string    `gorm:"type:json;column:ext" json:"ext,omitempty"`
+	CreatedAt   int64     `gorm:"index:idx_session_time;column:created_at" json:"timestamp"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"-"`
+}
+
+// TableName 指定数据库表名
+func (ImGroupMessage) TableName() string {
+	return "im_group_messages"
 }
 
 // ImSingleMessage 单聊消息结构体

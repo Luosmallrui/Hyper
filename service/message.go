@@ -26,9 +26,9 @@ type MessageService struct {
 var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
-	SaveMessage(msg *models.ImSingleMessage) error
+	SaveSingleMessage(msg *models.ImSingleMessage) error
+	SaveGroupMessage(msg *models.ImGroupMessage) error
 	SendMessage(msg *types.Message) error
-	SendGroupMessage(msg *models.Message) error
 	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
 	PullOfflineMessages(userID string) ([]models.Message, error)
 	SendSystemMessage(targetID string, content string) error
@@ -91,35 +91,51 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 	return result, nil
 }
 
-func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
-	// 执行插入
-	return s.MessageDao.Save(msg)
+func (s *MessageService) SaveSingleMessage(msg *models.ImSingleMessage) error {
+	return s.MessageDao.SaveSingle(msg)
+}
+func (s *MessageService) SaveGroupMessage(msg *models.ImGroupMessage) error {
+	return s.MessageDao.SaveGroup(msg)
 }
 func (s *MessageService) SendMessage(msg *types.Message) error {
+	// 1) 服务端统一补字段：时间、状态、雪花ID、Ext兜底
 	msg.Timestamp = time.Now().UnixMilli()
-	msg.Status = 0
+	msg.Status = types.MsgStatusSending
+	msg.Id = snowflake.GenID()
 
 	if msg.Ext == nil {
 		msg.Ext = make(map[string]interface{})
 	}
 
-	//cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
-	//isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
-	//if err != nil {
-	//	return err
-	//}
-	//if !isNew {
-	//	return nil
-	//}
-
-	msg.Id = snowflake.GenID()
-
-	if msg.SessionType == types.SessionTypeSingle { // 假设 1 是单聊
-		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
+	// 2) 生成“会话标识”
+	// SessionID：用于展示/调试，稳定可读
+	// SessionHash：用于数据库索引/分表/查询（通常是整型）
+	switch msg.SessionType {
+	case types.SessionTypeSingle:
+		// 单聊：用双方uid生成稳定会话（A->B 和 B->A 一样）
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
-	}
-	msg.Channel = "chat"
+		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 
+	case types.GroupChatSessionTypeGroup:
+		// 群聊：TargetID 此时就是 groupId
+		msg.SessionID = fmt.Sprintf("g_%d", msg.TargetID)
+		msg.SessionHash = GetGroupSessionHash(msg.TargetID)
+
+	default:
+		return fmt.Errorf("unknown session_type=%d", msg.SessionType)
+	}
+
+	// 3) 频道（给 ws / 路由用）
+	msg.Channel = types.ChannelChat
+
+	// 4) 发 MQ
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	mqMsg := &primitive.Message{
+		Topic: types.ImTopicChat,
 	body, _ := json.Marshal(msg)
 	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
@@ -132,13 +148,29 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		}
 	})
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
+
+	// 5) ShardingKey：保证“同一会话/同一群”的消息尽量落在同一分片上，顺序更稳定
+	switch msg.SessionType {
+	case types.SessionTypeSingle:
+		// 单聊按目标用户分片
+		mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
+	case types.GroupChatSessionTypeGroup:
+		// 群聊按群分片（加 g_ 前缀避免和用户ID字符串混淆）
+		mqMsg.WithShardingKey(fmt.Sprintf("g_%d", msg.TargetID))
+	}
+
+	_, err = s.MqProducer.SendSync(context.Background(), mqMsg)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (s *MessageService) SendGroupMessage(msg *models.Message) error {
-	// 群消息仍然只存一条
-	return nil
-}
+//func (s *MessageService) SendGroupMessage(msg *models.Message) error {
+//	// 群消息仍然只存一条
+//	return nil
+//}
 
 // 查询某个用户/群的最近消息
 func (s *MessageService) GetRecentMessages(targetID string, limit int) ([]models.Message, error) {
@@ -201,5 +233,13 @@ func GetSessionHash(uid1, uid2 int64) int64 {
 	h.Write([]byte(rawID))
 
 	// 3. 返回 int64 类型（强转 uint64 为 int64）
+	return int64(h.Sum64())
+}
+
+func GetGroupSessionHash(groupID int64) int64 {
+	// 给群加个固定前缀，避免和 "私聊" 的 hash 产生碰撞
+	rawID := fmt.Sprintf("g_%d", groupID)
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(rawID))
 	return int64(h.Sum64())
 }
