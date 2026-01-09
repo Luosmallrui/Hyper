@@ -106,7 +106,7 @@ func (s *PushServiceImpl) PushToClient(
 		IsSelf:  false,
 	}
 
-	if m.TargetID == int64(client.Uid()) {
+	if m.SenderID == int64(client.Uid()) {
 		res.IsSelf = true
 	}
 	if err := client.Write(res); err != nil {
