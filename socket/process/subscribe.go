@@ -7,12 +7,12 @@ import (
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 
+	"Hyper/pkg/log"
 	"Hyper/service"
 	"Hyper/types"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -22,6 +22,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/cloudwego/kitex/client"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +45,7 @@ func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error)
 	// 创建新 Client 开启多路复用
 	newCli, err := pushservice.NewClient("im_push_service", client.WithHostPorts(addr))
 	if err != nil {
+		log.L.Error("new push client error", zap.Error(err))
 		return nil, err
 	}
 	clientCache.Store(addr, newCli)
@@ -51,7 +53,7 @@ func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error)
 }
 
 func (m *MessageSubscribe) Setup(ctx context.Context) error {
-	log.Printf("[MQ] 正在启动消息消费者，ServerID: %s", server.GetServerId())
+	log.L.Info("[MQ]MessageSubscribe 正在启动消息消费者", zap.String("serverId", server.GetServerId()))
 	err := m.MqConsumer.Subscribe(types.ImTopicChat, consumer.MessageSelector{}, m.handleMessage)
 	if err != nil {
 		return fmt.Errorf("subscribe topic error: %w", err)
@@ -63,7 +65,7 @@ func (m *MessageSubscribe) Setup(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		log.Println("[MQ] 正在关闭消费者...")
+		log.L.Info("[MQ] 正在关闭消费者...")
 		m.MqConsumer.Shutdown()
 	}()
 
@@ -75,11 +77,11 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 		// 1. 反序列化
 		var imMsg types.Message
 		if err := json.Unmarshal(msg.Body, &imMsg); err != nil {
-			log.Printf("[MQ] 解析消息失败: %v, Body: %s", err, string(msg.Body))
+			log.L.Error("unmarshal msg error", zap.Error(err))
 			continue
 		}
 		b, _ := json.Marshal(imMsg)
-		log.Printf("[MQ] 解析成功: %s", string(b))
+		log.L.Info("[MQ] 解析成功:", zap.Any("imMsg", imMsg), zap.String("body", string(b)))
 		extBytes, _ := json.Marshal(imMsg.Ext)
 
 		if imMsg.SessionType == types.SessionTypeSingle {
@@ -98,12 +100,12 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive
 				UpdatedAt:   time.Now(),
 			}
 			if err := m.MessageService.SaveMessage(immsg); err != nil {
-				log.Printf("[MQ] 消息入库失败: %v", err)
+				log.L.Error("[MQ] 消息入库失败", zap.Error(err))
 				// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
 				//return consumer.SuspendCurrentQueueAMoment, err
 			}
 			if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
-				log.Printf("update session error: %v", err)
+				log.L.Error("update session error", zap.Error(err))
 				//return consumer.SuspendCurrentQueueAMoment, err
 			}
 			go func(imMsg types.Message) {
@@ -173,32 +175,60 @@ func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
 	uid := int(msg.TargetID)
 	msg.Status = types.MsgStatusSuccess
 
+	trace := fmt.Sprintf(
+		"[DISPATCH msg=%d from=%d to=%d]",
+		msg.Id, msg.SenderID, msg.TargetID,
+	)
+
 	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
-	if err != nil || len(sids) == 0 {
-		log.Printf("[MQ] 用户 %d 不在线", uid)
+	if err != nil {
+		log.L.Error("redis HKeys error:", zap.Error(err))
+		return
+	}
+	if len(sids) == 0 {
+		log.L.Error(" user offline", zap.Any("trace", trace))
 		return
 	}
 
+	log.L.Info("user online status",
+		zap.String("trace", trace),
+		zap.Int("server_count", len(sids)),
+		zap.Any("sids", sids), // %v 对应的 slice/map 使用 zap.Any
+	)
+
 	payload, _ := json.Marshal(msg)
 
+	// 2️⃣ 遍历 server
 	for _, sid := range sids {
 		userKey := key.UserClients(sid, msg.Channel, uid)
-		cids, _ := m.Redis.SMembers(ctx, userKey).Result()
+		cids, err := m.Redis.SMembers(ctx, userKey).Result()
+		if err != nil {
+			log.L.Error("redis SMembers error:", zap.Error(err))
+			continue
+		}
 
 		if len(cids) == 0 {
-			// 如果某台机器上已经没客户端了，顺手清理一下 Hash
+			log.L.Error(" user offline", zap.Any("trace", trace))
 			m.Redis.HDel(ctx, key.UserLocation(uid), sid)
 			continue
 		}
 
-		// 获取 RPC Client 并推送
+		log.L.Info("user offline status", zap.String("trace", trace),
+			zap.Int("server_count", len(cids)),
+			zap.Any("cids", cids))
+
 		cli, err := m.getRpcClient(sid)
 		if err != nil {
+			log.L.Error("get rpc client error:", zap.Error(err))
 			continue
 		}
 
+		// 3️⃣ 遍历 client
 		for _, cidStr := range cids {
 			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+			log.L.Info("client offline", zap.Any("trace", trace),
+				zap.Any("sid", sid), zap.Any("cid", cid))
+
 			_, err := cli.PushToClient(ctx, &push.PushRequest{
 				Cid:     cid,
 				Uid:     int32(uid),
@@ -206,13 +236,13 @@ func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
 				Event:   "chat",
 			})
 			if err != nil {
-				log.Printf("[RPC] 目标服务不可达，正在清理脏路由: %s", sid)
+				log.L.Error("push to client error:", zap.Error(err))
 
-				// 立即从该用户的 Location Hash 中移除该 sid
 				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-
-				// 同时清理 RPC 客户端缓存
 				clientCache.Delete(sid)
+			} else {
+				log.L.Info("push success", zap.String("trace", trace))
+
 			}
 		}
 	}
@@ -232,35 +262,32 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 	// 2. 开启管道
 	pipe := m.Redis.Pipeline()
 
-	// --- A. 更新接收方的未读数 ---
 	// Key 设计: unread:{user_id} -> Hash { "1_single_1001": 5 }
 	// 表示：用户 receiverID 收到来自 1001 的单聊消息，未读数为 5
 	m.UnreadStorage.PipeIncr(ctx, pipe, receiverID, types.SessionTypeSingle, senderID)
 
-	// --- B. 更新双方的会话列表摘要 (Last Message) ---
 	// 无论是发送方还是接收方，会话列表展示的最后一条消息必须是最新的
-	fmt.Println(msg.Content, 2131242141)
+
 	summary := &cache.LastCacheMessage{
 		Content:   truncateContent(msg.Content, 50), // 截断内容防止浪费内存
 		Timestamp: msg.Timestamp,
 	}
 
-	fmt.Printf("%+v\n 5555", summary)
+	log.L.Info("update summary", zap.Any("summary", summary))
 
 	err := m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)
 	if err != nil {
-		log.Printf("failed to update user cache: %v", err)
+		log.L.Error("set message error", zap.Error(err))
 	}
-	log.Printf("update user cache")
+	log.L.Info("update user cache")
 	err = m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary)
 	if err != nil {
-		log.Printf("failed to update user cache: %v", err)
+		log.L.Error("set message error", zap.Error(err))
 	}
-	log.Printf("update user cach1e1")
 	// 3. 执行管道
 	_, err = pipe.Exec(ctx)
 	if err != nil {
-		log.Printf("[Cache] 更新用户 %d 的缓存失败: %v", receiverID, err)
+		log.L.Error("pipe exec error", zap.Error(err))
 	}
 }
 
