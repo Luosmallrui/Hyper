@@ -33,7 +33,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config: cfg,
 	}
 	ossConfig := config.ProvideOssConfig(cfg)
-	iOssService := service.NewOssService(ossConfig)
+	image := dao.NewImage(db)
+	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
 	followService := &service.FollowService{
