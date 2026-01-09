@@ -9,6 +9,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
+	"github.com/apache/rocketmq-client-go/v2/rlog"
 )
 
 type Rocketmq struct {
@@ -16,6 +17,10 @@ type Rocketmq struct {
 	RocketmqConsumer rocketmq.PushConsumer
 }
 
+func init() {
+	rlog.SetLogLevel("info")
+	rlog.SetOutputPath("/root/logs/rocketmq.log 你电脑的路径")
+}
 func InitProducer() rocketmq.Producer {
 	p, err := rocketmq.NewProducer(
 		producer.WithNameServer([]string{"8.156.86.220:9876"}),
@@ -37,6 +42,8 @@ func InitConsumer() rocketmq.PushConsumer {
 	c, err := rocketmq.NewPushConsumer(
 		consumer.WithNameServer([]string{"8.156.86.220:9876"}),
 		consumer.WithGroupName("IM_STORAGE_GROUP"),
+		consumer.WithConsumerModel(consumer.BroadCasting), //本地偷懒测试，防止被抢
+
 	)
 	if err != nil {
 		panic(err)

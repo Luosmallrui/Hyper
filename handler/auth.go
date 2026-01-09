@@ -10,6 +10,7 @@ import (
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,25 +58,45 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 // 		totalCollects = 0
 // 	}
 
-// 	rep := types.UserProfileResp{
-// 		Stats: types.UserStats{
-// 			Following: following,
-// 			Follower:  follower,
-// 			Likes:     totalLikes + totalCollects,
-// 		},
-// 	}
-// 	response.Success(c, rep)
-// 	return nil
-// }
+//		rep := types.UserProfileResp{
+//			Stats: types.UserStats{
+//				Following: following,
+//				Follower:  follower,
+//				Likes:     totalLikes + totalCollects,
+//			},
+//		}
+//		response.Success(c, rep)
+//		return nil
+//	}
+//
 
 func (u *Auth) GetToken(c *gin.Context) error {
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XXX")
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		userIDStr = "8" // 不传就默认 8（可选）
+	}
+
+	uid, err := strconv.Atoi(userIDStr)
+	if err != nil || uid <= 0 {
+		return response.NewError(http.StatusBadRequest, "invalid user_id")
+	}
+
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(uid), "XXX")
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, token)
 	return nil
 }
+
+//func (u *Auth) GetToken(c *gin.Context) error {
+//	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 8, "XXX")
+//	if err != nil {
+//		return response.NewError(http.StatusInternalServerError, err.Error())
+//	}
+//	response.Success(c, token)
+//	return nil
+//}
 
 func (u *Auth) Login(c *gin.Context) error {
 	var req types.WxLoginRequest

@@ -5,14 +5,21 @@ import (
 	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/socket/handler"
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"net/http/pprof"
-
-	"github.com/gin-gonic/gin"
+	"runtime"
 )
 
 func init() {
 	gin.SetMode(gin.DebugMode)
+	if runtime.GOOS == "windows" {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			DisableColors: true,
+			FullTimestamp: true,
+		})
+	}
 }
 
 // NewRouter 初始化配置路由

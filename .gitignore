@@ -3,3 +3,6 @@ bin/*
 
 *.exe
 *.out
+# local config
+config.dev.yaml
+
