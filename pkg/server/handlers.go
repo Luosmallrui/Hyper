@@ -12,4 +12,5 @@ type Handlers struct {
 	Follow  *handler.Follow
 	User    *handler.User
 	Session *handler.Session
+	Group   *handler.GroupHandler
 }
