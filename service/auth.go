@@ -265,7 +265,7 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 	//校验
 	cachedCode, err := s.Redis.Get(ctx, "sms:bind"+mobile).Result()
 	if err != nil {
-		errors.New("验证码已过期或着未发送")
+		errors.New("验证码已过期或未发送")
 	}
 	if cachedCode != inputCode {
 		return errors.New("验证码错误")
