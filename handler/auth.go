@@ -30,10 +30,10 @@ type Auth struct {
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
-	auth := r.Group("/")
-	auth.POST("/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
-	auth.POST("/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
-	auth.POST("/auth/refresh", context.Wrap(u.Refresh))
+	auth := r.Group("/v1/auth")
+	auth.POST("/wx-login", context.Wrap(u.Login))                  // 微信登录
+	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.POST("/refresh", context.Wrap(u.Refresh))
 	auth.GET("/token", context.Wrap(u.GetToken))
 	auth.GET("/test1", authorize, context.Wrap(u.test))
 }
