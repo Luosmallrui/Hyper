@@ -6,6 +6,8 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -14,21 +16,41 @@ type PushServiceImpl struct {
 }
 
 // PushToClient implements the PushServiceImpl interface.
-func (s *PushServiceImpl) PushToClient(ctx context.Context, req *push.PushRequest) (*push.PushResponse, error) {
+func (s *PushServiceImpl) PushToClient(
+	ctx context.Context,
+	req *push.PushRequest,
+) (*push.PushResponse, error) {
+
+	// trace 前缀：一条消息贯穿全链路
+	trace := fmt.Sprintf(
+		"[PUSH msg=%s uid=%d cid=%d event=%s]",
+		req.Payload, // 如果太长，下面会优化
+		req.Uid,
+		req.Cid,
+		req.Event,
+	)
+
+	log.Printf("%s enter PushToClient", trace)
+
 	ch := socket.Session.Chat
 	if ch == nil {
-		return &push.PushResponse{Success: false, Msg: "chat channel not initialized"}, nil
+		log.Printf("%s chat channel not initialized", trace)
+		return &push.PushResponse{
+			Success: false,
+			Msg:     "chat channel not initialized",
+		}, nil
 	}
 
 	client, ok := ch.Client(req.Cid)
 	if !ok {
-		return &push.PushResponse{Success: false, Msg: "client offline"}, nil
+		log.Printf("%s client offline", trace)
+		return &push.PushResponse{
+			Success: false,
+			Msg:     "client offline",
+		}, nil
 	}
 
-	if req.Cid == client.Cid() {
-		return &push.PushResponse{Success: true}, nil
-	}
-
+	// 解析 payload
 	var m struct {
 		Id          int64                  `json:"msg_id,string"`
 		ClientMsgID string                 `json:"client_msg_id"`
@@ -45,12 +67,24 @@ func (s *PushServiceImpl) PushToClient(ctx context.Context, req *push.PushReques
 	}
 
 	if err := json.Unmarshal([]byte(req.Payload), &m); err != nil {
-		return &push.PushResponse{Success: false, Msg: "invalid payload"}, err
+		log.Printf("%s invalid payload err=%v payload=%s", trace, err, req.Payload)
+		return &push.PushResponse{
+			Success: false,
+			Msg:     "invalid payload",
+		}, err
 	}
+
+	log.Printf(
+		"%s parsed payload sender=%d target=%d msg_type=%d",
+		trace, m.SenderID, m.TargetID, m.MsgType,
+	)
+
 	extBytes, err := json.Marshal(m.Ext)
 	if err != nil {
-		extBytes = []byte("{}") // 序列化失败的兜底
+		log.Printf("%s ext marshal failed err=%v", trace, err)
+		extBytes = []byte("{}")
 	}
+
 	dto := &types.MessageDTO{
 		MsgID:       strconv.FormatInt(m.Id, 10),
 		ClientMsgID: m.ClientMsgID,
@@ -69,14 +103,25 @@ func (s *PushServiceImpl) PushToClient(ctx context.Context, req *push.PushReques
 		dto.ParentMsgID = strconv.FormatInt(m.ParentMsgID, 10)
 	}
 
-	err = client.Write(&socket.ClientResponse{
+	// 推送到 WebSocket
+	if err := client.Write(&socket.ClientResponse{
 		IsAck:   ok,
 		Event:   req.Event,
 		Content: dto,
-	})
-	if err != nil {
-		return &push.PushResponse{Success: false, Msg: err.Error()}, nil
+	}); err != nil {
+
+		log.Printf(
+			"%s write to client failed err=%v",
+			trace, err,
+		)
+
+		return &push.PushResponse{
+			Success: false,
+			Msg:     err.Error(),
+		}, nil
 	}
+
+	log.Printf("%s push success", trace)
 
 	return &push.PushResponse{Success: true}, nil
 }

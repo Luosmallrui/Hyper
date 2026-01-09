@@ -11,10 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	gin.SetMode(gin.DebugMode)
-}
-
 // NewRouter 初始化配置路由
 func NewRouter(conf *config.Config, handle *handler.Handler) *gin.Engine {
 

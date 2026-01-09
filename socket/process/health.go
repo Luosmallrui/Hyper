@@ -2,9 +2,9 @@ package process
 
 import (
 	"Hyper/dao/cache"
+	"Hyper/pkg/log"
 	"Hyper/pkg/server"
 	"context"
-	"log"
 	"time"
 )
 
@@ -18,7 +18,7 @@ func NewHealthSubscribe(storage *cache.ServerStorage) *HealthSubscribe {
 
 func (s *HealthSubscribe) Setup(ctx context.Context) error {
 
-	log.Println("Start HealthSubscribe")
+	log.L.Info("start health subscribe")
 
 	timer := time.NewTicker(5 * time.Second)
 	defer timer.Stop()
@@ -29,7 +29,7 @@ func (s *HealthSubscribe) Setup(ctx context.Context) error {
 			return nil
 		case <-timer.C:
 			if err := s.storage.Set(ctx, server.GetServerId(), time.Now().Unix()); err != nil {
-				//logger.Std().Error(fmt.Sprintf("Websocket HealthSubscribe Report Err: %s", err.Error()))
+				//log.Std().Error(fmt.Sprintf("Websocket HealthSubscribe Report Err: %s", err.Error()))
 			}
 		}
 	}
