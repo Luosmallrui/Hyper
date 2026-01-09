@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
+	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
 	"fmt"
@@ -34,6 +35,9 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/wx-login", context.Wrap(u.Login))                  // 微信登录
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
+	auth := r.Group("/")
+	auth.POST("/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
+	auth.POST("/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.GET("/token", context.Wrap(u.GetToken))
 
 	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))         //发送验证码
@@ -46,7 +50,43 @@ func (u *Auth) test(c *gin.Context) error {
 	fmt.Println(userId)
 	fmt.Println(err)
 	return nil
+	// auth.GET("/test1", context.Wrap(u.test1))
 }
+
+// func (u *Auth) test1(c *gin.Context) error {
+// 	userid := 1
+// 	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		following = 0
+// 	}
+
+// 	// 获取粉丝数
+// 	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		follower = 0
+// 	}
+
+// 	// 获取用户帖子的总点赞数 + 总收藏数
+// 	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		totalLikes = 0
+// 	}
+
+// 	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(userid))
+// 	if err != nil {
+// 		totalCollects = 0
+// 	}
+
+// 	rep := types.UserProfileResp{
+// 		Stats: types.UserStats{
+// 			Following: following,
+// 			Follower:  follower,
+// 			Likes:     totalLikes + totalCollects,
+// 		},
+// 	}
+// 	response.Success(c, rep)
+// 	return nil
+// }
 
 func (u *Auth) GetToken(c *gin.Context) error {
 
@@ -126,6 +166,42 @@ func (u *Auth) Login(c *gin.Context) error {
 	}
 	log.L.Info("generating refresh token", zap.String("token", refreshToken))
 
+	// 获取关注数
+	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		following = 0
+	}
+
+	// 获取粉丝数
+	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		follower = 0
+	}
+
+	// 获取用户帖子的总点赞数 + 总收藏数
+	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		totalLikes = 0
+	}
+
+	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(user.Id))
+	if err != nil {
+		totalCollects = 0
+	}
+
+	rep := types.UserProfileResp{
+		User: types.UserBasicInfo{
+			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
+			Nickname:    user.Nickname,
+			PhoneNumber: user.Mobile,
+			AvatarURL:   user.Avatar,
+		},
+		Stats: types.UserStats{
+			Following: following,
+			Follower:  follower,
+			Likes:     totalLikes + totalCollects,
+		},
+		Token: token,
 	rep := types.UserToken{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
