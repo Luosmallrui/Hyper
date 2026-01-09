@@ -5,6 +5,7 @@ import (
 	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
+	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
 	"fmt"
@@ -17,9 +18,12 @@ import (
 )
 
 type User struct {
-	Config      *config.Config
-	UserService service.IUserService
-	OssService  service.IOssService
+	Config         *config.Config
+	UserService    service.IUserService
+	OssService     service.IOssService
+	FollowService  service.FollowService
+	LikeService    service.LikeService
+	CollectService service.CollectService
 }
 
 func (u *User) RegisterRouter(r gin.IRouter) {
@@ -28,7 +32,57 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.Use(authorize)
 	g.POST("/info", context.Wrap(u.UpdateUserInfo))
 	g.POST("/avatar", context.Wrap(u.UploadAvatar))
+	g.GET("/info", context.Wrap(u.GetUserInfo))
 
+}
+
+func (u *User) GetUserInfo(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+
+	userInfo, err := u.UserService.GetUserInfo(c.Request.Context(), int(userID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "更新失败: "+err.Error())
+	}
+	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(userInfo.Id))
+	if err != nil {
+		following = 0
+	}
+
+	// 获取粉丝数
+	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(userInfo.Id))
+	if err != nil {
+		follower = 0
+	}
+
+	// 获取用户帖子的总点赞数 + 总收藏数
+	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(userInfo.Id))
+	if err != nil {
+		totalLikes = 0
+	}
+
+	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(userInfo.Id))
+	if err != nil {
+		totalCollects = 0
+	}
+
+	rep := types.UserProfileResp{
+		User: types.UserBasicInfo{
+			UserID:      utils.GenHashID(u.Config.Jwt.Secret, userInfo.Id),
+			Nickname:    userInfo.Nickname,
+			PhoneNumber: userInfo.Mobile,
+			AvatarURL:   userInfo.Avatar,
+		},
+		Stats: types.UserStats{
+			Following: following,
+			Follower:  follower,
+			Likes:     totalLikes + totalCollects,
+		},
+	}
+	response.Success(c, rep)
+	return nil
 }
 func (u *User) UpdateUserInfo(c *gin.Context) error {
 	userID, err := context.GetUserID(c) // 这里的 userID 是 int
