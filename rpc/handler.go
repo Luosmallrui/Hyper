@@ -32,8 +32,6 @@ func (s *PushServiceImpl) PushToClient(
 		req.Event,
 	)
 	log.L.Info("enter PushToClient", zap.Any("trace", trace))
-	//
-	//log.Printf("%s enter PushToClient", trace)
 
 	ch := socket.Session.Chat
 	if ch == nil {

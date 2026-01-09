@@ -7,7 +7,6 @@ import (
 	"Hyper/pkg/socket/adapter"
 	"Hyper/service"
 	"Hyper/socket/handler/event"
-	//"log"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
