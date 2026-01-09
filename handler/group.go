@@ -3,9 +3,9 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/middleware"
-	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/service"
+	"Hyper/types"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -25,13 +25,13 @@ func NewGroupHandler(config *config.Config, groupService *service.GroupService) 
 
 func (h *GroupHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
-	group := r.Group("/api/group")
+	group := r.Group("/group")
 	group.POST("/create", authorize, context.Wrap(h.CreateGroup)) //创建群
 }
 
 // 创建群
 func (h *GroupHandler) CreateGroup(c *gin.Context) error {
-	var req models.CreateGroupRequest
+	var req types.CreateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "请求参数错误: ",
@@ -52,7 +52,7 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) error {
 	}
 
 	//构建响应
-	resp := models.CreateGroupResponse{
+	resp := types.CreateGroupResponse{
 		Id:          group.Id,
 		Name:        group.Name,
 		Avatar:      group.Avatar,
