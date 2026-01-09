@@ -10,5 +10,5 @@ type Handlers struct {
 	Message *handler.MessageHandler
 	WS      *handler.WSHandler
 	Note    *handler.Note
-
+	Group   *handler.GroupHandler
 }

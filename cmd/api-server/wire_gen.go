@@ -21,8 +21,10 @@ import (
 func InitServer(cfg *config.Config) *server.AppProvider {
 	db := database.NewDB(cfg)
 	users := dao.NewUsers(db)
+	redisClient := client.NewRedisClient(cfg)
 	userService := &service.UserService{
 		UsersRepo: users,
+		Redis:     redisClient,
 	}
 	weChatService := &service.WeChatService{
 		Config: cfg,
@@ -39,7 +41,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapService := &service.MapService{
 		MapDao: mapDao,
 	}
-	redisClient := client.NewRedisClient(cfg)
 	handlerMap := &handler.Map{
 		MapService: mapService,
 		OssService: iOssService,
@@ -69,12 +70,20 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		NoteService: noteService,
 		Config:      cfg,
 	}
+	groupService := &service.GroupService{
+		DB: db,
+	}
+	groupHandler := &handler.GroupHandler{
+		Config:       cfg,
+		GroupService: groupService,
+	}
 	handlers := &server.Handlers{
 		Auth:    auth,
 		Map:     handlerMap,
 		Message: messageHandler,
 		WS:      wsHandler,
 		Note:    note,
+		Group:   groupHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

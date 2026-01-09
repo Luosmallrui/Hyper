@@ -26,5 +26,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(GroupMemberService), "*"),
 	wire.Bind(new(IGroupMemberService), new(*GroupMemberService)),
 
+	wire.Struct(new(GroupService), "*"),
+	wire.Bind(new(IGroupService), new(*GroupService)),
+
 	NewOssService,
 )

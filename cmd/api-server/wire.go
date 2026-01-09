@@ -30,7 +30,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 
 		wire.Struct(new(handler.MessageHandler), "*"),
 		wire.Struct(new(handler.WSHandler), "*"),
-
+		wire.Struct(new(handler.GroupHandler), "*"),
 		dao.ProviderSet,
 
 		service.ProviderSet,
