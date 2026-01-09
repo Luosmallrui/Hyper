@@ -1,13 +1,15 @@
 package middleware
 
 import (
-	"fmt"
+	"Hyper/pkg/log"
 	"net/http"
 	"strings"
 
 	"Hyper/pkg/jwt"
 	"Hyper/pkg/response"
+
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func Auth(secret []byte) gin.HandlerFunc {
@@ -29,7 +31,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, "token 无效")
 			return
 		}
-		fmt.Println(claims.UserID, 66)
+		log.L.Info("claims", zap.Any("claims", claims))
 		c.Set("user_id", claims.UserID)
 		c.Set("openid", claims.OpenID)
 
