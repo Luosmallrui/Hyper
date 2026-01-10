@@ -61,6 +61,7 @@ type ClientResponse struct {
 	Event   string `json:"event"`             // 事件名
 	Content any    `json:"payload,omitempty"` // 事件内容
 	Retry   int    `json:"-"`                 // 重试次数（0 默认不重试）
+	IsSelf  bool   `json:"is_self"`
 }
 
 // NewClient 初始化客户端信息
@@ -263,6 +264,7 @@ func (c *Client) hookClose(code int, text string) error {
 func (c *Client) handleMessage(data []byte) {
 
 	event, err := c.validate(data)
+	fmt.Println("event: ", string(data), 55)
 	if err != nil {
 		log.Printf("[ERROR] validate err: %s \n", err.Error())
 		return

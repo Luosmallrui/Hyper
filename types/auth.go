@@ -67,11 +67,16 @@ type LoginRep struct {
 }
 
 type UserProfileResp struct {
-	User  UserBasicInfo `json:"user"`
-	Stats UserStats     `json:"stats"`
-	Token string        `json:"token"`
+	User         UserBasicInfo `json:"user"`
+	Stats        UserStats     `json:"stats"`
+	AccessToken  string        `json:"access_token,omitempty"`
+	RefreshToken string        `json:"refresh_token,omitempty"`
 }
 
+type UserToken struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
 type UserBasicInfo struct {
 	UserID      string `json:"user_id"`    // Snowflake ID（对外）
 	Nickname    string `json:"nickname"`   // 邪修的马路路

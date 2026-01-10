@@ -2,12 +2,13 @@ package main
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/log"
 	"Hyper/pkg/server"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -31,6 +32,6 @@ func main() {
 		},
 	}
 	if err := cliApp.Run(os.Args); err != nil {
-		log.Fatal(err)
+		log.L.Fatal("failed to start server", zap.Error(err))
 	}
 }

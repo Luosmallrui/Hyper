@@ -40,11 +40,10 @@ const (
 )
 
 type Message struct {
-	Id          int64  `json:"msg_id,string"`    // 全局唯一雪花ID
-	ClientMsgID string `json:"client_msg_id"`    // 前端生成的UUID，用于幂等去重
-	SenderID    int64  `json:"sender_id,string"` // 发送者ID
-	TargetID    int64  `json:"target_id,string"` // 接收者ID或群ID
-	SessionType int    `json:"session_type"`     // 1-单聊, 2-群聊
+	Id          int64 `json:"msg_id,string"`    // 全局唯一雪花ID
+	SenderID    int64 `json:"sender_id,string"` // 发送者ID
+	TargetID    int64 `json:"target_id,string"` // 接收者ID或群ID
+	SessionType int   `json:"session_type"`     // 1-单聊, 2-群聊
 
 	SessionHash int64  `json:"session_hash"` // 数据库索引专用，不需要返回给前端
 	SessionID   string `json:"session_id"`   // 原始会话ID，用于碰撞校验和展示

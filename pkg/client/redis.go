@@ -2,10 +2,12 @@ package client
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/log"
 	"context"
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 func NewRedisClient(conf *config.Config) *redis.Client {
@@ -17,8 +19,8 @@ func NewRedisClient(conf *config.Config) *redis.Client {
 		ReadTimeout: 0,
 	})
 	if _, err := client.Ping(context.TODO()).Result(); err != nil {
-		panic(fmt.Errorf("client client error: %s", err))
+		log.L.Fatal("connect redis error", zap.Error(err))
 	}
-	fmt.Println("redis client success")
+	log.L.Info("redis client success")
 	return client
 }
