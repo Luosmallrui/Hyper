@@ -103,11 +103,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	follow := &handler.Follow{
 		Config:        cfg,
 		FollowService: followService,
+		MqProducer:    producer,
 	}
 	serviceFollowService := service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
+		Producer:  producer,
 	}
 	serviceLikeService := service.LikeService{
 		LikeDAO:  noteLikeDAO,

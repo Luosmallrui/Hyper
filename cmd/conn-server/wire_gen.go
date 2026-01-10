@@ -12,7 +12,6 @@ import (
 	"Hyper/dao/cache"
 	"Hyper/pkg/client"
 	"Hyper/pkg/database"
-	"Hyper/pkg/rocketmq"
 	socket2 "Hyper/pkg/socket"
 	"Hyper/service"
 	"Hyper/socket"
@@ -62,15 +61,8 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	}
 	engine := router.NewRouter(cfg, handlerHandler)
 	healthSubscribe := process.NewHealthSubscribe(serverStorage)
-	pushConsumer := rocketmq.InitConsumer()
-	noticeSubscribe := &process.NoticeSubscribe{
-		Redis:          redisClient,
-		MqConsumer:     pushConsumer,
-		ConnectService: clientConnectService,
-	}
 	subServers := &process.SubServers{
 		HealthSubscribe: healthSubscribe,
-		NoticeSubscribe: noticeSubscribe,
 	}
 	server := process.NewServer(subServers)
 	appProvider := &socket.AppProvider{

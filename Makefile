@@ -72,7 +72,7 @@ build-fanout: gen-fanout
 # =========================
 # Run (dev)
 # =========================
-.PHONY: run-api run-conn
+.PHONY: run run-conn
 
 run-api: gen-api
 	@$(GO) run ./$(API_CMD) serve
