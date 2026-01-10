@@ -27,12 +27,19 @@ type IUserService interface {
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
 	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
 	GetUserAvatar(ctx context.Context, uid int64) (string, string, error)
+	GetUserInfo(ctx context.Context, uid int) (*models.Users, error)
 }
 
 type UserService struct {
 	UsersRepo *dao.Users
 	Redis     *redis.Client
 	DB        *gorm.DB
+}
+
+func (s *UserService) GetUserInfo(ctx context.Context, uid int) (*models.Users, error) {
+	var users *models.Users
+	err := s.DB.WithContext(ctx).Where("id = ?", uid).First(&users).Error
+	return users, err
 }
 
 func (s *UserService) GetUserAvatar(ctx context.Context, uid int64) (string, string, error) {
@@ -232,7 +239,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 			// 写入缓存供下次使用
 			data, _ := json.Marshal(info)
-			pipe.Set(ctx, fmt.Sprintf("user:info:%d", user.Id), data, 1*time.Hour)
+			pipe.Set(ctx, fmt.Sprintf("user:info:%d", user.Id), data, 15*time.Second)
 		}
 		_, _ = pipe.Exec(ctx)
 	}

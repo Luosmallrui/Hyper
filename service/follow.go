@@ -2,8 +2,15 @@ package service
 
 import (
 	"Hyper/dao"
+	"Hyper/types"
 	"context"
+	"encoding/json"
 	"errors"
+	"log"
+	"time"
+
+	"github.com/apache/rocketmq-client-go/v2"
+	"github.com/apache/rocketmq-client-go/v2/primitive"
 )
 
 var _ IFollowService = (*FollowService)(nil)
@@ -21,6 +28,7 @@ type FollowService struct {
 	FollowDAO *dao.UserFollowDAO
 	StatsDAO  *dao.UserStatsDAO
 	UserDAO   *dao.Users
+	Producer  rocketmq.Producer
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
@@ -60,6 +68,40 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 	if err := s.StatsDAO.IncrFollowingCount(ctx, followerID, 1); err != nil {
 		return err
 	}
+
+	// 发送 MQ 通知
+	go func() {
+		// 查询关注者信息
+		follower, err := s.UserDAO.FindById(context.Background(), followerID)
+		if err != nil {
+			log.Printf("[MQ] 获取关注者信息失败: %v", err)
+			return
+		}
+
+		payload := &types.FollowPayload{
+			UserId:    int(followerID),
+			TargetId:  int(followeeID),
+			Avatar:    follower.Avatar,
+			Nickname:  follower.Nickname,
+			CreatedAt: time.Now().Format(time.RFC3339),
+		}
+		dataBytes, _ := json.Marshal(payload)
+
+		msgMap := &types.SystemMessage{
+			Type: "follow",
+			Data: json.RawMessage(dataBytes),
+		}
+		body, _ := json.Marshal(msgMap)
+
+		msg := &primitive.Message{
+			Topic: "hyper_system_messages",
+			Body:  body,
+		}
+
+		if _, err := s.Producer.SendSync(context.Background(), msg); err != nil {
+			log.Printf("[MQ] 发送关注通知失败: %v", err)
+		}
+	}()
 
 	return nil
 }

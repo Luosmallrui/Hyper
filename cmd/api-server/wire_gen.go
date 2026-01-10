@@ -37,10 +37,12 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
+	producer := rocketmq.InitProducer()
 	followService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
+		Producer:  producer,
 	}
 	noteLikeDAO := dao.NewNoteLikeDAO(db)
 	noteStatsDAO := dao.NewNoteStatsDAO(db)
@@ -75,7 +77,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
-	producer := rocketmq.InitProducer()
 	messageService := &service.MessageService{
 		MessageDao: messageDAO,
 		MqProducer: producer,
@@ -103,10 +104,28 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:        cfg,
 		FollowService: followService,
 	}
+	serviceFollowService := service.FollowService{
+		FollowDAO: userFollowDAO,
+		StatsDAO:  userStatsDAO,
+		UserDAO:   users,
+	}
+	serviceLikeService := service.LikeService{
+		LikeDAO:  noteLikeDAO,
+		StatsDAO: noteStatsDAO,
+		NoteDAO:  noteDAO,
+	}
+	serviceCollectService := service.CollectService{
+		CollectionDAO: noteCollectionDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+	}
 	user := &handler.User{
-		Config:      cfg,
-		UserService: userService,
-		OssService:  iOssService,
+		Config:         cfg,
+		UserService:    userService,
+		OssService:     iOssService,
+		FollowService:  serviceFollowService,
+		LikeService:    serviceLikeService,
+		CollectService: serviceCollectService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
 	sessionService := &service.SessionService{

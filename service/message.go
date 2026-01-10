@@ -126,7 +126,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 	body, _ := json.Marshal(msg)
 	mqMsg := &primitive.Message{
-		Topic: "IM_CHAT_MSGS",
+		Topic: types.ImTopicChat,
 		Body:  body,
 	}
 	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
