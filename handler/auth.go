@@ -69,7 +69,7 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 // }
 
 func (u *Auth) GetToken(c *gin.Context) error {
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XXX")
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 6, "XXX")
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}

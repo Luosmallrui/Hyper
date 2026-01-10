@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/gin-gonic/gin"
 )
 
 type Follow struct {
 	Config        *config.Config
 	FollowService service.IFollowService
+	MqProducer    rocketmq.Producer
 }
 
 func (f *Follow) RegisterRouter(r gin.IRouter) {
@@ -28,7 +30,19 @@ func (f *Follow) RegisterRouter(r gin.IRouter) {
 	g.GET("/:user_id/followers/count", context.Wrap(f.GetFollowerCount))
 	g.GET("/:user_id/following/count", context.Wrap(f.GetFollowingCount))
 	g.GET("/:user_id/following/list", authorize, context.Wrap(f.GetFollowingList))
+	g.GET("/test")
 }
+
+// func (f *Follow) TestMq(c *gin.Context) error {
+// 	body := []byte{"test yige"}
+// 	mqMsg := &primitive.Message{
+// 		Topic: "IM_CHAT_MSGS",
+// 		Body:  body,
+// 	}
+// 	_, err := f.MqProducer.SendSync(c.Request.Context(), mqMsg)
+// 	return err
+
+// }
 
 // FollowUser 关注用户
 func (f *Follow) FollowUser(c *gin.Context) error {
