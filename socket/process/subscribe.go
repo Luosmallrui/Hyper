@@ -60,7 +60,7 @@ func (m *MessageSubscribe) Setup(ctx context.Context) error {
 	}
 
 	if err := m.MqConsumer.Start(); err != nil {
-		log.Printf("[MQ Warning] Start message consumer failed: %v. Will retry in background...", err)
+		log.L.Error("[MQ] start message consumer error", zap.Error(err))
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
@@ -70,7 +70,7 @@ func (m *MessageSubscribe) Setup(ctx context.Context) error {
 					return
 				case <-ticker.C:
 					if err := m.MqConsumer.Start(); err == nil {
-						log.Printf("[MQ] Message consumer started successfully in background")
+						log.L.Info("[MQ] start message consumer success")
 						return
 					}
 				}
