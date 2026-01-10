@@ -1,6 +1,7 @@
 package rocketmq
 
 import (
+	"Hyper/config"
 	"Hyper/pkg/log"
 	"context"
 
@@ -18,15 +19,15 @@ type Rocketmq struct {
 }
 
 func init() {
-	rlog.SetLogLevel("info")
+	rlog.SetLogLevel("error")
 	//rlog.SetOutputPath("/Users/luosmallrui/Downloads/22583504_hypercn.cn_other/rocketmq.log")
 }
 
-func InitProducer() rocketmq.Producer {
+func InitProducer(cfg *config.RocketMQConfig) rocketmq.Producer {
 	p, err := rocketmq.NewProducer(
-		producer.WithNameServer([]string{"8.156.86.220:9876"}),
-		producer.WithRetry(2),
-		producer.WithGroupName("PID_IM_SERVICE"),
+		producer.WithNameServer(cfg.NameServer),
+		producer.WithRetry(cfg.Producer.Retry),
+		producer.WithGroupName(cfg.Producer.Group),
 	)
 	if err != nil {
 		panic(err)
@@ -39,10 +40,10 @@ func InitProducer() rocketmq.Producer {
 
 	return p
 }
-func InitConsumer() rocketmq.PushConsumer {
+func InitConsumer(cfg *config.RocketMQConfig) rocketmq.PushConsumer {
 	c, err := rocketmq.NewPushConsumer(
-		consumer.WithNameServer([]string{"8.156.86.220:9876"}),
-		consumer.WithGroupName("IM_STORAGE_GROUP"),
+		consumer.WithNameServer(cfg.NameServer),
+		consumer.WithGroupName(cfg.Consumer.Group),
 	)
 	if err != nil {
 		panic(err)

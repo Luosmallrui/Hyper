@@ -37,7 +37,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
-	producer := rocketmq.InitProducer()
+	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
+	producer := rocketmq.InitProducer(rocketMQConfig)
 	followService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
