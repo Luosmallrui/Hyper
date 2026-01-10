@@ -17,6 +17,13 @@ type Config struct {
 	Nacos    *NacosConfig    `json:"nacos" yaml:"nacos"`
 	Server   *Server         `json:"server" yaml:"server"`
 	RocketMQ *RocketMQConfig `json:"rocketmq" yaml:"rocketmq"`
+	App    *App       `json:"app" yaml:"app"`
+	Redis  *Redis     `json:"redis" yaml:"redis"`
+	MySQL  *MySQL     `json:"mysql" yaml:"mysql"`
+	Jwt    *Jwt       `json:"jwt" yaml:"jwt"`
+	Oss    *OssConfig `json:"oss" yaml:"oss"`
+	Server *Server    `json:"server" yaml:"server"`
+	Nacos  *Nacos     `json:"nacos" yaml:"nacos"`
 }
 
 type Server struct {
