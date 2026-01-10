@@ -19,7 +19,7 @@ type Rocketmq struct {
 
 func init() {
 	rlog.SetLogLevel("info")
-	rlog.SetOutputPath("/Users/luosmallrui/Downloads/22583504_hypercn.cn_other/rocketmq.log")
+	//rlog.SetOutputPath("/Users/luosmallrui/Downloads/22583504_hypercn.cn_other/rocketmq.log")
 }
 
 func InitProducer() rocketmq.Producer {

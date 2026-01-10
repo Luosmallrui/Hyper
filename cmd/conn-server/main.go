@@ -8,6 +8,7 @@ import (
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 	s "Hyper/socket"
 	"fmt"
+	"github.com/cloudwego/kitex/pkg/registry"
 
 	"net"
 	"os"
@@ -34,7 +35,7 @@ func main() {
 		Action: func(ctx *cli.Context) error {
 			rpcPort := cfg.Server.Rpc
 			fmt.Println("rpc port:", rpcPort)
-			go startKitexRPC(rpcPort)
+			go startKitexRPC(rpcPort, cfg.Nacos)
 			return s.Run(ctx, conn)
 		},
 
@@ -52,22 +53,33 @@ func main() {
 		log.L.Fatal("failed to start server", zap.Error(err))
 	}
 }
-func startKitexRPC(rpcPort int) {
+func startKitexRPC(rpcPort int, cfg *config.NacosConfig) {
 	h := &handler.PushServiceImpl{}
-	nacosRegistry := nacos.NewRegistry()
+	nacosRegistry := nacos.NewRegistry(cfg)
+
+	listenAddr := &net.TCPAddr{IP: net.IPv4zero, Port: rpcPort}
+
+	registryAddr := &net.TCPAddr{IP: net.ParseIP(cfg.Address), Port: rpcPort}
+
 	svr := pushservice.NewServer(
 		h,
 		server.WithRegistry(nacosRegistry),
-		server.WithServiceAddr(&net.TCPAddr{Port: rpcPort}),
+		server.WithServiceAddr(listenAddr),
+		server.WithRegistryInfo(&registry.Info{
+			ServiceName: "PushService",
+			Addr:        registryAddr,
+			Tags:        map[string]string{"node_id": "ws-01"},
+		}),
 		server.WithServerBasicInfo(
 			&rpcinfo.EndpointBasicInfo{
 				ServiceName: "PushService",
 			},
 		),
 	)
-	log.L.Info("[RPC] Kitex Push Server is running on ", zap.Int("port", rpcPort))
+
+	log.L.Info("[RPC] Kitex Server starting", zap.String("listen", listenAddr.String()), zap.String("registry", registryAddr.String()))
+
 	if err := svr.Run(); err != nil {
-		log.L.Fatal("failed to start  rpc server", zap.Error(err))
+		log.L.Fatal("failed to start rpc server", zap.Error(err))
 	}
-	fmt.Println("[RPC] Kitex Push Server is running")
 }
