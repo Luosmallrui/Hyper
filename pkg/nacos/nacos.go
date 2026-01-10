@@ -1,8 +1,8 @@
 package nacos
 
 import (
+	"Hyper/config"
 	"Hyper/pkg/log"
-
 	"github.com/cloudwego/kitex/pkg/registry"
 	nacosreg "github.com/kitex-contrib/registry-nacos/v2/registry"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
@@ -11,30 +11,25 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRegistry() registry.Registry {
+func NewRegistry(cfg *config.NacosConfig) registry.Registry {
 	sc := []constant.ServerConfig{
-		*constant.NewServerConfig("47.109.188.142", 9848),
+		*constant.NewServerConfig(cfg.Address, cfg.Port),
 	}
 	cc := constant.ClientConfig{
-		NamespaceId:         "public",
-		TimeoutMs:           5000,
+		NamespaceId:         cfg.Namespace,
+		TimeoutMs:           cfg.TimeoutMs,
 		NotLoadCacheAtStart: true,
 		LogDir:              "/tmp/nacos/log",
 		CacheDir:            "/tmp/nacos/cache",
-		LogLevel:            "info",
+		LogLevel:            cfg.LogLevel,
 	}
 
-	cli, err := clients.NewNamingClient(
-		vo.NacosClientParam{
-			ClientConfig:  &cc,
-			ServerConfigs: sc,
-		},
-	)
-	_, err = cli.GetService(vo.GetServiceParam{
-		ServiceName: "DUMMY-CHECK",
+	cli, err := clients.NewNamingClient(vo.NacosClientParam{
+		ClientConfig:  &cc,
+		ServerConfigs: sc,
 	})
 	if err != nil {
-		panic("nacos not reachable: " + err.Error())
+		log.L.Info("Nacos 无法连接: ", zap.Error(err))
 	}
 	r := nacosreg.NewNacosRegistry(cli)
 	if err != nil {

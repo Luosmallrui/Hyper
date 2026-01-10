@@ -16,10 +16,9 @@ type IServer interface {
 
 // SubServers 订阅的服务列表
 type SubServers struct {
-	HealthSubscribe *HealthSubscribe // 注册健康上报
-	//MessageSubscribe *MessageSubscribe /// 注册消息订阅
-	//NoticeSubscribe  *NoticeSubscribe
-	//QueueSubscribe   *QueueSubscribe   // 消息队列服务
+	HealthSubscribe  *HealthSubscribe  // 注册健康上报
+	MessageSubscribe *MessageSubscribe /// 注册消息订阅
+	NoticeSubscribe  *NoticeSubscribe
 }
 
 type Server struct {
