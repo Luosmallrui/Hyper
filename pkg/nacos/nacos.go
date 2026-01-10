@@ -3,6 +3,7 @@ package nacos
 import (
 	"Hyper/config"
 	"Hyper/pkg/log"
+
 	"github.com/cloudwego/kitex/pkg/registry"
 	nacosreg "github.com/kitex-contrib/registry-nacos/v2/registry"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
