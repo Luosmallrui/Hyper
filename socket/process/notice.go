@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
@@ -25,7 +24,6 @@ type NoticeSubscribe struct {
 }
 
 func (m *NoticeSubscribe) Init() error {
-	// 所有的 Subscribe 都在这里，由外部 Start 方法同步调用
 	err := m.MqConsumer.Subscribe("hyper_system_messages", consumer.MessageSelector{}, m.handleMessage)
 	if err != nil {
 		return fmt.Errorf("subscribe topic error: %w", err)
@@ -34,31 +32,6 @@ func (m *NoticeSubscribe) Init() error {
 }
 
 func (m *NoticeSubscribe) Setup(ctx context.Context) error {
-	log.L.Info(fmt.Sprintf("[MQ] 正在启动notice消费者，ServerID: %s", server.GetServerId()))
-	err := m.MqConsumer.Subscribe("hyper_system_messages", consumer.MessageSelector{}, m.handleMessage)
-	if err != nil {
-		return fmt.Errorf("subscribe topic error: %w", err)
-	}
-
-	if err := m.MqConsumer.Start(); err != nil {
-		log.L.Error("start mq noteice consumer error", zap.Error(err))
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := m.MqConsumer.Start(); err == nil {
-						log.L.Info("[MQ Warning] Start notice consumer successfully")
-						return
-					}
-				}
-			}
-		}()
-	}
-
 	go func() {
 		<-ctx.Done()
 		log.L.Info("[MQ] 正在关闭Notice消费者...")

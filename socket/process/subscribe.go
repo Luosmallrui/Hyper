@@ -3,7 +3,6 @@ package process
 import (
 	"Hyper/dao/cache"
 	"Hyper/models"
-	"Hyper/pkg/server"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 
@@ -61,38 +60,11 @@ func (m *MessageSubscribe) Init() error {
 	return nil
 }
 func (m *MessageSubscribe) Setup(ctx context.Context) error {
-	log.L.Info("[MQ]MessageSubscribe 正在启动消息消费者", zap.String("serverId", server.GetServerId()))
-	err := m.MqConsumer.Subscribe(types.ImTopicChat, consumer.MessageSelector{}, m.handleMessage)
-	if err != nil {
-		return fmt.Errorf("subscribe topic error: %w", err)
-	}
-
-	if err := m.MqConsumer.Start(); err != nil {
-		log.L.Error("[MQ] start message consumer error", zap.Error(err))
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := m.MqConsumer.Start(); err == nil {
-						log.L.Info("[MQ] start message consumer success")
-						return
-					}
-				}
-			}
-		}()
-	}
-	fmt.Println(11)
-
 	go func() {
 		<-ctx.Done()
 		log.L.Info("[MQ] 正在关闭消费者...")
 		m.MqConsumer.Shutdown()
 	}()
-
 	return nil
 }
 
