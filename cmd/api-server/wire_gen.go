@@ -36,10 +36,12 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	iOssService := service.NewOssService(ossConfig)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
+	producer := rocketmq.InitProducer()
 	followService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
+		Producer:  producer,
 	}
 	noteLikeDAO := dao.NewNoteLikeDAO(db)
 	noteStatsDAO := dao.NewNoteStatsDAO(db)
@@ -74,7 +76,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
-	producer := rocketmq.InitProducer()
 	messageService := &service.MessageService{
 		MessageDao: messageDAO,
 		MqProducer: producer,
