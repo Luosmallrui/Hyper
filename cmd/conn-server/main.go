@@ -8,11 +8,10 @@ import (
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 	s "Hyper/socket"
 	"fmt"
-	"github.com/cloudwego/kitex/pkg/registry"
-
 	"net"
 	"os"
 
+	"github.com/cloudwego/kitex/pkg/registry"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/server"
 	"github.com/urfave/cli/v2"
@@ -30,15 +29,11 @@ func main() {
 
 	cliApp := &cli.App{
 		Name: "conn-server",
-
-		// 👇 默认启动行为
 		Action: func(ctx *cli.Context) error {
 			rpcPort := cfg.Server.Rpc
-			fmt.Println("rpc port:", rpcPort)
 			go startKitexRPC(rpcPort, cfg.Nacos)
 			return s.Run(ctx, conn)
 		},
-
 		Commands: []*cli.Command{
 			{
 				Name: "serve",
