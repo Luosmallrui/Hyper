@@ -52,6 +52,14 @@ func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error)
 	return newCli, nil
 }
 
+func (m *MessageSubscribe) Init() error {
+	// 所有的 Subscribe 都在这里，由外部 Start 方法同步调用
+	err := m.MqConsumer.Subscribe(types.ImTopicChat, consumer.MessageSelector{}, m.handleMessage)
+	if err != nil {
+		return fmt.Errorf("subscribe topic error: %w", err)
+	}
+	return nil
+}
 func (m *MessageSubscribe) Setup(ctx context.Context) error {
 	log.L.Info("[MQ]MessageSubscribe 正在启动消息消费者", zap.String("serverId", server.GetServerId()))
 	err := m.MqConsumer.Subscribe(types.ImTopicChat, consumer.MessageSelector{}, m.handleMessage)
