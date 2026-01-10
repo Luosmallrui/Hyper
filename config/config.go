@@ -15,6 +15,7 @@ type Config struct {
 	Jwt    *Jwt       `json:"jwt" yaml:"jwt"`
 	Oss    *OssConfig `json:"oss" yaml:"oss"`
 	Server *Server    `json:"server" yaml:"server"`
+	Nacos  *Nacos     `json:"nacos" yaml:"nacos"`
 }
 
 type Server struct {
