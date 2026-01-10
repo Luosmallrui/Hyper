@@ -46,6 +46,7 @@ func (u *Auth) test(c *gin.Context) error {
 }
 
 func (u *Auth) GetToken(c *gin.Context) error {
+
 	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "access", 2*time.Hour)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
