@@ -5,13 +5,17 @@ import (
 	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/jwt"
+	"Hyper/pkg/log"
 	"Hyper/pkg/response"
-	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type Auth struct {
@@ -26,54 +30,66 @@ type Auth struct {
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
-	auth := r.Group("/")
-	auth.POST("/auth/wx-login", context.Wrap(u.Login))                  // 微信登录
-	auth.POST("/auth/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
+	auth := r.Group("/v1/auth")
+	auth.POST("/wx-login", context.Wrap(u.Login))                  // 微信登录
+	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
+	auth.POST("/refresh", context.Wrap(u.Refresh))
 	auth.GET("/token", context.Wrap(u.GetToken))
-	// auth.GET("/test1", context.Wrap(u.test1))
+	auth.GET("/test1", authorize, context.Wrap(u.test))
 }
 
-// func (u *Auth) test1(c *gin.Context) error {
-// 	userid := 1
-// 	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(userid))
-// 	if err != nil {
-// 		following = 0
-// 	}
-
-// 	// 获取粉丝数
-// 	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(userid))
-// 	if err != nil {
-// 		follower = 0
-// 	}
-
-// 	// 获取用户帖子的总点赞数 + 总收藏数
-// 	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(userid))
-// 	if err != nil {
-// 		totalLikes = 0
-// 	}
-
-// 	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(userid))
-// 	if err != nil {
-// 		totalCollects = 0
-// 	}
-
-// 	rep := types.UserProfileResp{
-// 		Stats: types.UserStats{
-// 			Following: following,
-// 			Follower:  follower,
-// 			Likes:     totalLikes + totalCollects,
-// 		},
-// 	}
-// 	response.Success(c, rep)
-// 	return nil
-// }
+func (u *Auth) test(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	fmt.Println(userId)
+	fmt.Println(err)
+	return nil
+}
 
 func (u *Auth) GetToken(c *gin.Context) error {
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 6, "XXX")
+
+	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "access", 2*time.Hour)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-	response.Success(c, token)
+	fmt.Println(u.Config.Jwt.Secret, 123)
+	f, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "refresh", 2*time.Hour)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"token": token, "refresh": f})
+	return nil
+}
+
+func (u *Auth) Refresh(c *gin.Context) error {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return response.NewError(401, "Authorization not find")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return response.NewError(400, "Authorization 格式错误")
+	}
+
+	claims, err := jwt.ParseToken([]byte(u.Config.Jwt.Secret), "refresh", parts[1])
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, err.Error())
+	}
+
+	newAccessToken, _ := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "access", 60*time.Second)
+	resp := gin.H{
+		"access_token":  newAccessToken,
+		"refresh_token": "",
+	}
+	if jwt.ShouldRotateRefreshToken(claims, 24*time.Hour) {
+		newRefreshToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "refresh", 7*24*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"msg": "failed to rotate refresh token"})
+			return response.NewError(500, err.Error())
+		}
+		resp["refresh_token"] = newRefreshToken
+	}
+	response.Success(c, resp)
 	return nil
 }
 
@@ -96,48 +112,20 @@ func (u *Auth) Login(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID)
+	accessToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "access", 60*time.Second)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
-	// 获取关注数
-	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(user.Id))
+	log.L.Info("generating access token", zap.String("token", accessToken))
+	refreshToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "refresh", 7*24*time.Hour)
 	if err != nil {
-		following = 0
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
+	log.L.Info("generating refresh token", zap.String("token", refreshToken))
 
-	// 获取粉丝数
-	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(user.Id))
-	if err != nil {
-		follower = 0
-	}
-
-	// 获取用户帖子的总点赞数 + 总收藏数
-	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(user.Id))
-	if err != nil {
-		totalLikes = 0
-	}
-
-	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(user.Id))
-	if err != nil {
-		totalCollects = 0
-	}
-
-	rep := types.UserProfileResp{
-		User: types.UserBasicInfo{
-			UserID:      utils.GenHashID(u.Config.Jwt.Secret, user.Id),
-			Nickname:    user.Nickname,
-			PhoneNumber: user.Mobile,
-			AvatarURL:   user.Avatar,
-		},
-		Stats: types.UserStats{
-			Following: following,
-			Follower:  follower,
-			Likes:     totalLikes + totalCollects,
-		},
-		Token: token,
+	rep := types.UserToken{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}
 	response.Success(c, rep)
 	return nil

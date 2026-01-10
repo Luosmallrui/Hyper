@@ -2,10 +2,11 @@ package server
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
+	"Hyper/pkg/log"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -34,7 +36,7 @@ func init() {
 	once.Do(func() {
 		ip, err := getLocalIP() // 获取本机内网 IP
 		if err != nil {
-			panic(fmt.Sprintf("获取本地IP失败: %v", err))
+			log.L.Fatal("get local ip", zap.Error(err))
 		}
 		// 最终 sid 格式为: 192.168.1.10:8083
 		serverId = fmt.Sprintf("%s:%d", ip, 8083)
@@ -60,8 +62,10 @@ func getLocalIP() (string, error) {
 	return "", errors.New("no ip address found")
 }
 func NewGinEngine(h *Handlers) *gin.Engine {
-	r := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
 	r.Use(CORSMiddleware())
+	r.Use(middleware.GinZap(), gin.Recovery())
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
 	h.Map.RegisterRouter(api)
@@ -100,8 +104,10 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 
-	log.Printf("HTTP Listen Port :%d", app.Config.Server.Http)
-	log.Printf("HTTP Server Pid  :%d", os.Getpid())
+	log.L.Info("server starting", zap.String("serverId", serverId),
+		zap.Int("port", app.Config.Server.Http),
+		zap.String("env", "prod"),
+	)
 
 	return run(c, eg, groupCtx, app)
 }
@@ -124,14 +130,14 @@ func run(c chan os.Signal, eg *errgroup.Group, ctx context.Context, app *AppProv
 
 	eg.Go(func() error {
 		defer func() {
-			log.Println("Shutting down serv...")
+			log.L.Info("server stopping", zap.String("serverId", serverId))
 
 			// 等待中断信号以优雅地关闭服务器
 			timeCtx, timeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer timeCancel()
 
 			if err := serv.Shutdown(timeCtx); err != nil {
-				log.Fatalf("HTTP Server Shutdown Err: %s", err)
+				log.L.Info("server stopping", zap.String("serverId", serverId), zap.Error(err))
 			}
 		}()
 
@@ -144,10 +150,10 @@ func run(c chan os.Signal, eg *errgroup.Group, ctx context.Context, app *AppProv
 	})
 
 	if err := eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatalf("HTTP Server forced to shutdown: %s", err)
+		log.L.Info("server stopping", zap.Error(err))
 	}
 
-	log.Println("Server exiting")
+	log.L.Info("server stopped", zap.String("serverId", serverId))
 
 	return nil
 }

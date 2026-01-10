@@ -33,7 +33,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config: cfg,
 	}
 	ossConfig := config.ProvideOssConfig(cfg)
-	iOssService := service.NewOssService(ossConfig)
+	image := dao.NewImage(db)
+	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
 	producer := rocketmq.InitProducer()
@@ -103,10 +104,28 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:        cfg,
 		FollowService: followService,
 	}
+	serviceFollowService := service.FollowService{
+		FollowDAO: userFollowDAO,
+		StatsDAO:  userStatsDAO,
+		UserDAO:   users,
+	}
+	serviceLikeService := service.LikeService{
+		LikeDAO:  noteLikeDAO,
+		StatsDAO: noteStatsDAO,
+		NoteDAO:  noteDAO,
+	}
+	serviceCollectService := service.CollectService{
+		CollectionDAO: noteCollectionDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+	}
 	user := &handler.User{
-		Config:      cfg,
-		UserService: userService,
-		OssService:  iOssService,
+		Config:         cfg,
+		UserService:    userService,
+		OssService:     iOssService,
+		FollowService:  serviceFollowService,
+		LikeService:    serviceLikeService,
+		CollectService: serviceCollectService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
 	sessionService := &service.SessionService{

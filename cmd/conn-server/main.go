@@ -2,16 +2,18 @@ package main
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/log"
 	"Hyper/rpc"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 	s "Hyper/socket"
 	"fmt"
-	"log"
+
 	"net"
 	"os"
 
 	"github.com/cloudwego/kitex/server"
 	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -28,7 +30,8 @@ func main() {
 
 		// 👇 默认启动行为
 		Action: func(ctx *cli.Context) error {
-			go startKitexRPC()
+			rpcPort := cfg.Server.Rpc
+			go startKitexRPC(rpcPort)
 			return s.Run(ctx, conn)
 		},
 
@@ -43,20 +46,18 @@ func main() {
 	}
 
 	if err := cliApp.Run(os.Args); err != nil {
-		log.Fatal(err)
+		log.L.Fatal("failed to start server", zap.Error(err))
 	}
 }
-func startKitexRPC() {
+func startKitexRPC(rpcPort int) {
 	h := &handler.PushServiceImpl{}
 
-	// 创建 Kitex Server
 	svr := pushservice.NewServer(
 		h,
-		server.WithServiceAddr(&net.TCPAddr{Port: 8083}),
+		server.WithServiceAddr(&net.TCPAddr{Port: rpcPort}),
 	)
-
-	log.Println("[RPC] Kitex Push Server is running on :8083...")
+	log.L.Info("[RPC] Kitex Push Server is running on ", zap.Int("port", rpcPort))
 	if err := svr.Run(); err != nil {
-		log.Printf("[RPC] Kitex server run failed: %v", err)
+		log.L.Fatal("failed to start  rpc server", zap.Error(err))
 	}
 }

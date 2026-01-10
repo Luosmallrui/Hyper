@@ -9,18 +9,12 @@ import (
 	"Hyper/types"
 	"encoding/json"
 	"fmt"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
 	"net/http"
-	"path"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	_ "golang.org/x/image/webp"
 )
 
@@ -50,57 +44,21 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
 }
+
 func (n *Note) UploadImage(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
 	header, err := c.FormFile("image")
 	if err != nil {
-		return response.NewError(500, err.Error())
+		return response.NewError(400, "missing image")
 	}
-	const maxSize = 10 << 20
-	if header.Size > maxSize {
-		return fmt.Errorf("image size exceeds 10MB")
-	}
-
-	file, err := header.Open()
+	img, err := n.OssService.UploadImage(c.Request.Context(), int(userID), header)
 	if err != nil {
-		return response.NewError(500, err.Error())
+		return err
 	}
-	defer file.Close()
-	var (
-		width  int
-		height int
-	)
-
-	if seeker, ok := file.(io.Seeker); ok {
-		cfg, format, err := image.DecodeConfig(file)
-		if err == nil {
-			width = cfg.Width
-			height = cfg.Height
-		}
-		allowed := map[string]bool{
-			"jpeg": true,
-			"png":  true,
-			"webp": true,
-		}
-		if !allowed[strings.ToLower(format)] {
-			return fmt.Errorf("unsupported image format")
-		}
-		seeker.Seek(0, 0) // 重置指针
-	}
-
-	objectKey := fmt.Sprintf("note/%s/%s%s", time.Now().Format("2006/01/02"), uuid.NewString(),
-		path.Ext(header.Filename),
-	)
-
-	if err := n.OssService.UploadReader(c.Request.Context(), file, objectKey); err != nil {
-		return response.NewError(500, err.Error())
-	}
-	response.Success(c, types.UploadResponse{
-		Url: fmt.Sprintf("https://%s.%s/%s",
-			n.Config.Oss.Bucket, n.Config.Oss.Endpoint,
-			objectKey),
-		Width:  width,
-		Height: height,
-	})
+	response.Success(c, img)
 	return nil
 }
 
