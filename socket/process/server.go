@@ -12,6 +12,7 @@ var once sync.Once
 
 type IServer interface {
 	Setup(ctx context.Context) error
+	Init() error
 }
 
 // SubServers 订阅的服务列表
