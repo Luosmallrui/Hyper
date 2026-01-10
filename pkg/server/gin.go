@@ -102,6 +102,7 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 
 	eg, groupCtx := errgroup.WithContext(ctx.Context)
 	c := make(chan os.Signal, 1)
+	// 终止的信号 服务要停止了
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 
 	log.L.Info("server starting", zap.String("serverId", serverId),

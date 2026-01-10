@@ -77,6 +77,7 @@ func (m *MessageSubscribe) Setup(ctx context.Context) error {
 			}
 		}()
 	}
+	fmt.Println(11)
 
 	go func() {
 		<-ctx.Done()
