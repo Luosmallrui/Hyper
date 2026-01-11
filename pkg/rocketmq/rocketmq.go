@@ -4,12 +4,14 @@ import (
 	"Hyper/config"
 	"Hyper/pkg/log"
 	"context"
+	"github.com/apache/rocketmq-clients/golang/v5/credentials"
 
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
 	"github.com/apache/rocketmq-client-go/v2/rlog"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"go.uber.org/zap"
 )
 
@@ -24,22 +26,21 @@ func init() {
 }
 
 func InitProducer(cfg *config.RocketMQConfig) rocketmq.Producer {
-	p, err := rocketmq.NewProducer(
-		producer.WithNameServer(cfg.NameServer),
-		producer.WithRetry(cfg.Producer.Retry),
-		producer.WithGroupName(cfg.Producer.Group),
+	p, err := rmq_client.NewProducer(&rmq_client.Config{
+		Endpoint: Endpoint,
+		Credentials: &credentials.SessionCredentials{
+			AccessKey:    AccessKey,
+			AccessSecret: SecretKey,
+		},
 	)
-	if err != nil {
-		panic(err)
-	}
-
 	if err = p.Start(); err != nil {
 		return nil
 	}
 	log.L.Info("init producer success")
 
 	return p
-}
+	)
+	if err != nil {}
 func InitConsumer(cfg *config.RocketMQConfig) rocketmq.PushConsumer {
 	c, err := rocketmq.NewPushConsumer(
 		consumer.WithNameServer(cfg.NameServer),

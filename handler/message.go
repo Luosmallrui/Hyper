@@ -3,7 +3,6 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/dao/cache"
-	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
@@ -21,9 +20,9 @@ type Message struct {
 }
 
 func (m *Message) RegisterRouter(r gin.IRouter) {
-	authorize := middleware.Auth([]byte(m.Config.Jwt.Secret))
+	//authorize := middleware.Auth([]byte(m.Config.Jwt.Secret))
 	message := r.Group("/v1/message")
-	message.Use(authorize)
+	//message.Use(authorize)
 	message.POST("/send", context.Wrap(m.SendMessage))
 	message.GET("/list", context.Wrap(m.ListMessages))
 	message.POST("/clear-unread", context.Wrap(m.ClearUnreadMessage)) // 清除会话未读数
@@ -43,15 +42,15 @@ func (m *Message) ClearUnreadMessage(c *gin.Context) error {
 }
 
 func (m *Message) SendMessage(c *gin.Context) error {
-	userId, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(401, "未登录")
-	}
+	//userId, err := context.GetUserID(c)
+	//if err != nil {
+	//	return response.NewError(401, "未登录")
+	//}
 	var msg types.Message
 	if err := c.ShouldBindJSON(&msg); err != nil {
 		return response.NewError(500, err.Error())
 	}
-	msg.SenderID = userId
+	msg.SenderID = 1
 
 	if err := m.MessageService.SendMessage(&msg); err != nil {
 		return response.NewError(500, err.Error())
