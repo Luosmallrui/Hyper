@@ -78,7 +78,7 @@ run-api: gen-api
 	@$(GO) run ./$(API_CMD) serve
 
 run-conn: gen-conn
-	@$(GO) run ./$(CONN_CMD) serve
+	@$(GO) run ./$(CONN_CMD)/.
 
 run-fanout: gen-fanout
 	@cd $(FANOUT_CMD) && $(GO) run .
