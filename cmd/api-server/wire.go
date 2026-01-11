@@ -34,9 +34,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Session), "*"),
 		wire.Struct(new(handler.Message), "*"),
 
+		wire.Struct(new(handler.GroupHandler), "*"),
+		wire.Struct(new(handler.GroupMemberHandler), "*"),
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
-
+		
 		dao.ProviderSet,
 
 		service.ProviderSet,
