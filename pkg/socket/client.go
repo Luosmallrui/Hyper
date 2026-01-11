@@ -1,5 +1,6 @@
 package socket
 
+import "C"
 import (
 	"context"
 	"encoding/json"
@@ -31,7 +32,7 @@ type IClient interface {
 
 type IStorage interface {
 	Bind(ctx context.Context, sid string, channel string, cid int64, uid int) error
-	UnBind(ctx context.Context, sid string, channel string, cid int64) error
+	UnBind(ctx context.Context, sid string, channel string, cid int64, uid int) error
 }
 
 // Client WebSocket 客户端连接信息
@@ -247,7 +248,7 @@ func (c *Client) hookClose(code int, text string) error {
 	c.event.Close(c, code, text)
 
 	if c.storage != nil {
-		err := c.storage.UnBind(context.Background(), server.GetServerId(), c.channel.Name(), c.cid)
+		err := c.storage.UnBind(context.Background(), server.GetServerId(), c.channel.Name(), c.cid, c.Uid())
 		if err != nil {
 			log.Println("[ERROR] unbind client err: ", err.Error())
 			return err

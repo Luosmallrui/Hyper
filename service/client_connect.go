@@ -12,7 +12,7 @@ type IClientConnectService interface {
 	// Bind 绑定用户和客户端
 	Bind(ctx context.Context, sid, channel string, clientId int64, uid int) error
 	// UnBind 解除用户和客户端的绑定
-	UnBind(ctx context.Context, sid, channel string, clientId int64) error
+	UnBind(ctx context.Context, sid, channel string, clientId int64, uid int) error
 	// IsUidOnline 检查用户是否在线(不区分服务ID)
 	IsUidOnline(ctx context.Context, channel string, uid int) (bool, error)
 	// IsUidOnlineBySid 检查用户是否在线(指定服务ID)
@@ -32,8 +32,8 @@ func (c *ClientConnectService) Bind(ctx context.Context, sid, channel string, cl
 	return c.Storage.Bind(ctx, sid, channel, clientId, uid)
 }
 
-func (c *ClientConnectService) UnBind(ctx context.Context, sid, channel string, clientId int64) error {
-	return c.Storage.UnBind(ctx, sid, channel, clientId)
+func (c *ClientConnectService) UnBind(ctx context.Context, sid, channel string, clientId int64, uid int) error {
+	return c.Storage.UnBind(ctx, sid, channel, clientId, uid)
 }
 
 func (c *ClientConnectService) IsUidOnline(ctx context.Context, channel string, uid int) (bool, error) {
