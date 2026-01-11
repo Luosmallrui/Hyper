@@ -16,6 +16,11 @@ func NewHealthSubscribe(storage *cache.ServerStorage) *HealthSubscribe {
 	return &HealthSubscribe{storage}
 }
 
+func (s *HealthSubscribe) Init() error {
+
+	return nil
+}
+
 func (s *HealthSubscribe) Setup(ctx context.Context) error {
 
 	log.L.Info("start health subscribe")
