@@ -10,10 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/redis/go-redis/v9"
-	"time"
-
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"time"
 )
 
 var _ IUserService = (*UserService)(nil)
