@@ -141,14 +141,30 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
+	groupService := &service.GroupService{
+		DB: db,
+	}
+	groupHandler := &handler.GroupHandler{
+		Config:       cfg,
+		GroupService: groupService,
+	}
+	groupMemberService := &service.GroupMemberService{
+		DB: db,
+	}
+	groupMemberHandler := &handler.GroupMemberHandler{
+		Config:             cfg,
+		GroupMemberService: groupMemberService,
+	}
 	handlers := &server.Handlers{
-		Auth:    auth,
-		Map:     handlerMap,
-		Message: message,
-		Note:    note,
-		Follow:  follow,
-		User:    user,
-		Session: session,
+		Auth:        auth,
+		Map:         handlerMap,
+		Message:     message,
+		Note:        note,
+		Follow:      follow,
+		User:        user,
+		Session:     session,
+		Group:       groupHandler,
+		GroupMember: groupMemberHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
