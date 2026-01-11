@@ -3,7 +3,6 @@ package nacos
 import (
 	"Hyper/config"
 	"Hyper/pkg/log"
-
 	"github.com/cloudwego/kitex/pkg/registry"
 	nacosreg "github.com/kitex-contrib/registry-nacos/v2/registry"
 	"github.com/nacos-group/nacos-sdk-go/v2/clients"
@@ -23,6 +22,8 @@ func NewRegistry(cfg *config.NacosConfig) registry.Registry {
 		LogDir:              "/tmp/nacos/log",
 		CacheDir:            "/tmp/nacos/cache",
 		LogLevel:            cfg.LogLevel,
+		AccessKey:           cfg.AccessKeyID,
+		SecretKey:           cfg.AccessKeySecret,
 	}
 
 	cli, err := clients.NewNamingClient(vo.NacosClientParam{
