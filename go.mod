@@ -13,6 +13,10 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gorilla/websocket v1.5.3
+<<<<<<< HEAD
+=======
+	github.com/kitex-contrib/registry-nacos/v2 v2.0.0
+>>>>>>> 7f36704970a7bb1dec9dc3c3a710f5cbec013f19
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.5
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/redis/go-redis/v9 v9.17.2
@@ -126,7 +130,11 @@ require (
 	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
 	golang.org/x/tools v0.39.0 // indirect
+<<<<<<< HEAD
 	google.golang.org/genproto v0.0.0-20210513213006-bf773b8c8384 // indirect
+=======
+	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
+>>>>>>> 7f36704970a7bb1dec9dc3c3a710f5cbec013f19
 	google.golang.org/grpc v1.67.3 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

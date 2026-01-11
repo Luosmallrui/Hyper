@@ -22,6 +22,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 
 		client.NewRedisClient,
 		config.ProvideOssConfig,
+		config.ProvideRocketMQConfig,
 		rocketmq.InitProducer,
 		server.NewGinEngine,
 		cache.ProviderSet,
@@ -31,19 +32,20 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Follow), "*"),
 		wire.Struct(new(handler.User), "*"),
 		wire.Struct(new(handler.Session), "*"),
+<<<<<<< HEAD
+=======
+		wire.Struct(new(handler.Message), "*"),
+
+>>>>>>> 7f36704970a7bb1dec9dc3c3a710f5cbec013f19
 		wire.Struct(new(handler.GroupHandler), "*"),
 		wire.Struct(new(handler.GroupMemberHandler), "*"),
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
-
-		wire.Struct(new(handler.Message), "*"),
-		//wire.Struct(new(handler.WSHandler), "*"),
-
+		
 		dao.ProviderSet,
 
 		service.ProviderSet,
 		database.NewDB,
-		//service.NewMessageReadService,
 	)
 	return nil
 }

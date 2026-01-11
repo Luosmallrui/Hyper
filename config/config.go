@@ -9,6 +9,7 @@ import (
 
 // Config 配置信息
 type Config struct {
+<<<<<<< HEAD
 	App    *App       `json:"app" yaml:"app"`
 	Redis  *Redis     `json:"redis" yaml:"redis"`
 	MySQL  *MySQL     `json:"mysql" yaml:"mysql"`
@@ -16,6 +17,16 @@ type Config struct {
 	Oss    *OssConfig `json:"oss" yaml:"oss"`
 	Server *Server    `json:"server" yaml:"server"`
 	Nacos  *Nacos     `json:"nacos" yaml:"nacos"`
+=======
+	App      *App            `json:"app" yaml:"app"`
+	Redis    *Redis          `json:"redis" yaml:"redis"`
+	MySQL    *MySQL          `json:"mysql" yaml:"mysql"`
+	Jwt      *Jwt            `json:"jwt" yaml:"jwt"`
+	Oss      *OssConfig      `json:"oss" yaml:"oss"`
+	Nacos    *NacosConfig    `json:"nacos" yaml:"nacos"`
+	Server   *Server         `json:"server" yaml:"server"`
+	RocketMQ *RocketMQConfig `json:"rocketmq" yaml:"rocketmq"`
+>>>>>>> 7f36704970a7bb1dec9dc3c3a710f5cbec013f19
 }
 
 type Server struct {

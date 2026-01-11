@@ -38,5 +38,6 @@ var ProviderSet = wire.NewSet(
 
 	wire.Struct(new(SessionService), "*"),
 	wire.Bind(new(ISessionService), new(*SessionService)),
+
 	NewOssService,
 )
