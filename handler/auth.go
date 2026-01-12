@@ -80,8 +80,10 @@ func (u *Auth) Refresh(c *gin.Context) error {
 
 	newAccessToken, _ := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "access", 60*time.Second)
 	resp := gin.H{
-		"access_token":  newAccessToken,
-		"refresh_token": "",
+		"access_token":   newAccessToken,
+		"refresh_token":  "",
+		"access_expire":  time.Now().Add(60 * time.Second).Unix(),
+		"refresh_expire": claims.ExpiresAt,
 	}
 	if jwt.ShouldRotateRefreshToken(claims, 24*time.Hour) {
 		newRefreshToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "refresh", 7*24*time.Hour)
@@ -125,8 +127,10 @@ func (u *Auth) Login(c *gin.Context) error {
 	}
 	log.L.Info("generating refresh token", zap.String("token", refreshToken))
 	rep := types.UserToken{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		AccessToken:   accessToken,
+		RefreshToken:  refreshToken,
+		AccessExpire:  time.Now().Add(60 * time.Second).Unix(),
+		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
 	}
 	response.Success(c, rep)
 	return nil

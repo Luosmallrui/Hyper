@@ -81,13 +81,14 @@ func (m *Message) ListMessages(c *gin.Context) error {
 
 	peerId, _ := strconv.ParseUint(c.Query("peer_id"), 10, 64)
 	cursor, _ := strconv.ParseInt(c.Query("cursor"), 10, 64)
+	since, _ := strconv.ParseInt(c.Query("since"), 10, 64)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
 	if peerId == 0 {
 		return response.NewError(400, "peer_id 不能为空")
 	}
 
-	list, err := m.MessageService.ListMessages(c.Request.Context(), uint64(userId), peerId, cursor, limit)
+	list, err := m.MessageService.ListMessages(c.Request.Context(), uint64(userId), peerId, cursor, since, limit)
 	if err != nil {
 		return response.NewError(500, "拉取消息失败")
 	}
