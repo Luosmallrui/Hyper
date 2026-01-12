@@ -76,6 +76,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Follow.RegisterRouter(api)
 	h.Group.RegisterRouter(api)
 	h.GroupMember.RegisterRouter(api)
+	h.CommentsHandler.RegisterRouter(api)
 	return r
 }
 
