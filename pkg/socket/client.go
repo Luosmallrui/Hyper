@@ -1,6 +1,5 @@
 package socket
 
-import "C"
 import (
 	"context"
 	"encoding/json"
