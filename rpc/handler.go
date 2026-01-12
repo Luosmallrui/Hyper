@@ -120,3 +120,90 @@ func (s *PushServiceImpl) PushToClient(
 	}
 	return &push.PushResponse{Success: true}, nil
 }
+
+func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.BatchPushRequest) (r *push.PushResponse, err error) {
+	// 1. 基础检查
+	ch := socket.Session.Chat
+	if ch == nil {
+		log.L.Error("ch is nil")
+		return &push.PushResponse{Success: false, Msg: "chat channel not initialized"}, nil
+	}
+
+	// 2. 公共逻辑提取：消息解析与 DTO 转换（只做一次）
+	// 这里直接复用你之前的解析逻辑
+	var m struct {
+		Id          int64                  `json:"msg_id,string"`
+		ClientMsgID string                 `json:"client_msg_id"`
+		SenderID    int64                  `json:"sender_id,string"`
+		TargetID    int64                  `json:"target_id,string"`
+		SessionID   string                 `json:"session_id"`
+		SessionType int                    `json:"session_type"`
+		MsgType     int                    `json:"msg_type"`
+		Content     string                 `json:"content"`
+		ParentMsgID int64                  `json:"parent_msg_id,string"`
+		Timestamp   int64                  `json:"timestamp"`
+		Status      int                    `json:"status"`
+		Ext         map[string]interface{} `json:"ext"`
+	}
+
+	if err := json.Unmarshal([]byte(req.Payload), &m); err != nil {
+		log.L.Error("batch unmarshal payload failed", zap.Error(err))
+		return &push.PushResponse{Success: false, Msg: "invalid payload"}, nil
+	}
+
+	extBytes, _ := json.Marshal(m.Ext)
+	dto := &types.MessageDTO{
+		MsgID:       strconv.FormatInt(m.Id, 10),
+		ClientMsgID: m.ClientMsgID,
+		SenderID:    strconv.FormatInt(m.SenderID, 10),
+		TargetID:    strconv.FormatInt(m.TargetID, 10),
+		SessionID:   m.SessionID,
+		SessionType: m.SessionType,
+		MsgType:     m.MsgType,
+		Content:     m.Content,
+		Timestamp:   m.Timestamp,
+		Status:      m.Status,
+		Ext:         extBytes,
+	}
+	if m.ParentMsgID != 0 {
+		dto.ParentMsgID = strconv.FormatInt(m.ParentMsgID, 10)
+	}
+
+	// 3. 循环推送给不同的 CID
+	successCount := 0
+	failCount := 0
+
+	for _, cid := range req.Cids {
+		client, ok := ch.Client(cid)
+		if !ok {
+			failCount++
+			continue
+		}
+
+		// 构造响应对象
+		res := &socket.ClientResponse{
+			IsAck:   true,
+			Event:   req.Event,
+			Content: dto,
+			IsSelf:  m.SenderID == int64(client.Uid()),
+		}
+
+		// 执行写入
+		if err := client.Write(res); err != nil {
+			log.L.Error("batch write error", zap.Int64("cid", cid), zap.Error(err))
+			failCount++
+		} else {
+			successCount++
+		}
+	}
+
+	log.L.Info("batch push finished",
+		zap.Int("total", len(req.Cids)),
+		zap.Int("success", successCount),
+		zap.Int("fail", failCount))
+
+	return &push.PushResponse{
+		Success: successCount > 0, // 只要有一个成功就算成功，或者根据业务自定义
+		Msg:     fmt.Sprintf("success:%d, fail:%d", successCount, failCount),
+	}, nil
+}

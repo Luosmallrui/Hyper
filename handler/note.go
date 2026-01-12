@@ -29,7 +29,7 @@ type Note struct {
 func (n *Note) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
-	g.POST("/upload", context.Wrap(n.UploadImage))
+	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))

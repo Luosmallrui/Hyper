@@ -9,8 +9,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 )
 
 var _ IFollowService = (*FollowService)(nil)
@@ -28,7 +27,7 @@ type FollowService struct {
 	FollowDAO *dao.UserFollowDAO
 	StatsDAO  *dao.UserStatsDAO
 	UserDAO   *dao.Users
-	Producer  rocketmq.Producer
+	Producer  rmq_client.Producer
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
@@ -72,7 +71,7 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 	// 发送 MQ 通知
 	go func() {
 		// 查询关注者信息
-		follower, err := s.UserDAO.FindById(context.Background(), followerID)
+		follower, err := s.UserDAO.FindById(ctx, followerID)
 		if err != nil {
 			log.Printf("[MQ] 获取关注者信息失败: %v", err)
 			return
@@ -93,12 +92,12 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 		}
 		body, _ := json.Marshal(msgMap)
 
-		msg := &primitive.Message{
+		msg := &rmq_client.Message{
 			Topic: "hyper_system_messages",
 			Body:  body,
 		}
 
-		if _, err := s.Producer.SendSync(context.Background(), msg); err != nil {
+		if _, err := s.Producer.Send(ctx, msg); err != nil {
 			log.Printf("[MQ] 发送关注通知失败: %v", err)
 		}
 	}()

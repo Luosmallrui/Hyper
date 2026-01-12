@@ -32,6 +32,12 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 
 	// 生成笔记ID
 	noteID := uint64(snowflake.GenUserID())
+	if len(req.TopicIDs) == 0 {
+		req.TopicIDs = make([]int64, 0)
+	}
+	if len(req.MediaData) == 0 {
+		req.MediaData = make([]types.NoteMedia, 0)
+	}
 
 	// 序列化 JSON 字段
 	topicIDsJSON, err := json.Marshal(req.TopicIDs)
