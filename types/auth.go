@@ -74,8 +74,10 @@ type UserProfileResp struct {
 }
 
 type UserToken struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken   string `json:"access_token"`
+	RefreshToken  string `json:"refresh_token"`
+	AccessExpire  int64  `json:"access_expire"`
+	RefreshExpire int64  `json:"refresh_expire"`
 }
 type UserBasicInfo struct {
 	UserID      string `json:"user_id"`    // Snowflake ID（对外）

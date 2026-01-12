@@ -11,15 +11,14 @@ import (
 	"hash/fnv"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type MessageService struct {
 	MessageDao *dao.MessageDAO
-	MqProducer rocketmq.Producer
+	MqProducer rmq_client.Producer
 	Redis      *redis.Client
 	DB         *gorm.DB
 }
@@ -35,10 +34,10 @@ type IMessageService interface {
 	SendSystemMessage(targetID string, content string) error
 	AckMessages(msgIDs []string) error
 	GetMessageByID(msgID string) (*models.Message, error)
-	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error)
+	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
 }
 
-func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error) {
+func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error) {
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -49,47 +48,44 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 	q := s.DB.WithContext(ctx).
 		Model(&models.ImSingleMessage{}).
 		Where("session_hash = ?", sessionHash)
-	if cursor > 0 {
-		q = q.Where("created_at < ?", cursor)
+
+	if since > 0 {
+		q = q.Where("created_at > ?", since).
+			Order("created_at ASC")
+	} else {
+		if cursor > 0 {
+			q = q.Where("created_at < ?", cursor)
+		}
+		q = q.Order("created_at DESC")
 	}
 
 	var msgs []models.ImSingleMessage
-	if err := q.
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&msgs).Error; err != nil {
+	if err := q.Limit(limit).Find(&msgs).Error; err != nil {
 		return nil, err
 	}
 
+	if since <= 0 {
+		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+			msgs[i], msgs[j] = msgs[j], msgs[i]
+		}
+	}
+
 	result := make([]types.ListMessageReq, 0, len(msgs))
-
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-
-		ext := make(map[string]interface{})
+	for _, m := range msgs {
+		ext := map[string]interface{}{}
 		if m.Ext != "" {
-			if err := json.Unmarshal([]byte(m.Ext), &ext); err != nil {
-				ext = make(map[string]interface{})
-			}
-		}
-		if ext == nil {
-			ext = make(map[string]interface{})
+			_ = json.Unmarshal([]byte(m.Ext), &ext)
 		}
 
-		item := types.ListMessageReq{
+		result = append(result, types.ListMessageReq{
 			Id:       uint64(m.Id),
 			SenderId: uint64(m.SenderId),
 			Content:  m.Content,
 			MsgType:  m.MsgType,
 			Ext:      ext,
 			Time:     m.CreatedAt,
-			IsSelf:   false,
-		}
-		if m.SenderId == int64(userId) {
-			item.IsSelf = true
-		}
-
-		result = append(result, item)
+			IsSelf:   m.SenderId == int64(userId),
+		})
 	}
 
 	return result, nil
@@ -125,18 +121,17 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Channel = "chat"
 
 	body, _ := json.Marshal(msg)
-	mqMsg := &primitive.Message{
+	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
 		Body:  body,
 	}
-	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	_, err := s.MqProducer.SendSync(context.Background(), mqMsg)
+	fmt.Println(s.MqProducer, 44)
+	s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
+		for i := 0; i < len(resp); i++ {
+			fmt.Printf("%#v\n", resp[i])
+		}
+	})
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
-	if err != nil {
-		//s.Redis.Del(context.Background(), cacheKey)
-		return err
-	}
-
 	return nil
 }
 
