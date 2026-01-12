@@ -47,9 +47,11 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("rocketmq.client.logRoot", logPath)
 	rmq_client.ResetLogger()
-	p, err := rmq_client.NewProducer(&rmq_client.Config{Endpoint: cfg.NameServer[0],
-		Credentials: &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}},
-		rmq_client.WithTopics(types.ImTopicChat))
+	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0]}
+	if cfg.Ak != "" && cfg.Sk != "" {
+		rmqConfig.Credentials = &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}
+	}
+	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(types.ImTopicChat))
 	if err != nil {
 		log.L.Fatal("Failed to create producer", zap.Error(err))
 	}
@@ -74,14 +76,11 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("rocketmq.client.logRoot", logPath)
 	rmq_client.ResetLogger()
-	c, err := rmq_client.NewSimpleConsumer(&rmq_client.Config{
-		Endpoint:      cfg.NameServer[0],
-		ConsumerGroup: cfg.Consumer.Group,
-		Credentials: &credentials.SessionCredentials{
-			AccessKey:    cfg.Ak,
-			AccessSecret: cfg.Sk,
-		},
-	},
+	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0], ConsumerGroup: cfg.Consumer.Group}
+	if cfg.Ak != "" && cfg.Sk != "" {
+		rmqConfig.Credentials = &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}
+	}
+	c, err := rmq_client.NewSimpleConsumer(rmqConfig,
 		rmq_client.WithSimpleAwaitDuration(awaitDuration),
 		rmq_client.WithSimpleSubscriptionExpressions(map[string]*rmq_client.FilterExpression{
 			"IM_CHAT_MSGS":      rmq_client.SUB_ALL,

@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	heartbeatInterval = 10 // 心跳检测间隔时间
-	heartbeatTimeout  = 35 // 心跳检测超时时间（超时时间是隔间检测时间的2.5倍以上）
+	heartbeatInterval = 30 // 心跳检测间隔时间
+	heartbeatTimeout  = 75 // 心跳检测超时时间（超时时间是隔间检测时间的2.5倍以上）
 )
 
 var health *heartbeat
