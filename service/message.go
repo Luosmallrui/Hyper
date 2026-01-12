@@ -11,15 +11,14 @@ import (
 	"hash/fnv"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type MessageService struct {
 	MessageDao *dao.MessageDAO
-	MqProducer rocketmq.Producer
+	MqProducer rmq_client.Producer
 	Redis      *redis.Client
 	DB         *gorm.DB
 }
@@ -125,18 +124,17 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	msg.Channel = "chat"
 
 	body, _ := json.Marshal(msg)
-	mqMsg := &primitive.Message{
+	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
 		Body:  body,
 	}
-	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	_, err := s.MqProducer.SendSync(context.Background(), mqMsg)
+	fmt.Println(s.MqProducer, 44)
+	s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
+		for i := 0; i < len(resp); i++ {
+			fmt.Printf("%#v\n", resp[i])
+		}
+	})
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
-	if err != nil {
-		//s.Redis.Del(context.Background(), cacheKey)
-		return err
-	}
-
 	return nil
 }
 

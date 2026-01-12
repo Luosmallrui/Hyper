@@ -63,6 +63,62 @@ var fieldIDToName_PushRequest = map[int16]string{
 	4: "event",
 }
 
+type BatchPushRequest struct {
+	Cids    []int64 `thrift:"cids,1" frugal:"1,default,list<i64>" json:"cids"`
+	Uid     int32   `thrift:"uid,2" frugal:"2,default,i32" json:"uid"`
+	Payload string  `thrift:"payload,3" frugal:"3,default,string" json:"payload"`
+	Event   string  `thrift:"event,4" frugal:"4,default,string" json:"event"`
+}
+
+func NewBatchPushRequest() *BatchPushRequest {
+	return &BatchPushRequest{}
+}
+
+func (p *BatchPushRequest) InitDefault() {
+}
+
+func (p *BatchPushRequest) GetCids() (v []int64) {
+	return p.Cids
+}
+
+func (p *BatchPushRequest) GetUid() (v int32) {
+	return p.Uid
+}
+
+func (p *BatchPushRequest) GetPayload() (v string) {
+	return p.Payload
+}
+
+func (p *BatchPushRequest) GetEvent() (v string) {
+	return p.Event
+}
+func (p *BatchPushRequest) SetCids(val []int64) {
+	p.Cids = val
+}
+func (p *BatchPushRequest) SetUid(val int32) {
+	p.Uid = val
+}
+func (p *BatchPushRequest) SetPayload(val string) {
+	p.Payload = val
+}
+func (p *BatchPushRequest) SetEvent(val string) {
+	p.Event = val
+}
+
+func (p *BatchPushRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("BatchPushRequest(%+v)", *p)
+}
+
+var fieldIDToName_BatchPushRequest = map[int16]string{
+	1: "cids",
+	2: "uid",
+	3: "payload",
+	4: "event",
+}
+
 type PushResponse struct {
 	Success bool   `thrift:"success,1" frugal:"1,default,bool" json:"success"`
 	Msg     string `thrift:"msg,2" frugal:"2,default,string" json:"msg"`
@@ -103,6 +159,8 @@ var fieldIDToName_PushResponse = map[int16]string{
 
 type PushService interface {
 	PushToClient(ctx context.Context, req *PushRequest) (r *PushResponse, err error)
+
+	BatchPushToClient(ctx context.Context, req *BatchPushRequest) (r *PushResponse, err error)
 }
 
 type PushServicePushToClientArgs struct {
@@ -178,5 +236,81 @@ func (p *PushServicePushToClientResult) String() string {
 }
 
 var fieldIDToName_PushServicePushToClientResult = map[int16]string{
+	0: "success",
+}
+
+type PushServiceBatchPushToClientArgs struct {
+	Req *BatchPushRequest `thrift:"req,1" frugal:"1,default,BatchPushRequest" json:"req"`
+}
+
+func NewPushServiceBatchPushToClientArgs() *PushServiceBatchPushToClientArgs {
+	return &PushServiceBatchPushToClientArgs{}
+}
+
+func (p *PushServiceBatchPushToClientArgs) InitDefault() {
+}
+
+var PushServiceBatchPushToClientArgs_Req_DEFAULT *BatchPushRequest
+
+func (p *PushServiceBatchPushToClientArgs) GetReq() (v *BatchPushRequest) {
+	if !p.IsSetReq() {
+		return PushServiceBatchPushToClientArgs_Req_DEFAULT
+	}
+	return p.Req
+}
+func (p *PushServiceBatchPushToClientArgs) SetReq(val *BatchPushRequest) {
+	p.Req = val
+}
+
+func (p *PushServiceBatchPushToClientArgs) IsSetReq() bool {
+	return p.Req != nil
+}
+
+func (p *PushServiceBatchPushToClientArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PushServiceBatchPushToClientArgs(%+v)", *p)
+}
+
+var fieldIDToName_PushServiceBatchPushToClientArgs = map[int16]string{
+	1: "req",
+}
+
+type PushServiceBatchPushToClientResult struct {
+	Success *PushResponse `thrift:"success,0,optional" frugal:"0,optional,PushResponse" json:"success,omitempty"`
+}
+
+func NewPushServiceBatchPushToClientResult() *PushServiceBatchPushToClientResult {
+	return &PushServiceBatchPushToClientResult{}
+}
+
+func (p *PushServiceBatchPushToClientResult) InitDefault() {
+}
+
+var PushServiceBatchPushToClientResult_Success_DEFAULT *PushResponse
+
+func (p *PushServiceBatchPushToClientResult) GetSuccess() (v *PushResponse) {
+	if !p.IsSetSuccess() {
+		return PushServiceBatchPushToClientResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *PushServiceBatchPushToClientResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PushResponse)
+}
+
+func (p *PushServiceBatchPushToClientResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *PushServiceBatchPushToClientResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PushServiceBatchPushToClientResult(%+v)", *p)
+}
+
+var fieldIDToName_PushServiceBatchPushToClientResult = map[int16]string{
 	0: "success",
 }
