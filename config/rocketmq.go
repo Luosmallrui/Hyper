@@ -6,6 +6,8 @@ type RocketMQConfig struct {
 	Producer Producer `yaml:"producer"`
 
 	Consumer Consumer `yaml:"consumer"`
+	Ak       string   `yaml:"ak"`
+	Sk       string   `yaml:"sk"`
 }
 
 type Producer struct {

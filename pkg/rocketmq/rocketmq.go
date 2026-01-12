@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/apache/rocketmq-client-go/v2/rlog"
@@ -15,19 +14,6 @@ import (
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"go.uber.org/zap"
-)
-
-var wg sync.WaitGroup
-
-const (
-	Topic         = "IM_CHAT_MSGS"
-	ConsumerGroup = "IM_STORAGE_GROUP"
-	// Endpoint 填写腾讯云提供的接入地址
-	Endpoint = "rmq-163wpoz74o.rocketmq.cd.public.tencenttdmq.com:8080"
-	// AccessKey 添加配置的ak
-	AccessKey = "ak163wpoz74o167d5c7fb947"
-	// SecretKey 添加配置的sk
-	SecretKey = "skcbcfbab1a66254c3"
 )
 
 var (
@@ -40,8 +26,6 @@ var (
 	// receive concurrency
 	receiveConcurrency = 6
 )
-
-var defaultLoggerOnce sync.Once
 
 func init() {
 	rlog.SetLogLevel("error")
@@ -63,8 +47,8 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("rocketmq.client.logRoot", logPath)
 	rmq_client.ResetLogger()
-	p, err := rmq_client.NewProducer(&rmq_client.Config{Endpoint: "rmq-163wpoz74o.rocketmq.cd.public.tencenttdmq.com:8080",
-		Credentials: &credentials.SessionCredentials{AccessKey: AccessKey, AccessSecret: SecretKey}},
+	p, err := rmq_client.NewProducer(&rmq_client.Config{Endpoint: cfg.NameServer[0],
+		Credentials: &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}},
 		rmq_client.WithTopics(types.ImTopicChat))
 	if err != nil {
 		log.L.Fatal("Failed to create producer", zap.Error(err))
@@ -91,11 +75,11 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	os.Setenv("rocketmq.client.logRoot", logPath)
 	rmq_client.ResetLogger()
 	c, err := rmq_client.NewSimpleConsumer(&rmq_client.Config{
-		Endpoint:      Endpoint,
-		ConsumerGroup: ConsumerGroup,
+		Endpoint:      cfg.NameServer[0],
+		ConsumerGroup: cfg.Consumer.Group,
 		Credentials: &credentials.SessionCredentials{
-			AccessKey:    AccessKey,
-			AccessSecret: SecretKey,
+			AccessKey:    cfg.Ak,
+			AccessSecret: cfg.Sk,
 		},
 	},
 		rmq_client.WithSimpleAwaitDuration(awaitDuration),
