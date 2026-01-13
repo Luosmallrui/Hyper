@@ -3,6 +3,7 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -33,19 +34,21 @@ func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int, l
 	return notes, err
 }
 
-func (d *NoteDAO) ListNode(ctx context.Context, limit, offset int) (notes []*models.Note, total int64, err error) {
-
+func (d *NoteDAO) ListNode(ctx context.Context, cursor int64, limit int) (notes []*models.Note, err error) {
 	db := d.Db.WithContext(ctx).Model(&models.Note{})
 
-	if err = db.Count(&total).Error; err != nil {
-		return
+	// 如果前端传了游标（大于0），则查询该时间点之前的数据
+	if cursor > 0 {
+		// 将纳秒时间戳转回 time.Time 对象
+		cursorTime := time.Unix(0, cursor)
+		db = db.Where("created_at < ?", cursorTime)
 	}
-
+	// 必须按时间倒序排，最新的在前
 	err = db.Order("created_at DESC").
 		Limit(limit).
-		Offset(offset).
 		Find(&notes).Error
-	return
+
+	return notes, err
 }
 
 // UpdateStatus 更新笔记状态

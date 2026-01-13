@@ -65,19 +65,19 @@ func (n *Note) UploadImage(c *gin.Context) error {
 }
 
 func (n *Note) ListNode(c *gin.Context) error {
-	var req types.Leaf
+	var req types.ListNotesReq // 对应上面定义的结构体
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
 	}
-	if req.Page == 0 {
-		req.Page = types.DefaultPage
-	}
+
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
-	rep, err := n.NoteService.ListNode(c.Request.Context(), req.Page, req.PageSize)
+
+	// 调用 Service
+	rep, err := n.NoteService.ListNode(c.Request.Context(), req.Cursor, req.PageSize)
 	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
+		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
 	}
 
 	response.Success(c, rep)
