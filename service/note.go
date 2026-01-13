@@ -188,8 +188,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		return 0, err
 	}
 
-	// 修改这里: Location 为 nil 时使用 "{}" 或 "null"
-	locationJSON := "{}" // 或者用 "null"
+	locationJSON := "{}"
 	if req.Location != nil {
 		locBytes, err := json.Marshal(req.Location)
 		if err != nil {
@@ -213,7 +212,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		Location:    locationJSON,
 		MediaData:   string(mediaDataJSON),
 		Type:        req.Type,
-		Status:      0,
+		Status:      0, // 默认审核中
 		VisibleConf: req.VisibleConf,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -223,8 +222,31 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		note.VisibleConf = types.VisibleConfPublic
 	}
 
-	// 保存到数据库
-	if err := s.NoteDAO.Create(ctx, note); err != nil {
+	// 使用事务保存笔记和统计记录
+	err = s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
+		// 1. 创建笔记
+		if err := tx.Create(note).Error; err != nil {
+			return err
+		}
+
+		// 2. 创建统计记录
+		stats := &models.NoteStats{
+			NoteID:       noteID,
+			LikeCount:    0,
+			CollCount:    0,
+			ShareCount:   0,
+			CommentCount: 0,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		if err := tx.Create(stats).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return 0, err
 	}
 

@@ -88,3 +88,7 @@ func (d *NoteStatsDAO) IncrementViewCount(ctx context.Context, noteID uint64, de
 		UpdateColumn("view_count", gorm.Expr("view_count + ?", delta)).
 		Error
 }
+
+func (d *NoteDAO) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return d.Db.WithContext(ctx).Transaction(fn)
+}
