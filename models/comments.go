@@ -24,36 +24,6 @@ func (Comments) TableName() string {
 	return "comments"
 }
 
-// Topic 话题表
-type Topic struct {
-	ID          uint32    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Name        string    `gorm:"column:name;uniqueIndex:uk_name;type:varchar(64);not null" json:"name"` // 话题名称
-	Description string    `gorm:"column:description;type:varchar(255)" json:"description"`               // 话题简介
-	CoverURL    string    `gorm:"column:cover_url;type:varchar(255)" json:"cover_url"`                   // 封面图
-	PostCount   uint32    `gorm:"column:post_count;default:0" json:"post_count"`                         // 帖子数
-	ViewCount   uint32    `gorm:"column:view_count;default:0" json:"view_count"`                         // 浏览量
-	IsHot       bool      `gorm:"column:is_hot;default:0" json:"is_hot"`                                 // 是否热门
-	Status      int8      `gorm:"column:status;default:1" json:"status"`                                 // 1-正常, 0-禁用
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
-}
-
-func (Topic) TableName() string {
-	return "topics"
-}
-
-// TopicPostRelation 话题与帖子关联表
-type TopicPostRelation struct {
-	ID        uint64    `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	TopicID   uint32    `gorm:"column:topic_id;not null;index:idx_topic_post_time" json:"topic_id"` // 话题ID
-	PostID    uint64    `gorm:"column:post_id;not null;index:idx_post_id" json:"post_id"`           // 帖子ID
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`                 // 关联时间
-}
-
-func (TopicPostRelation) TableName() string {
-	return "topic_post_relations"
-}
-
 // CommentLike 评论点赞表
 type CommentLike struct {
 	ID        uint64    `gorm:"primaryKey" json:"id"`
