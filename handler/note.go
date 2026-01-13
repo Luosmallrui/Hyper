@@ -261,7 +261,7 @@ func (n *Note) Like(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
 	}
 
-	err = n.LikeService.Like(c.Request.Context(), uint64(userID), noteID)
+	err = n.LikeService.LikeNote(c.Request.Context(), uint64(userID), noteID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -285,7 +285,7 @@ func (n *Note) Unlike(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
 	}
 
-	err = n.LikeService.Unlike(c.Request.Context(), uint64(userID), noteID)
+	err = n.LikeService.UnlikeNote(c.Request.Context(), uint64(userID), noteID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
