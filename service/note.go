@@ -4,7 +4,6 @@ import (
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/snowflake"
-	"Hyper/pkg/utils"
 	"Hyper/types"
 	"context"
 	"encoding/json"
@@ -20,9 +19,12 @@ type INoteService interface {
 	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
 	ListNode(ctx context.Context, cursor int64, pageSize int) (types.ListNotesRep, error)
 }
+type NoteService struct {
+	NoteDAO     *dao.NoteDAO
+	UserService IUserService
+}
 
 func (s *NoteService) ListNode(ctx context.Context, cursor int64, pageSize int) (types.ListNotesRep, error) {
-	// 多查一条用于判断 HasMore
 	limit := pageSize + 1
 	nodes, err := s.NoteDAO.ListNode(ctx, cursor, limit)
 	if err != nil {
@@ -35,32 +37,63 @@ func (s *NoteService) ListNode(ctx context.Context, cursor int64, pageSize int) 
 	}
 
 	actualCount := len(nodes)
+	if actualCount == 0 {
+		return rep, nil
+	}
+
 	displayCount := actualCount
 	if actualCount > pageSize {
 		rep.HasMore = true
-		displayCount = pageSize // 实际只给前端返回 pageSize 条
+		displayCount = pageSize
 	}
 
+	// 只收集需要展示的数据的用户ID
+	userIds := make([]uint64, 0, displayCount)
 	for i := 0; i < displayCount; i++ {
-		dto, err := utils.ConvertNoteModelToDTO(nodes[i])
-		if err != nil {
-			return rep, err
+		userIds = append(userIds, nodes[i].UserID)
+	}
+	userMap := s.UserService.BatchGetUserInfo(ctx, userIds)
+
+	for i := 0; i < displayCount; i++ {
+		note := nodes[i]
+		dto := &types.Notes{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			Type:        note.Type,
+			Status:      note.Status,
+			VisibleConf: note.VisibleConf,
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
 		}
+
+		// 安全地获取用户信息
+		if user, ok := userMap[note.UserID]; ok {
+			dto.Avatar = user.Avatar
+			dto.Nickname = user.Nickname
+		}
+
+		if err := json.Unmarshal([]byte(note.TopicIDs), &dto.TopicIDs); err != nil {
+			dto.TopicIDs = make([]int64, 0)
+		}
+		if err := json.Unmarshal([]byte(note.Location), &dto.Location); err != nil {
+			dto.Location = types.Location{}
+		}
+
+		var noteMedia []types.NoteMedia
+		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
+			dto.MediaData = noteMedia[0]
+		} else {
+			dto.MediaData = types.NoteMedia{}
+		}
+
 		rep.Notes = append(rep.Notes, dto)
 	}
 
-	// 计算下一个游标
-	if displayCount > 0 {
-		// 取显示列表的最后一条数据的时间，转为纳秒时间戳
-		// 前端下次请求把这个值填入 cursor 字段
-		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
-	}
+	rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
 
 	return rep, nil
-}
-
-type NoteService struct {
-	NoteDAO *dao.NoteDAO
 }
 
 // CreateNote 创建笔记
@@ -85,7 +118,8 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		return 0, err
 	}
 
-	locationJSON := ""
+	// 修改这里: Location 为 nil 时使用 "{}" 或 "null"
+	locationJSON := "{}" // 或者用 "null"
 	if req.Location != nil {
 		locBytes, err := json.Marshal(req.Location)
 		if err != nil {
@@ -109,7 +143,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		Location:    locationJSON,
 		MediaData:   string(mediaDataJSON),
 		Type:        req.Type,
-		Status:      0, // 默认审核中
+		Status:      0,
 		VisibleConf: req.VisibleConf,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
