@@ -77,12 +77,14 @@ func (u *Auth) Refresh(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusUnauthorized, err.Error())
 	}
+	expireDuration := time.Duration(u.Config.Jwt.ExpiresTime) * time.Second
+	expireAt := time.Now().Add(expireDuration)
 
-	newAccessToken, _ := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "access", 60*time.Second)
+	newAccessToken, _ := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), claims.UserID, claims.OpenID, "access", expireDuration)
 	resp := gin.H{
 		"access_token":   newAccessToken,
 		"refresh_token":  "",
-		"access_expire":  time.Now().Add(60 * time.Second).Unix(),
+		"access_expire":  expireAt.Unix(),
 		"refresh_expire": claims.ExpiresAt,
 	}
 	if jwt.ShouldRotateRefreshToken(claims, 24*time.Hour) {
@@ -116,7 +118,7 @@ func (u *Auth) Login(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-	accessToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "access", 60*time.Second)
+	accessToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "access", time.Duration(u.Config.Jwt.ExpiresTime)*time.Second)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -129,7 +131,7 @@ func (u *Auth) Login(c *gin.Context) error {
 	rep := types.UserToken{
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
-		AccessExpire:  time.Now().Add(60 * time.Second).Unix(),
+		AccessExpire:  time.Now().Add(time.Duration(u.Config.Jwt.ExpiresTime) * time.Second).Unix(),
 		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
 	}
 	response.Success(c, rep)
