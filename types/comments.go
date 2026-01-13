@@ -21,3 +21,15 @@ type CommentResponse struct {
 	ReplyToUserID *uint64 `json:"reply_to_user_id,omitempty"` // 被回复人ID
 	CreatedAt     string  `json:"created_at"`                 // 创建时间
 }
+
+type DeleteCommentRequest struct {
+	CommentID uint64 `json:"id" binding:"required"` // 评论ID
+}
+
+type LikeCommentRequest struct {
+	CommentID uint64 `json:"comment_id" binding:"required"` // 评论ID
+}
+
+type UnlikeCommentRequest struct {
+	CommentID uint64 `json:"comment_id" binding:"required"` // 评论ID
+}

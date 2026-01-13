@@ -53,3 +53,15 @@ type TopicPostRelation struct {
 func (TopicPostRelation) TableName() string {
 	return "topic_post_relations"
 }
+
+// CommentLike 评论点赞表
+type CommentLike struct {
+	ID        uint64    `gorm:"primaryKey" json:"id"`
+	CommentID uint64    `gorm:"index:idx_comment_user,unique" json:"comment_id"`
+	UserID    uint64    `gorm:"index:idx_comment_user,unique" json:"user_id"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+func (CommentLike) TableName() string {
+	return "comment_likes"
+}
