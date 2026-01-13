@@ -34,7 +34,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
-	g.GET("/list", context.Wrap(n.ListNode))
+	g.GET("/list", context.Wrap(n.ListNote))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
@@ -64,8 +64,8 @@ func (n *Note) UploadImage(c *gin.Context) error {
 	return nil
 }
 
-func (n *Note) ListNode(c *gin.Context) error {
-	var req types.ListNotesReq // 对应上面定义的结构体
+func (n *Note) ListNote(c *gin.Context) error {
+	var req types.ListNotesReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
 	}
