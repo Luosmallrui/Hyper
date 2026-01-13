@@ -26,6 +26,7 @@ type MessageService struct {
 var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
+	SaveMessage(msg *models.ImSingleMessage) error
 	SaveSingleMessage(msg *models.ImSingleMessage) error
 	SaveGroupMessage(msg *models.ImGroupMessage) error
 	SendMessage(msg *types.Message) error
@@ -35,6 +36,11 @@ type IMessageService interface {
 	AckMessages(msgIDs []string) error
 	GetMessageByID(msgID string) (*models.Message, error)
 	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
+}
+
+func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
+	// 执行插入
+	return s.MessageDao.Save(msg)
 }
 
 func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error) {
@@ -134,9 +140,6 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		return err
 	}
 
-	mqMsg := &primitive.Message{
-		Topic: types.ImTopicChat,
-	body, _ := json.Marshal(msg)
 	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
 		Body:  body,
@@ -149,17 +152,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	})
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
 
-	// 5) ShardingKey：保证“同一会话/同一群”的消息尽量落在同一分片上，顺序更稳定
-	switch msg.SessionType {
-	case types.SessionTypeSingle:
-		// 单聊按目标用户分片
-		mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	case types.GroupChatSessionTypeGroup:
-		// 群聊按群分片（加 g_ 前缀避免和用户ID字符串混淆）
-		mqMsg.WithShardingKey(fmt.Sprintf("g_%d", msg.TargetID))
-	}
-
-	_, err = s.MqProducer.SendSync(context.Background(), mqMsg)
+	_, err = s.MqProducer.Send(context.Background(), mqMsg)
 	if err != nil {
 		return err
 	}
