@@ -1,13 +1,12 @@
 package process
 
 import (
+	"Hyper/dao"
 	"Hyper/dao/cache"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
-	"time"
-
-	"Hyper/pkg/log"
 	"Hyper/service"
 	"Hyper/types"
 	"context"
@@ -15,6 +14,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/cloudwego/kitex/client"
@@ -30,6 +30,7 @@ type MessageSubscribe struct {
 	MessageStorage *cache.MessageStorage
 	SessionService service.ISessionService
 	UnreadStorage  *cache.UnreadStorage
+	GroupDAO       *dao.GroupDAO
 }
 
 var clientCache sync.Map // map[string]pushservice.Client
@@ -61,10 +62,9 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		log.L.Error("unmarshal msg error", zap.Error(err))
 		return nil
 	}
-
-	// 业务逻辑处理
-	if imMsg.SessionType == types.SessionTypeSingle {
-		extBytes, _ := json.Marshal(imMsg.Ext)
+	extBytes, _ := json.Marshal(imMsg.Ext)
+	switch imMsg.SessionType {
+	case types.SessionTypeSingle:
 		immsg := &models.ImSingleMessage{
 			Id:          imMsg.Id,
 			SessionHash: imMsg.SessionHash,
@@ -108,8 +108,37 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 				m.doBatchPush(bgCtx, int(msg.SenderID), &msg, int(msg.SenderID))
 			}
 		}(imMsg)
+	case types.GroupChatSessionTypeGroup:
+		// 2) 群聊落库：只存 1 条到 im_message（models.Message）
+		gdb := &models.ImGroupMessage{
+			Id:          imMsg.Id,
+			SessionHash: imMsg.SessionHash,
+			SessionId:   imMsg.SessionID,
+			SenderId:    imMsg.SenderID,
+			TargetId:    imMsg.TargetID, // groupId
+			MsgType:     imMsg.MsgType,
+			Content:     imMsg.Content,
+			ParentMsgId: imMsg.ParentMsgID,
+			Status:      types.MsgStatusSuccess,
+			CreatedAt:   time.Now().Unix(),
+			Ext:         string(extBytes),
+			UpdatedAt:   time.Now(),
+		}
+		if err := m.MessageService.SaveGroupMessage(gdb); err != nil {
+			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
+		}
+		// 3) 查群成员（批量推送的“成员列表”来源）
+		memberUIDs, err := m.GroupDAO.GetGroupMembers(fmt.Sprintf("%d", imMsg.TargetID))
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[MQ] 获取群成员失败 group=%d err=%v", imMsg.TargetID, err))
+		}
+		go func(copyMsg types.Message, members []string) {
+			m.updateCacheGroup(ctx, &copyMsg, members)
+			m.dispatchToGroup(ctx, &copyMsg, members)
+		}(imMsg, memberUIDs)
+	default:
+		log.L.Error(fmt.Sprintf("[MQ] 未知 SessionType=%d, msg_id=%d", imMsg.SessionType, imMsg.Id))
 	}
-
 	return nil
 }
 func (m *MessageSubscribe) doBatchPush(ctx context.Context, uid int, msg *types.Message, targetUID int) {
@@ -302,4 +331,120 @@ func (m *MessageSubscribe) GetUserRoute(ctx context.Context, uid int) (map[strin
 
 	// 返回结果示例: map["sid_A"]: ["c1", "c2"], map["sid_B"]: ["c3"]
 	return routeMap, nil
+}
+
+func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Message, members []string) {
+	const maxFanout = 32
+	sem := make(chan struct{}, maxFanout)
+	var wg sync.WaitGroup
+
+	for _, uidStr := range members {
+		uid, err := strconv.Atoi(uidStr)
+		if err != nil {
+			continue
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(receiver int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			m.dispatchToUser(ctx, receiver, msg)
+		}(uid)
+	}
+
+	wg.Wait()
+}
+
+// 私聊推送（也被群聊复用）
+func (m *MessageSubscribe) dispatchToUser(ctx context.Context, uid int, msg *types.Message) {
+	key := RouterKey{}
+	msg.Status = types.MsgStatusSuccess
+
+	// 1) 取出用户在哪些 sid 上在线
+	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+	if err != nil || len(sids) == 0 {
+		log.L.Error(fmt.Sprintf("[Router] uid=%d offline or no route (no sids), err=%v", uid, err))
+		return
+	}
+
+	payload, _ := json.Marshal(msg)
+
+	for _, sid := range sids {
+
+		userKey := key.UserClients(sid, msg.Channel, uid)
+
+		// 2) 这里做“短暂重试”，避免刚连接时 set 还没写完
+		var cids []string
+		for attempt := 0; attempt < 3; attempt++ {
+			cids, err = m.Redis.SMembers(ctx, userKey).Result()
+			if err == nil && len(cids) > 0 {
+				break
+			}
+			// 10ms, 30ms, 50ms（总共 < 100ms）
+			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
+		}
+
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s read cids err=%v", uid, sid, err))
+			continue
+		}
+
+		// 关键：不要因为 cids 空就删除 location
+		if len(cids) == 0 {
+			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s has route but empty cids (skip, no delete)", uid, sid))
+			continue
+		}
+
+		// 3) RPC 推送
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[RPC] get client fail sid=%s err=%v", sid, err))
+			continue
+		}
+
+		for _, cidStr := range cids {
+			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+			_, err := cli.PushToClient(ctx, &push.PushRequest{
+				Cid:     cid,
+				Uid:     int32(uid),
+				Payload: string(payload),
+				Event:   "chat",
+			})
+			if err != nil {
+				// 只有 RPC 明确不可达，才清理 sid（这个清理是合理的）
+				log.L.Error(fmt.Sprintf("[RPC] push fail uid=%d sid=%s cid=%d err=%v, cleanup route", uid, sid, cid, err))
+				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+				clientCache.Delete(sid)
+				break
+			}
+		}
+	}
+}
+
+func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) {
+	groupID := int(msg.TargetID)
+	senderID := int(msg.SenderID)
+	pipe := m.Redis.Pipeline()
+	summary := &cache.LastCacheMessage{
+		Content:   truncateContent(msg.Content, 50),
+		Timestamp: msg.Timestamp,
+	}
+	for _, uidStr := range members {
+		uid, err := strconv.Atoi(uidStr)
+		if err != nil {
+			continue
+		}
+		// sender 不加未读，其他人加未读
+		if uid != senderID {
+			m.UnreadStorage.PipeIncr(ctx, pipe, uid, types.GroupChatSessionTypeGroup, groupID)
+		}
+		// 所有人（含 sender）更新会话列表摘要：peerId 用 groupID
+		m.MessageStorage.Set(ctx, types.GroupChatSessionTypeGroup, uid, groupID, summary)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.L.Error(fmt.Sprintf("[Cache] group 更新失败 group=%d err=%v", groupID, err))
+	}
 }

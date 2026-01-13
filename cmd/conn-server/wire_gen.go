@@ -83,6 +83,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		UnreadStorage:  unreadStorage,
 		UserService:    userService,
 	}
+	groupDAO := dao.NewGroupDAO(db)
 	messageSubscribe := &process.MessageSubscribe{
 		Redis:          redisClient,
 		DB:             db,
@@ -90,6 +91,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		MessageStorage: messageStorage,
 		SessionService: sessionService,
 		UnreadStorage:  unreadStorage,
+		GroupDAO:       groupDAO,
 	}
 	noticeSubscribe := &process.NoticeSubscribe{
 		Redis:          redisClient,
