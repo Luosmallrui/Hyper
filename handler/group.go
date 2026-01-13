@@ -16,7 +16,7 @@ type GroupHandler struct {
 	GroupService service.IGroupService
 }
 
-func NewGroupHandler(config *config.Config, groupService *service.GroupService) *GroupHandler {
+func NewGroupHandler(config *config.Config, groupService service.IGroupService) *GroupHandler {
 	return &GroupHandler{
 		GroupService: groupService,
 		Config:       config,
