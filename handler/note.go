@@ -35,7 +35,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
-	g.GET("/list", context.Wrap(n.ListNote))
+	g.GET("/list", authorize, context.Wrap(n.ListNote))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
@@ -46,7 +46,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
-	g.GET("/:id", context.Wrap(n.GetNoteDetail))
+	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
 }
 
 func (n *Note) GetNoteDetail(c *gin.Context) error {
