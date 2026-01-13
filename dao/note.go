@@ -33,6 +33,21 @@ func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int, l
 	return notes, err
 }
 
+func (d *NoteDAO) ListNode(ctx context.Context, limit, offset int) (notes []*models.Note, total int64, err error) {
+
+	db := d.Db.WithContext(ctx).Model(&models.Note{})
+
+	if err = db.Count(&total).Error; err != nil {
+		return
+	}
+
+	err = db.Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&notes).Error
+	return
+}
+
 // UpdateStatus 更新笔记状态
 func (d *NoteDAO) UpdateStatus(ctx context.Context, noteID uint64, status int) error {
 	return d.Db.WithContext(ctx).
