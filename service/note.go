@@ -4,6 +4,7 @@ import (
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/snowflake"
+	"Hyper/pkg/utils"
 	"Hyper/types"
 	"context"
 	"encoding/json"
@@ -17,6 +18,29 @@ type INoteService interface {
 	CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error)
 	GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error)
 	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
+	ListNode(ctx context.Context, page, pageSize int) (types.ListNotesRep, error)
+}
+
+func (s *NoteService) ListNode(ctx context.Context, page, pageSize int) (types.ListNotesRep, error) {
+	limit := pageSize
+	offset := (page - 1) * pageSize
+	rep := types.ListNotesRep{
+		Notes: make([]*types.Notes, 0),
+		Total: 0,
+	}
+	nodes, total, err := s.NoteDAO.ListNode(ctx, limit, offset)
+	if err != nil {
+		return rep, err
+	}
+	rep.Total = total
+	for _, note := range nodes {
+		dto, err := utils.ConvertNoteModelToDTO(note)
+		if err != nil {
+			return rep, err
+		}
+		rep.Notes = append(rep.Notes, dto)
+	}
+	return rep, nil
 }
 
 type NoteService struct {

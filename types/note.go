@@ -111,3 +111,29 @@ type GetMyCollectionsResponse struct {
 	Notes []*Note `json:"notes"`
 	Total int     `json:"total"`
 }
+
+type Leaf struct {
+	Page     int `form:"page"`      // 页码（从1开始）
+	PageSize int `form:"pageSize" ` // 每页数量
+}
+
+type Notes struct {
+	ID        int64       `json:"id"`        // 雪花算法ID
+	UserID    int64       `json:"user_id"`   // 作者ID
+	Title     string      `json:"title"`     // 标题
+	Content   string      ` json:"content"`  // 正文内容
+	TopicIDs  []int64     `json:"topic_ids"` // 话题列表
+	Location  Location    `json:"location"`  // 地理位置{lat, lng, name}
+	MediaData []NoteMedia `json:"media_data"`
+
+	Type        int       `json:"type"`         // 1-图文, 2-视频
+	Status      int       `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
+	VisibleConf int       `json:"visible_conf"` // 1-公开, 2-粉丝可见, 3-自己可见
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ListNotesRep struct {
+	Notes []*Notes `json:"notes"`
+	Total int64    `json:"total"`
+}
