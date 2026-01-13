@@ -16,6 +16,15 @@ func NewNoteCollectionDAO(db *gorm.DB) *NoteCollectionDAO {
 	return &NoteCollectionDAO{Repo: NewRepo[models.NoteCollection](db)}
 }
 
+func (d *NoteCollectionDAO) CheckExists(ctx context.Context, userID, noteID uint64) (bool, error) {
+	var count int64
+	err := d.Db.WithContext(ctx).
+		Model(&models.NoteCollection{}).
+		Where("user_id = ? AND note_id = ?", userID, noteID).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // GetByNoteUser 查询指定用户对指定笔记的收藏记录
 func (d *NoteCollectionDAO) GetByNoteUser(ctx context.Context, noteID uint64, userID uint64) (*models.NoteCollection, error) {
 	var item models.NoteCollection

@@ -70,3 +70,21 @@ func (d *NoteDAO) FindByIDs(ctx context.Context, ids []uint64) ([]*models.Note, 
 		Find(&notes).Error
 	return notes, err
 }
+
+func (d *NoteDAO) GetByID(ctx context.Context, noteID uint64) (*models.Note, error) {
+	var note models.Note
+	err := d.Db.WithContext(ctx).
+		Where("id = ?", noteID).
+		First(&note).Error
+	return &note, err
+}
+
+// dao/note_stats_dao.go
+
+func (d *NoteStatsDAO) IncrementViewCount(ctx context.Context, noteID uint64, delta int) error {
+	return d.Db.WithContext(ctx).
+		Model(&models.NoteStats{}).
+		Where("note_id = ?", noteID).
+		UpdateColumn("view_count", gorm.Expr("view_count + ?", delta)).
+		Error
+}
