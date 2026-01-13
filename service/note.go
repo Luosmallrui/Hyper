@@ -18,28 +18,44 @@ type INoteService interface {
 	CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error)
 	GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error)
 	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
-	ListNode(ctx context.Context, page, pageSize int) (types.ListNotesRep, error)
+	ListNode(ctx context.Context, cursor int64, pageSize int) (types.ListNotesRep, error)
 }
 
-func (s *NoteService) ListNode(ctx context.Context, page, pageSize int) (types.ListNotesRep, error) {
-	limit := pageSize
-	offset := (page - 1) * pageSize
-	rep := types.ListNotesRep{
-		Notes: make([]*types.Notes, 0),
-		Total: 0,
-	}
-	nodes, total, err := s.NoteDAO.ListNode(ctx, limit, offset)
+func (s *NoteService) ListNode(ctx context.Context, cursor int64, pageSize int) (types.ListNotesRep, error) {
+	// 多查一条用于判断 HasMore
+	limit := pageSize + 1
+	nodes, err := s.NoteDAO.ListNode(ctx, cursor, limit)
 	if err != nil {
-		return rep, err
+		return types.ListNotesRep{}, err
 	}
-	rep.Total = total
-	for _, note := range nodes {
-		dto, err := utils.ConvertNoteModelToDTO(note)
+
+	rep := types.ListNotesRep{
+		Notes:   make([]*types.Notes, 0),
+		HasMore: false,
+	}
+
+	actualCount := len(nodes)
+	displayCount := actualCount
+	if actualCount > pageSize {
+		rep.HasMore = true
+		displayCount = pageSize // 实际只给前端返回 pageSize 条
+	}
+
+	for i := 0; i < displayCount; i++ {
+		dto, err := utils.ConvertNoteModelToDTO(nodes[i])
 		if err != nil {
 			return rep, err
 		}
 		rep.Notes = append(rep.Notes, dto)
 	}
+
+	// 计算下一个游标
+	if displayCount > 0 {
+		// 取显示列表的最后一条数据的时间，转为纳秒时间戳
+		// 前端下次请求把这个值填入 cursor 字段
+		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
+	}
+
 	return rep, nil
 }
 

@@ -133,7 +133,12 @@ type Notes struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type ListNotesReq struct {
+	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
+	PageSize int   `form:"pageSize"`
+}
 type ListNotesRep struct {
-	Notes []*Notes `json:"notes"`
-	Total int64    `json:"total"`
+	Notes      []*Notes `json:"notes"`
+	NextCursor int64    `json:"next_cursor"` // 返回给前端，下次请求带上
+	HasMore    bool     `json:"has_more"`    // 告诉前端是否还有更多
 }
