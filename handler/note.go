@@ -51,7 +51,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 
 func (n *Note) GetNoteDetail(c *gin.Context) error {
 	// 获取笔记ID
-	noteIDStr := c.Param("id")
+	noteIDStr := c.Param("note_id")
 	noteID, err := strconv.ParseUint(noteIDStr, 10, 64)
 	if err != nil {
 		return response.NewError(http.StatusBadRequest, "笔记ID格式错误")

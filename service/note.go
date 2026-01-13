@@ -276,10 +276,10 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		return nil, err
 	}
 
-	// 2. 检查笔记可见性
-	if err := s.checkNoteVisible(ctx, note, currentUserID); err != nil {
-		return nil, err
-	}
+	//// 2. 检查笔记可见性
+	//if err := s.checkNoteVisible(ctx, note, currentUserID); err != nil {
+	//	return nil, err
+	//}
 
 	// 3. 并发获取关联数据
 	var (
