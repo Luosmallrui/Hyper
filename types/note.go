@@ -133,6 +133,18 @@ type Notes struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	Avatar      string    `json:"avatar"`
 	Nickname    string    `json:"nickname"`
+
+	// 统计数据
+	LikeCount    int64 `json:"like_count"`
+	CollCount    int64 `json:"coll_count"`
+	ShareCount   int64 `json:"share_count"`
+	CommentCount int64 `json:"comment_count"`
+	ViewCount    int64 `json:"view_count,omitempty"`
+
+	// 用户相关状态
+	IsLiked     bool `json:"is_liked"`     // 当前用户是否点赞
+	IsCollected bool `json:"is_collected"` // 当前用户是否收藏
+	IsFollowed  bool `json:"is_followed"`  // 当前用户是否关注作者
 }
 
 type ListNotesReq struct {
@@ -143,4 +155,44 @@ type ListNotesRep struct {
 	Notes      []*Notes `json:"notes"`
 	NextCursor int64    `json:"next_cursor"` // 返回给前端，下次请求带上
 	HasMore    bool     `json:"has_more"`    // 告诉前端是否还有更多
+}
+
+type NoteStats struct {
+	NoteID       uint64 `json:"note_id"`
+	LikeCount    int64  `json:"like_count"`
+	CollCount    int64  `json:"coll_count"`
+	ShareCount   int64  `json:"share_count"`
+	CommentCount int64  `json:"comment_count"`
+	ViewCount    int64  `json:"view_count,omitempty"` // 如果后续加浏览数
+}
+
+type NoteDetail struct {
+	ID          int64       `json:"id"`
+	UserID      int64       `json:"user_id"`
+	Title       string      `json:"title"`
+	Content     string      `json:"content"`
+	TopicIDs    []int64     `json:"topic_ids"`
+	Location    Location    `json:"location"`
+	MediaData   []NoteMedia `json:"media_data"`
+	Type        int         `json:"type"`
+	Status      int         `json:"status"`
+	VisibleConf int         `json:"visible_conf"`
+
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+
+	// 统计数据
+	LikeCount    int64 `json:"like_count"`
+	CollCount    int64 `json:"coll_count"`
+	ShareCount   int64 `json:"share_count"`
+	CommentCount int64 `json:"comment_count"`
+	ViewCount    int64 `json:"view_count"`
+
+	// 用户交互状态
+	IsLiked     bool `json:"is_liked"`
+	IsCollected bool `json:"is_collected"`
+	IsFollowed  bool `json:"is_followed"` // 是否关注了作者
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

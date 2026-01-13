@@ -44,6 +44,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
 		Producer:  producer,
+		Redis:     redisClient,
 	}
 	noteLikeDAO := dao.NewNoteLikeDAO(db)
 	noteStatsDAO := dao.NewNoteStatsDAO(db)
@@ -52,12 +53,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeDAO:  noteLikeDAO,
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
+		Redis:    redisClient,
 	}
 	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
 	collectService := &service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		Redis:         redisClient,
 	}
 	auth := &handler.Auth{
 		Config:         cfg,
@@ -92,8 +95,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:         cfg,
 	}
 	noteService := &service.NoteService{
-		NoteDAO:     noteDAO,
-		UserService: userService,
+		NoteDAO:        noteDAO,
+		UserService:    userService,
+		LikeService:    likeService,
+		RedisClient:    redisClient,
+		StatsDAO:       noteStatsDAO,
+		FollowService:  followService,
+		CollectService: collectService,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -112,16 +120,19 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
 		Producer:  producer,
+		Redis:     redisClient,
 	}
 	serviceLikeService := service.LikeService{
 		LikeDAO:  noteLikeDAO,
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
+		Redis:    redisClient,
 	}
 	serviceCollectService := service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		Redis:         redisClient,
 	}
 	user := &handler.User{
 		Config:         cfg,

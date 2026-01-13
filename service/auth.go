@@ -24,7 +24,7 @@ type IUserService interface {
 	UpdatePassword(uid int, oldPassword string, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
-	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
+	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile
 	GetUserAvatar(ctx context.Context, uid int64) (string, string, error)
 	GetUserInfo(ctx context.Context, uid int) (*models.Users, error)
 	SendVerifyCode(ctx context.Context, mobile string) error
@@ -192,13 +192,8 @@ func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateU
 	return nil
 }
 
-type UserInfo struct {
-	Avatar   string `json:"avatar"`
-	Nickname string `json:"nickname"`
-}
-
-func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo {
-	result := make(map[uint64]UserInfo)
+func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile {
+	result := make(map[uint64]types.UserProfile)
 	if len(uids) == 0 {
 		return result
 	}
@@ -214,7 +209,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 	missingIds := make([]uint64, 0)
 	for i, val := range cacheRes {
 		if val != nil {
-			var info UserInfo
+			var info types.UserProfile
 			_ = json.Unmarshal([]byte(val.(string)), &info)
 			result[uids[i]] = info
 		} else {
@@ -233,7 +228,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 		pipe := s.Redis.Pipeline()
 		for _, user := range dbUsers {
-			info := UserInfo{Avatar: user.Avatar, Nickname: user.Nickname}
+			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname}
 			result[user.Id] = info
 
 			// 写入缓存供下次使用

@@ -13,6 +13,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "golang.org/x/image/webp"
@@ -45,8 +46,30 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
+	g.GET("/:id", context.Wrap(n.GetNoteDetail))
 }
 
+func (n *Note) GetNoteDetail(c *gin.Context) error {
+	// 获取笔记ID
+	noteIDStr := c.Param("id")
+	noteID, err := strconv.ParseUint(noteIDStr, 10, 64)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "笔记ID格式错误")
+	}
+
+	// 获取当前用户ID (可选,未登录为0)
+	currentUserID, _ := context.GetUserID(c)
+
+	// 调用 Service 获取详情
+	detail, err := n.NoteService.GetNoteDetail(c.Request.Context(), noteID, uint64(currentUserID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 返回成功响应
+	response.Success(c, detail)
+	return nil
+}
 func (n *Note) UploadImage(c *gin.Context) error {
 	userID, err := context.GetUserID(c)
 	if err != nil {
@@ -65,6 +88,11 @@ func (n *Note) UploadImage(c *gin.Context) error {
 }
 
 func (n *Note) ListNote(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
 	var req types.ListNotesReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
@@ -75,7 +103,7 @@ func (n *Note) ListNote(c *gin.Context) error {
 	}
 
 	// 调用 Service
-	rep, err := n.NoteService.ListNode(c.Request.Context(), req.Cursor, req.PageSize)
+	rep, err := n.NoteService.ListNote(c.Request.Context(), req.Cursor, req.PageSize, uint64(userID))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
 	}

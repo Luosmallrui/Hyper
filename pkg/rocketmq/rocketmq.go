@@ -53,11 +53,11 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 	}
 	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(types.ImTopicChat))
 	if err != nil {
-		log.L.Fatal("Failed to create producer", zap.Error(err))
+		log.L.Info("Failed to create producer", zap.Error(err))
 	}
 	err = p.Start()
 	if err != nil {
-		log.L.Fatal("Failed to start producer", zap.Error(err))
+		log.L.Info("Failed to start producer", zap.Error(err))
 	}
 	return p
 }

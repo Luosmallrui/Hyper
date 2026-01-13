@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/redis/go-redis/v9"
 	"log"
 	"time"
 
@@ -21,6 +23,7 @@ type IFollowService interface {
 	GetFollowerCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error)
+	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
 }
 
 type FollowService struct {
@@ -28,6 +31,7 @@ type FollowService struct {
 	StatsDAO  *dao.UserStatsDAO
 	UserDAO   *dao.Users
 	Producer  rmq_client.Producer
+	Redis     *redis.Client
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
@@ -174,4 +178,19 @@ func (s *FollowService) GetFollowingCount(ctx context.Context, userID uint64) (i
 
 func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
 	return s.FollowDAO.GetFollowingList(ctx, userID, limit, offset)
+}
+
+func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error) {
+	if followerID == 0 || followerID == followeeID {
+		return false, nil
+	}
+
+	// 类似的逻辑
+	key := fmt.Sprintf("user:following:%d", followerID)
+	exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
+	if err == nil {
+		return exists, nil
+	}
+
+	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }
