@@ -167,16 +167,24 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:             cfg,
 		GroupMemberService: groupMemberService,
 	}
+	commentsService := &service.CommentsService{
+		DB: db,
+	}
+	commentsHandler := &handler.CommentsHandler{
+		Config:          cfg,
+		CommentsService: commentsService,
+	}
 	handlers := &server.Handlers{
-		Auth:        auth,
-		Map:         handlerMap,
-		Message:     message,
-		Note:        note,
-		Follow:      follow,
-		User:        user,
-		Session:     session,
-		Group:       groupHandler,
-		GroupMember: groupMemberHandler,
+		Auth:            auth,
+		Map:             handlerMap,
+		Message:         message,
+		Note:            note,
+		Follow:          follow,
+		User:            user,
+		Session:         session,
+		Group:           groupHandler,
+		GroupMember:     groupMemberHandler,
+		CommentsHandler: commentsHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

@@ -13,3 +13,7 @@ type Group struct {
 	CreatedAt   time.Time `gorm:"column:created_at;" json:"created_at"`           // 创建时间
 	UpdatedAt   time.Time `gorm:"column:updated_at;" json:"updated_at"`           // 更新时间
 }
+
+func (Group) TableName() string {
+	return "groups"
+}
