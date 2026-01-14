@@ -9,9 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
-	"time"
 )
 
 var _ IUserService = (*UserService)(nil)
@@ -228,7 +229,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 		pipe := s.Redis.Pipeline()
 		for _, user := range dbUsers {
-			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname}
+			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname, UserID: user.Id}
 			result[user.Id] = info
 
 			// 写入缓存供下次使用
