@@ -3,16 +3,18 @@ package service
 import (
 	"Hyper/dao"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/pkg/snowflake"
 	"Hyper/types"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/cloudwego/kitex/tool/internal_pkg/log"
-	"github.com/redis/go-redis/v9"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"gorm.io/gorm"
 )
@@ -262,7 +264,7 @@ func (s *CommentsService) updateRedisAfterCommentLike(ctx context.Context, userI
 	// 执行 Pipeline (即使失败也不影响业务)
 	if _, err := pipe.Exec(ctx); err != nil {
 		// 记录日志
-		log.Error("更新Redis缓存失败", "error", err, "userID", userID, "commentID", commentID)
+		log.L.Error("更新Redis缓存失败", zap.Error(err))
 	}
 }
 
@@ -425,7 +427,7 @@ func (s *CommentsService) CreateComment(ctx context.Context, req *types.CreateCo
 		UserID:        userID,
 		RootID:        req.RootID,
 		ParentID:      req.ParentID,
-		ReplyToUserID: req.ReplyToUserID,
+		ReplyToUserID: uint64(req.ReplyToUserID),
 		Content:       strings.TrimSpace(req.Content),
 		LikeCount:     0,
 		ReplyCount:    0,

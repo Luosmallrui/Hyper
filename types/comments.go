@@ -5,26 +5,26 @@ import "time"
 
 // 创建评论请求
 type CreateCommentRequest struct {
-	NoteID        uint64 `json:"note_id" binding:"required"`
+	NoteID        uint64 `json:"note_id,string" binding:"required"`
 	Content       string `json:"content" binding:"required,min=1,max=1000"`
-	RootID        uint64 `json:"root_id"`          // 根评论ID(回复评论时需要)
-	ParentID      uint64 `json:"parent_id"`        // 父评论ID(回复评论时需要)
-	ReplyToUserID uint64 `json:"reply_to_user_id"` // 回复的目标用户ID
+	RootID        uint64 `json:"root_id,string"`   // 根评论ID(回复评论时需要)
+	ParentID      uint64 `json:"parent_id,string"` // 父评论ID(回复评论时需要)
+	ReplyToUserID int    `json:"reply_to_user_id"` // 回复的目标用户ID
 }
 
 // 删除评论请求
 type DeleteCommentRequest struct {
-	CommentID uint64 `json:"comment_id" binding:"required"`
+	CommentID uint64 `json:"comment_id,string" binding:"required"`
 }
 
 // 点赞评论请求
 type LikeCommentRequest struct {
-	CommentID uint64 `json:"comment_id" binding:"required"`
+	CommentID uint64 `json:"comment_id,string" binding:"required"`
 }
 
 // 取消点赞评论请求
 type UnlikeCommentRequest struct {
-	CommentID uint64 `json:"comment_id" binding:"required"`
+	CommentID uint64 `json:"comment_id,string" binding:"required"`
 }
 
 // 评论响应(一级评论)
