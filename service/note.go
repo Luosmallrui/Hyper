@@ -9,11 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/cloudwego/kitex/tool/internal_pkg/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
-	"sync"
-	"time"
 )
 
 var _ INoteService = (*NoteService)(nil)
@@ -460,9 +461,8 @@ func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserPro
 		detail.LikeCount = stats.LikeCount
 		detail.CollCount = stats.CollCount
 		detail.ShareCount = stats.ShareCount
-		detail.CommentCount = stats.CommentCount
 	}
-
+	detail.CommentCount = commentPreview.TotalCount
 	// 用户交互状态
 	detail.IsLiked = isLiked
 	detail.IsCollected = isCollected
