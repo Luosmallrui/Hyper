@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"Hyper/middleware"
 	"Hyper/pkg/context"
+	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
@@ -40,8 +41,11 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) error {
 	}
 
 	//从上下文中获取用户ID
-	UserId := c.GetInt("user_id")
-
+	UserIdval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	UserId := int(UserIdval)
 	//调用服务层创建群
 	group, err := h.GroupService.CreateGroup(c, &req, UserId)
 	if err != nil {

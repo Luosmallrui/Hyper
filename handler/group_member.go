@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"Hyper/middleware"
 	"Hyper/pkg/context"
+	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
@@ -39,20 +40,24 @@ func (h *GroupMemberHandler) InviteMember(c *gin.Context) error {
 		return err
 	}
 	//执行邀请的用户ID
-	userId := c.GetInt("user_id")
+	//从上下文中获取用户ID
+	UserIdval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	UserId := int(UserIdval)
 	//req.GroupId,req.UserIds,请求参数前者是群ID，后者是被邀请的用户ID列表
-	resp, err := h.GroupMemberService.InviteMembers(c, req.GroupId, req.UserIds, userId)
+	resp, err := h.GroupMemberService.InviteMembers(c, req.GroupId, req.UserIds, UserId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "邀请成员失败: " + err.Error(),
 		})
 		return err
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "邀请成员成功",
-		"data":    resp,
+	response.Success(c, gin.H{
+		"invited_members": resp,
 	})
+
 	return nil
 }
 
@@ -65,20 +70,19 @@ func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 		return err
 	}
 
-	userId := c.GetInt("user_id")
-
-	err := h.GroupMemberService.KickMember(c, req.GroupId, userId, req.KickedUserId)
-
+	UserIdval, err := context.GetUserID(c)
 	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	UserId := int(UserIdval)
+
+	if err := h.GroupMemberService.KickMember(c, req.GroupId, UserId, req.KickedUserId); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "踢出成员失败: " + err.Error(),
 		})
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "踢出成员成功",
-	})
+	response.Success(c, "踢出成员成功")
 	return nil
 }
