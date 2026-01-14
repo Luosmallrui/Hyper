@@ -81,7 +81,7 @@ func (n *Note) UploadImage(c *gin.Context) error {
 	}
 	img, err := n.OssService.UploadImage(c.Request.Context(), int(userID), header)
 	if err != nil {
-		return err
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, img)
 	return nil

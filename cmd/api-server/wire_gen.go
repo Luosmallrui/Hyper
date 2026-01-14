@@ -167,8 +167,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:             cfg,
 		GroupMemberService: groupMemberService,
 	}
+	comment := dao.NewComment(db)
+	commentLike := dao.NewCommentLike(db)
 	commentsService := &service.CommentsService{
-		DB: db,
+		DB:             db,
+		CommentDAO:     comment,
+		CommentLikeDAO: commentLike,
+		UserService:    userService,
+		Redis:          redisClient,
 	}
 	commentsHandler := &handler.CommentsHandler{
 		Config:          cfg,

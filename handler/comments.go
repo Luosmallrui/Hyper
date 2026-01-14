@@ -29,8 +29,8 @@ func (ch *CommentsHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(ch.Config.Jwt.Secret))
 	comments := r.Group("/comments")
 	comments.POST("/create", authorize, context.Wrap(ch.CreateComment)) //创建评论
-	comments.GET("/list/:postId", context.Wrap(ch.GetComments))
-	comments.GET("/replies/:rootId", context.Wrap(ch.GetReplyComments))
+	comments.GET("/list/:note_id", authorize, context.Wrap(ch.GetComments))
+	comments.GET("/replies/:rootId", authorize, context.Wrap(ch.GetReplyComments))
 	comments.POST("/delete", authorize, context.Wrap(ch.DeleteComment))
 	comments.POST("/like", authorize, context.Wrap(ch.LikeComment)) //点赞评论
 	comments.POST("/unlike", authorize, context.Wrap(ch.UnlikeComment))
@@ -41,11 +41,7 @@ func (ch *CommentsHandler) CreateComment(c *gin.Context) error {
 	var req types.CreateCommentRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数失败" + err.Error(),
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	userIDval, err := context.GetUserID(c)
 	if err != nil {
@@ -54,134 +50,105 @@ func (ch *CommentsHandler) CreateComment(c *gin.Context) error {
 
 	userID := uint64(userIDval)
 	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "用户ID无效",
-		})
-		return nil
+		return response.NewError(http.StatusUnauthorized, "用户ID无效")
 	}
 	comment, err := ch.CommentsService.CreateComment(c, &req, userID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "创建评论失败: " + err.Error(),
-		})
-		return nil
+		return response.NewError(http.StatusBadRequest, "创建评论失败: "+err.Error())
 	}
 
-	response.Success(c, gin.H{
-		"message": "评论创建成功",
-		"data":    comment,
-	})
+	response.Success(c, comment)
 	return nil
 }
 
-// GetComments 获取评论列表
+// handler/comment_handler.go
+
+// GetComments 获取评论列表(游标分页)
 func (ch *CommentsHandler) GetComments(c *gin.Context) error {
-	postIdStr := c.Param("postId")
-	postID, err := strconv.ParseUint(postIdStr, 10, 64)
-	if err != nil || postID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "post_id参数错误",
-		})
-		return err
+	noteIDStr := c.Param("note_id")
+	noteID, err := strconv.ParseUint(noteIDStr, 10, 64)
+	if err != nil || noteID == 0 {
+		return response.NewError(http.StatusBadRequest, "note_id参数错误")
 	}
 
-	page := 1
-	pageSize := 20
-
-	if p := c.Query("page"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			page = v
+	// 游标(可选)
+	cursor := int64(0)
+	if cursorStr := c.Query("cursor"); cursorStr != "" {
+		if v, err := strconv.ParseInt(cursorStr, 10, 64); err == nil {
+			cursor = v
 		}
 	}
 
-	if ps := c.Query("pageSize"); ps != "" {
+	// 每页数量
+	pageSize := 20
+	if ps := c.Query("page_size"); ps != "" {
 		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 100 {
 			pageSize = v
 		}
 	}
-	comments, total, err := ch.CommentsService.GetComments(c, postID, page, pageSize)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "获取评论失败: " + err.Error(),
-		})
-		return nil
+
+	// 获取当前用户ID(可能未登录)
+	currentUserID := uint64(0)
+	if userIDval, err := context.GetUserID(c); err == nil {
+		currentUserID = uint64(userIDval)
 	}
 
-	response.Success(c, gin.H{
-		"message": "获取评论成功",
-		"data": gin.H{
-			"comments":  comments,
-			"total":     total,
-			"page":      page,
-			"page_size": pageSize,
-		},
-	})
+	// 调用 Service
+	result, err := ch.CommentsService.GetComments(c.Request.Context(), noteID, cursor, pageSize, currentUserID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "获取评论失败: "+err.Error())
+	}
+
+	response.Success(c, result)
 	return nil
 }
 
+// GetReplyComments 获取回复列表(游标分页)
 func (ch *CommentsHandler) GetReplyComments(c *gin.Context) error {
-	//获取评论的rootid
-	rootId := c.Param("rootId")
-	rootID, err := strconv.ParseUint(rootId, 10, 64)
+	rootIDStr := c.Param("rootId")
+	rootID, err := strconv.ParseUint(rootIDStr, 10, 64)
 	if err != nil || rootID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "root_id参数错误",
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "rootId参数错误")
 	}
 
-	page := 1
-	pageSize := 20
-
-	if p := c.Query("page"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil && v > 0 {
-			page = v
+	// 游标(可选)
+	cursor := int64(0)
+	if cursorStr := c.Query("cursor"); cursorStr != "" {
+		if v, err := strconv.ParseInt(cursorStr, 10, 64); err == nil {
+			cursor = v
 		}
 	}
-	if ps := c.Query("pageSize"); ps != "" {
+
+	// 每页数量
+	pageSize := 20
+	if ps := c.Query("page_size"); ps != "" {
 		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 100 {
 			pageSize = v
 		}
 	}
 
-	replies, total, err := ch.CommentsService.GetReplies(c, rootID, page, pageSize)
-
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "获取回复评论失败: " + err.Error(),
-		})
-		return nil
+	// 获取当前用户ID
+	currentUserID := uint64(0)
+	if userIDval, err := context.GetUserID(c); err == nil {
+		currentUserID = uint64(userIDval)
 	}
-	response.Success(c, gin.H{
-		"message": "获取回复评论成功",
-		"data": gin.H{
-			"replies":   replies,
-			"total":     total,
-			"page":      page,
-			"page_size": pageSize,
-		},
-	})
+
+	// 调用 Service
+	result, err := ch.CommentsService.GetReplies(c.Request.Context(), rootID, cursor, pageSize, currentUserID)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "获取回复失败: "+err.Error())
+	}
+
+	response.Success(c, result)
 	return nil
 }
-
 func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 	var req types.DeleteCommentRequest
 
 	// 1. 绑定参数
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数失败: " + err.Error(),
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "请求参数失败"+err.Error())
 	}
-
 	userIDval, err := context.GetUserID(c)
 	if err != nil {
 		return response.NewError(http.StatusUnauthorized, "未登录")
@@ -189,20 +156,12 @@ func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 
 	userID := uint64(userIDval)
 	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "用户ID无效",
-		})
-		return nil
+		return response.NewError(http.StatusUnauthorized, "用户ID无效")
 	}
 
 	// 4. 执行业务逻辑
 	if err := ch.CommentsService.DeleteComment(c, req.CommentID, userID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "删除评论失败: " + err.Error(),
-		})
-		return nil
+		return response.NewError(http.StatusBadRequest, "删除评论失败: "+err.Error())
 	}
 
 	response.Success(c, "删除评论成功")
@@ -213,11 +172,7 @@ func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 func (ch *CommentsHandler) LikeComment(c *gin.Context) error {
 	var req types.LikeCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数失败" + err.Error(),
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "请求参数失败"+err.Error())
 	}
 	userIDval, err := context.GetUserID(c)
 	if err != nil {
@@ -226,23 +181,12 @@ func (ch *CommentsHandler) LikeComment(c *gin.Context) error {
 
 	userID := uint64(userIDval)
 	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "用户ID无效",
-		})
-		return nil
+		return response.NewError(http.StatusUnauthorized, "用户ID无效")
 	}
 	if err := ch.CommentsService.LikeComment(c, req.CommentID, userID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "点赞评论失败: " + err.Error(),
-		})
-		return nil
+		return response.NewError(http.StatusBadRequest, "点赞评论失败: "+err.Error())
 	}
-	response.Success(c, gin.H{
-		"code":    200,
-		"message": "评论点赞成功",
-	})
+	response.Success(c, "ok")
 	return nil
 }
 
@@ -251,11 +195,7 @@ func (ch *CommentsHandler) UnlikeComment(c *gin.Context) error {
 	var req types.UnlikeCommentRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数失败" + err.Error(),
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "请求参数失败"+err.Error())
 	}
 	userIDval, err := context.GetUserID(c)
 	if err != nil {
@@ -264,18 +204,10 @@ func (ch *CommentsHandler) UnlikeComment(c *gin.Context) error {
 
 	userID := uint64(userIDval)
 	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "用户ID无效",
-		})
-		return nil
+		return response.NewError(http.StatusUnauthorized, "用户ID无效")
 	}
 	if err := ch.CommentsService.UnlikeComment(c, req.CommentID, userID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "取消点赞评论失败: " + err.Error(),
-		})
-		return nil
+		return response.NewError(http.StatusBadRequest, "取消点赞评论失败: "+err.Error())
 	}
 	response.Success(c, "评论取消点赞成功")
 	return nil
