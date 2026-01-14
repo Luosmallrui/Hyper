@@ -3,8 +3,9 @@ package dao
 import (
 	"Hyper/models"
 	"context"
-	"gorm.io/gorm"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Comment struct {
@@ -87,7 +88,7 @@ func (d *Comment) GetRootCommentCount(ctx context.Context, noteID uint64) (int64
 	var count int64
 	err := d.Db.WithContext(ctx).
 		Model(&models.Comment{}).
-		Where("note_id = ? AND root_id = 0 AND status = 1", noteID).
+		Where("note_id = ? ", noteID).
 		Count(&count).Error
 	return count, err
 }
