@@ -27,7 +27,7 @@ func NewCommentsHandler(config *config.Config, commentsService service.IComments
 
 func (ch *CommentsHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(ch.Config.Jwt.Secret))
-	comments := r.Group("/comments")
+	comments := r.Group("/v1/comments")
 	comments.POST("/create", authorize, context.Wrap(ch.CreateComment)) //创建评论
 	comments.GET("/list/:note_id", authorize, context.Wrap(ch.GetComments))
 	comments.GET("/replies/:rootId", authorize, context.Wrap(ch.GetReplyComments))
