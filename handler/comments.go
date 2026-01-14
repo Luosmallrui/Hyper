@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"Hyper/middleware"
 	"Hyper/pkg/context"
+	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
@@ -46,17 +47,12 @@ func (ch *CommentsHandler) CreateComment(c *gin.Context) error {
 		})
 		return err
 	}
-
-	userIDval, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权,请登录",
-		})
-		return nil
+	userIDval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
-	userID := uint64(userIDval.(int))
-	//userID := uint64(1)
+
+	userID := uint64(userIDval)
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
@@ -73,8 +69,7 @@ func (ch *CommentsHandler) CreateComment(c *gin.Context) error {
 		return nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
+	response.Success(c, gin.H{
 		"message": "评论创建成功",
 		"data":    comment,
 	})
@@ -116,8 +111,7 @@ func (ch *CommentsHandler) GetComments(c *gin.Context) error {
 		return nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
+	response.Success(c, gin.H{
 		"message": "获取评论成功",
 		"data": gin.H{
 			"comments":  comments,
@@ -164,8 +158,7 @@ func (ch *CommentsHandler) GetReplyComments(c *gin.Context) error {
 		})
 		return nil
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
+	response.Success(c, gin.H{
 		"message": "获取回复评论成功",
 		"data": gin.H{
 			"replies":   replies,
@@ -180,24 +173,21 @@ func (ch *CommentsHandler) GetReplyComments(c *gin.Context) error {
 func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 	var req types.DeleteCommentRequest
 
+	// 1. 绑定参数
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": "请求参数失败" + err.Error(),
+			"message": "请求参数失败: " + err.Error(),
 		})
 		return err
 	}
-	userIDval, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权,请登录",
-		})
-		return nil
-	}
-	userID := uint64(userIDval.(int))
-	//userID := uint64(1)
 
+	userIDval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+
+	userID := uint64(userIDval)
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
@@ -205,8 +195,9 @@ func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 		})
 		return nil
 	}
-	err := ch.CommentsService.DeleteComment(c, req.CommentID, userID)
-	if err != nil {
+
+	// 4. 执行业务逻辑
+	if err := ch.CommentsService.DeleteComment(c, req.CommentID, userID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "删除评论失败: " + err.Error(),
@@ -214,10 +205,8 @@ func (ch *CommentsHandler) DeleteComment(c *gin.Context) error {
 		return nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "评论删除成功",
-	})
+	response.Success(c, "删除评论成功")
+
 	return nil
 }
 
@@ -230,17 +219,12 @@ func (ch *CommentsHandler) LikeComment(c *gin.Context) error {
 		})
 		return err
 	}
-	userIDval, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权,请登录",
-		})
-		return nil
+	userIDval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
-	userID := uint64(userIDval.(int))
-	//userID := uint64(1)
 
+	userID := uint64(userIDval)
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
@@ -248,15 +232,14 @@ func (ch *CommentsHandler) LikeComment(c *gin.Context) error {
 		})
 		return nil
 	}
-	err := ch.CommentsService.LikeComment(c, req.CommentID, userID)
-	if err != nil {
+	if err := ch.CommentsService.LikeComment(c, req.CommentID, userID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "点赞评论失败: " + err.Error(),
 		})
 		return nil
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"code":    200,
 		"message": "评论点赞成功",
 	})
@@ -274,17 +257,12 @@ func (ch *CommentsHandler) UnlikeComment(c *gin.Context) error {
 		})
 		return err
 	}
-	userIDval, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权,请登录",
-		})
-		return nil
+	userIDval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
-	userID := uint64(userIDval.(int))
-	//userID := uint64(1)
 
+	userID := uint64(userIDval)
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
@@ -292,18 +270,13 @@ func (ch *CommentsHandler) UnlikeComment(c *gin.Context) error {
 		})
 		return nil
 	}
-
-	err := ch.CommentsService.UnlikeComment(c, req.CommentID, userID)
-	if err != nil {
+	if err := ch.CommentsService.UnlikeComment(c, req.CommentID, userID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "取消点赞评论失败: " + err.Error(),
 		})
 		return nil
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code":    200,
-		"message": "评论取消点赞成功",
-	})
+	response.Success(c, "评论取消点赞成功")
 	return nil
 }
