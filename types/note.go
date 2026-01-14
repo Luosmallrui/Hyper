@@ -190,10 +190,15 @@ type NoteDetail struct {
 	ViewCount    int64 `json:"view_count"`
 
 	// 用户交互状态
-	IsLiked     bool `json:"is_liked"`
-	IsCollected bool `json:"is_collected"`
-	IsFollowed  bool `json:"is_followed"` // 是否关注了作者
+	IsLiked        bool            `json:"is_liked"`
+	IsCollected    bool            `json:"is_collected"`
+	IsFollowed     bool            `json:"is_followed"` // 是否关注了作者
+	CommentPreview *CommentPreview `json:"comment_preview"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+type CommentPreview struct {
+	TotalCount int64              `json:"total_count"` // 评论总数
+	Comments   []*CommentResponse `json:"comments"`    // 前3条评论
 }
