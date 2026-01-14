@@ -39,9 +39,83 @@ type ICommentsService interface {
 	DeleteComment(ctx context.Context, commentID, userID uint64) error
 	LikeComment(ctx context.Context, commentID, userID uint64) error
 	UnlikeComment(ctx context.Context, commentID, userID uint64) error
+	GetTopComments(ctx context.Context, noteID uint64, limit int, currentUserID uint64) ([]*types.CommentResponse, error)
 }
 
-// service/comment_service.go
+func (s *CommentsService) GetTopComments(ctx context.Context, noteID uint64, limit int, currentUserID uint64) ([]*types.CommentResponse, error) {
+	// 1. 获取前N条一级评论
+	comments, err := s.CommentDAO.GetRootCommentsByCursor(ctx, noteID, 0, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(comments) == 0 {
+		return make([]*types.CommentResponse, 0), nil
+	}
+
+	// 2. 收集用户ID和评论ID
+	commentIDs := make([]uint64, 0, len(comments))
+	userIDs := make([]uint64, 0, len(comments))
+
+	for _, comment := range comments {
+		commentIDs = append(commentIDs, comment.ID)
+		userIDs = append(userIDs, comment.UserID)
+	}
+
+	// 3. 并发获取关联数据
+	var (
+		userMap       map[uint64]types.UserProfile
+		likeStatusMap map[uint64]bool
+		wg            sync.WaitGroup
+		mu            sync.Mutex
+	)
+
+	wg.Add(2)
+
+	// 获取用户信息
+	go func() {
+		defer wg.Done()
+		userMap = s.UserService.BatchGetUserInfo(ctx, userIDs)
+	}()
+
+	// 获取点赞状态
+	go func() {
+		defer wg.Done()
+		if currentUserID > 0 {
+			likes, err := s.CommentLikeDAO.BatchCheckExists(ctx, commentIDs, currentUserID)
+			if err == nil {
+				mu.Lock()
+				likeStatusMap = likes
+				mu.Unlock()
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// 4. 组装响应(不包含回复,笔记详情页只展示评论本身)
+	result := make([]*types.CommentResponse, 0, len(comments))
+
+	for _, comment := range comments {
+		resp := &types.CommentResponse{
+			ID:            comment.ID,
+			NoteID:        comment.NoteID,
+			UserID:        comment.UserID,
+			Content:       comment.Content,
+			LikeCount:     comment.LikeCount,
+			ReplyCount:    comment.ReplyCount,
+			IPLocation:    comment.IPLocation,
+			IsLiked:       likeStatusMap[comment.ID],
+			CreatedAt:     comment.CreatedAt,
+			User:          userMap[comment.UserID],
+			LatestReplies: make([]*types.ReplyResponse, 0), // 详情页不展示回复
+		}
+
+		result = append(result, resp)
+	}
+
+	return result, nil
+}
 
 func (s *CommentsService) LikeComment(ctx context.Context, commentID, userID uint64) error {
 	// 1. 分布式锁,防止重复点赞

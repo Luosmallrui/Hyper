@@ -94,14 +94,25 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:    userService,
 		Config:         cfg,
 	}
+	comment := dao.NewComment(db)
+	commentLike := dao.NewCommentLike(db)
+	commentsService := &service.CommentsService{
+		DB:             db,
+		CommentDAO:     comment,
+		CommentLikeDAO: commentLike,
+		UserService:    userService,
+		Redis:          redisClient,
+	}
 	noteService := &service.NoteService{
 		NoteDAO:        noteDAO,
+		CommentDAO:     comment,
 		UserService:    userService,
 		LikeService:    likeService,
 		RedisClient:    redisClient,
 		StatsDAO:       noteStatsDAO,
 		FollowService:  followService,
 		CollectService: collectService,
+		CommentService: commentsService,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -166,15 +177,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,
 		GroupMemberService: groupMemberService,
-	}
-	comment := dao.NewComment(db)
-	commentLike := dao.NewCommentLike(db)
-	commentsService := &service.CommentsService{
-		DB:             db,
-		CommentDAO:     comment,
-		CommentLikeDAO: commentLike,
-		UserService:    userService,
-		Redis:          redisClient,
 	}
 	commentsHandler := &handler.CommentsHandler{
 		Config:          cfg,

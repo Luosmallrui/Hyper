@@ -27,12 +27,14 @@ type INoteService interface {
 }
 type NoteService struct {
 	NoteDAO        *dao.NoteDAO
+	CommentDAO     *dao.Comment
 	UserService    IUserService
 	LikeService    ILikeService
 	RedisClient    *redis.Client
 	StatsDAO       *dao.NoteStatsDAO
 	FollowService  IFollowService
 	CollectService ICollectService
+	CommentService ICommentsService
 }
 
 func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error) {
@@ -283,16 +285,18 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 
 	// 3. 并发获取关联数据
 	var (
-		userInfo    *types.UserProfile
-		stats       *types.NoteStats
-		isLiked     bool
-		isCollected bool
-		isFollowed  bool
-		wg          sync.WaitGroup
-		mu          sync.Mutex
+		userInfo       *types.UserProfile
+		stats          *types.NoteStats
+		commentPreview *types.CommentPreview
+		isLiked        bool
+		isCollected    bool
+		isFollowed     bool
+		wg             sync.WaitGroup
+
+		mu sync.Mutex
 	)
 
-	wg.Add(5)
+	wg.Add(6)
 
 	// 获取作者信息
 	go func() {
@@ -306,6 +310,15 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		}
 	}()
 
+	go func() {
+		defer wg.Done()
+		preview, err := s.getCommentPreview(ctx, noteID, currentUserID)
+		if err == nil {
+			mu.Lock()
+			commentPreview = preview
+			mu.Unlock()
+		}
+	}()
 	// 获取统计数据
 	go func() {
 		defer wg.Done()
@@ -366,9 +379,28 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 	}()
 
 	// 5. 组装返回数据
-	detail := s.buildNoteDetail(note, userInfo, stats, isLiked, isCollected, isFollowed)
+	detail := s.buildNoteDetail(note, userInfo, stats, isLiked, isCollected, isFollowed, commentPreview)
 
 	return detail, nil
+}
+
+func (s *NoteService) getCommentPreview(ctx context.Context, noteID uint64, currentUserID uint64) (*types.CommentPreview, error) {
+	// 1. 获取前3条一级评论
+	comments, err := s.CommentService.GetTopComments(ctx, noteID, 3, currentUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 获取评论总数
+	totalCount, err := s.CommentDAO.GetRootCommentCount(ctx, noteID)
+	if err != nil {
+		totalCount = 0
+	}
+
+	return &types.CommentPreview{
+		TotalCount: totalCount,
+		Comments:   comments,
+	}, nil
 }
 
 // 检查笔记可见性
@@ -407,7 +439,7 @@ func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, c
 }
 
 // 组装笔记详情
-func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserProfile, stats *types.NoteStats, isLiked, isCollected, isFollowed bool) *types.NoteDetail {
+func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserProfile, stats *types.NoteStats, isLiked, isCollected, isFollowed bool, commentPreview *types.CommentPreview) *types.NoteDetail {
 
 	detail := &types.NoteDetail{
 		ID:          int64(note.ID),
@@ -435,6 +467,7 @@ func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserPro
 	detail.IsLiked = isLiked
 	detail.IsCollected = isCollected
 	detail.IsFollowed = isFollowed
+	detail.CommentPreview = commentPreview
 
 	// 解析 JSON 字段
 	if err := json.Unmarshal([]byte(note.TopicIDs), &detail.TopicIDs); err != nil {
