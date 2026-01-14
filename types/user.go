@@ -25,6 +25,7 @@ type UploadAvatarRes struct {
 }
 
 type UserProfile struct {
+	UserID   uint64 `json:"user_id"`
 	Avatar   string `json:"avatar"`
 	Nickname string `json:"nickname"`
 }

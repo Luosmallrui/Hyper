@@ -131,6 +131,7 @@ type Notes struct {
 	VisibleConf int       `json:"visible_conf"` // 1-公开, 2-粉丝可见, 3-自己可见
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	TimeStamp   int64     `json:"time_stamp"`
 	Avatar      string    `json:"avatar"`
 	Nickname    string    `json:"nickname"`
 
