@@ -74,6 +74,9 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Note.RegisterRouter(api)
 	h.Session.RegisterRouter(api)
 	h.Follow.RegisterRouter(api)
+	h.Group.RegisterRouter(api)
+	h.GroupMember.RegisterRouter(api)
+	h.CommentsHandler.RegisterRouter(api)
 	return r
 }
 
@@ -102,6 +105,7 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 
 	eg, groupCtx := errgroup.WithContext(ctx.Context)
 	c := make(chan os.Signal, 1)
+	// 终止的信号 服务要停止了
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
 
 	log.L.Info("server starting", zap.String("serverId", serverId),

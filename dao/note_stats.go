@@ -34,18 +34,6 @@ func (d *NoteStatsDAO) IncrCollCount(ctx context.Context, noteID uint64, delta i
 	).Error
 }
 
-func (d *NoteStatsDAO) GetByNoteID(ctx context.Context, noteID uint64) (*models.NoteStats, error) {
-	var item models.NoteStats
-	err := d.Db.WithContext(ctx).Where("note_id = ?", noteID).Limit(1).Find(&item).Error
-	if err != nil {
-		return nil, err
-	}
-	if item.NoteID == 0 {
-		return &models.NoteStats{NoteID: noteID, LikeCount: 0, CollCount: 0, ShareCount: 0, CommentCount: 0}, nil
-	}
-	return &item, nil
-}
-
 // GetUserTotalLikes 统计用户所有笔记的总点赞数
 func (d *NoteStatsDAO) GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error) {
 	var total int64
@@ -72,4 +60,20 @@ func (d *NoteStatsDAO) GetUserTotalCollects(ctx context.Context, userID uint64) 
 		`, userID).
 		Scan(&total).Error
 	return total, err
+}
+
+func (d *NoteStatsDAO) BatchGetByNoteIDs(ctx context.Context, noteIDs []uint64) ([]*models.NoteStats, error) {
+	var stats []*models.NoteStats
+	err := d.Db.WithContext(ctx).
+		Where("note_id IN ?", noteIDs).
+		Find(&stats).Error
+	return stats, err
+}
+
+func (d *NoteStatsDAO) GetByNoteID(ctx context.Context, noteID uint64) (*models.NoteStats, error) {
+	var stats models.NoteStats
+	err := d.Db.WithContext(ctx).
+		Where("note_id = ?", noteID).
+		First(&stats).Error
+	return &stats, err
 }

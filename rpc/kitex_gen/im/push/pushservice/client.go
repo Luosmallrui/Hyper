@@ -12,6 +12,7 @@ import (
 // Client is designed to provide IDL-compatible methods with call-option parameter for kitex framework.
 type Client interface {
 	PushToClient(ctx context.Context, req *push.PushRequest, callOptions ...callopt.Option) (r *push.PushResponse, err error)
+	BatchPushToClient(ctx context.Context, req *push.BatchPushRequest, callOptions ...callopt.Option) (r *push.PushResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -46,4 +47,9 @@ type kPushServiceClient struct {
 func (p *kPushServiceClient) PushToClient(ctx context.Context, req *push.PushRequest, callOptions ...callopt.Option) (r *push.PushResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.PushToClient(ctx, req)
+}
+
+func (p *kPushServiceClient) BatchPushToClient(ctx context.Context, req *push.BatchPushRequest, callOptions ...callopt.Option) (r *push.PushResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.BatchPushToClient(ctx, req)
 }

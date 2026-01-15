@@ -63,3 +63,24 @@ func (d *NoteLikeDAO) IsLiked(ctx context.Context, noteID uint64, userID uint64)
 	}
 	return exist, nil
 }
+
+func (d *NoteLikeDAO) CheckExists(ctx context.Context, userID, noteID uint64) (bool, error) {
+	var count int64
+	err := d.Db.WithContext(ctx).
+		Model(&models.NoteLike{}).
+		Where("user_id = ? AND note_id = ?", userID, noteID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (d *NoteLikeDAO) BatchGetByUserAndNotes(ctx context.Context, userID uint64, noteIDs []uint64) ([]*models.NoteLike, error) {
+	var likes []*models.NoteLike
+	err := d.Db.WithContext(ctx).
+		Where("user_id = ? AND note_id IN ?", userID, noteIDs).
+		Find(&likes).Error
+	return likes, err
+}
+
+func (d *NoteLikeDAO) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return d.Db.WithContext(ctx).Transaction(fn)
+}

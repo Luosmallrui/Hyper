@@ -14,7 +14,7 @@ type GroupMember struct {
 	Id        int       `gorm:"column:id;primary_key;AUTO_INCREMENT" json:"id"` // 自增ID
 	GroupId   int       `gorm:"column:group_id;" json:"group_id"`               // 群组ID
 	UserId    int       `gorm:"column:user_id;" json:"user_id"`                 // 用户ID
-	Leader    int       `gorm:"column:leader;" json:"leader"`                   // 成员属性[1:群主;2:管理员;3:普通成员;]
+	Role      int       `gorm:"column:role;" json:"role"`                       // 成员属性[1:群主;2:管理员;3:普通成员;]
 	UserCard  string    `gorm:"column:user_card;" json:"user_card"`             // 群名片
 	IsQuit    int       `gorm:"column:is_quit;" json:"is_quit"`                 // 是否退群[1:否;2:是;]
 	IsMute    int       `gorm:"column:is_mute;" json:"is_mute"`                 // 是否禁言[1:否;2:是;]

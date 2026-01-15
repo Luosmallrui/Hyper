@@ -20,6 +20,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	wire.Build(
 		database.NewDB,
 		client.NewRedisClient,
+		config.ProvideRocketMQConfig,
 		dao.ProviderSet,
 		rocketmq.InitConsumer,
 		cache.ProviderSet,

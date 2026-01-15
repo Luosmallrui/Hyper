@@ -1,36 +1,55 @@
 package process
 
 import (
+	"Hyper/pkg/log"
 	"context"
 	"reflect"
 	"sync"
+	"time"
 
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+)
+
+var (
+	// maximum waiting time for receive func
+	awaitDuration = time.Second * 5
+	// maximum number of messages received at one time
+	maxMessageNum int32 = 16
+	// invisibleDuration should > 20s
+	invisibleDuration = time.Second * 20
+	// receive concurrency
+	receiveConcurrency = 10
 )
 
 var once sync.Once
 
 type IServer interface {
 	Setup(ctx context.Context) error
+	Init() error
 }
 
 // SubServers 订阅的服务列表
 type SubServers struct {
 	HealthSubscribe  *HealthSubscribe  // 注册健康上报
-	MessageSubscribe *MessageSubscribe // 注册消息订阅
+	MessageSubscribe *MessageSubscribe /// 注册消息订阅
 	NoticeSubscribe  *NoticeSubscribe
-	//QueueSubscribe   *QueueSubscribe   // 消息队列服务
 }
 
 type Server struct {
-	items []IServer
+	items      []IServer
+	MqConsumer rmq_client.SimpleConsumer
+	SubServers
 }
 
-func NewServer(servers *SubServers) *Server {
-	s := &Server{}
+func NewServer(servers *SubServers, mqConsumer rmq_client.SimpleConsumer) *Server {
+	s := &Server{
+		MqConsumer: mqConsumer,
+		SubServers: *servers,
+	}
 
 	s.binds(servers)
-
 	return s
 }
 
@@ -47,11 +66,74 @@ func (c *Server) binds(servers *SubServers) {
 func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 	once.Do(func() {
 		for _, process := range c.items {
-			func(serv IServer) {
-				eg.Go(func() error {
-					return serv.Setup(ctx)
-				})
-			}(process)
+			if err := process.Init(); err != nil {
+				log.L.Fatal("注册 Topic 失败", zap.Error(err))
+			}
+		}
+
+		for _, process := range c.items {
+			serv := process
+			eg.Go(func() error {
+				return serv.Setup(ctx)
+			})
+		}
+
+		if err := c.MqConsumer.Start(); err != nil {
+			log.L.Fatal("Failed to start consumer", zap.Error(err))
+		}
+
+		eg.Go(func() error {
+			<-ctx.Done()
+			log.L.Info("正在优雅关闭 RocketMQ 消费者...")
+			return c.MqConsumer.GracefulStop()
+		})
+
+		log.L.Info("start receive message")
+
+		// 5. 启动并发消费
+		for i := 0; i < receiveConcurrency; i++ {
+			eg.Go(func() error {
+				for {
+					select {
+					case <-ctx.Done():
+						return nil
+					default:
+						mvs, _ := c.MqConsumer.Receive(ctx, maxMessageNum, invisibleDuration)
+						for _, mv := range mvs {
+							if mv == nil {
+								continue
+							}
+							c.processMessage(ctx, mv)
+
+							// 确认消费
+							if err := c.MqConsumer.Ack(ctx, mv); err != nil {
+								log.L.Error("ack message error", zap.Error(err))
+							}
+						}
+					}
+				}
+			})
 		}
 	})
+}
+
+// 建议提取一个简单的处理函数，保持代码整洁
+func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView) {
+	topic := mv.GetTopic()
+	var err error
+
+	switch topic {
+	case "IM_CHAT_MSGS":
+		if c.MessageSubscribe != nil {
+			err = c.MessageSubscribe.handleMessage(ctx, mv)
+		}
+	case "HYPER_SYSTEM_MSGS":
+		if c.NoticeSubscribe != nil {
+			_, err = c.NoticeSubscribe.handleSystem(ctx, mv)
+		}
+	}
+
+	if err != nil {
+		log.L.Warn("消息处理失败", zap.String("topic", topic), zap.Error(err))
+	}
 }

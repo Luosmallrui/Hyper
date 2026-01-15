@@ -25,9 +25,11 @@ type IUserService interface {
 	UpdatePassword(uid int, oldPassword string, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
-	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo
+	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile
 	GetUserAvatar(ctx context.Context, uid int64) (string, string, error)
 	GetUserInfo(ctx context.Context, uid int) (*models.Users, error)
+	SendVerifyCode(ctx context.Context, mobile string) error
+	UpdateMobileWithSms(ctx context.Context, mobile string, UserId int, inputCode string) error
 }
 
 type UserService struct {
@@ -59,12 +61,10 @@ func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber 
 	if PhoneNumber == "" {
 		return errors.New("手机号不能为空")
 	}
-
 	user, err := s.UsersRepo.FindById(ctx, UserId)
 	if err != nil || user.Id == 0 {
 		return errors.New("用户不存在")
 	}
-
 	err = s.UsersRepo.UpdateById(ctx, int64(user.Id), map[string]any{
 		"mobile":     PhoneNumber,
 		"updated_at": time.Now(),
@@ -193,13 +193,8 @@ func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateU
 	return nil
 }
 
-type UserInfo struct {
-	Avatar   string `json:"avatar"`
-	Nickname string `json:"nickname"`
-}
-
-func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]UserInfo {
-	result := make(map[uint64]UserInfo)
+func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile {
+	result := make(map[uint64]types.UserProfile)
 	if len(uids) == 0 {
 		return result
 	}
@@ -215,7 +210,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 	missingIds := make([]uint64, 0)
 	for i, val := range cacheRes {
 		if val != nil {
-			var info UserInfo
+			var info types.UserProfile
 			_ = json.Unmarshal([]byte(val.(string)), &info)
 			result[uids[i]] = info
 		} else {
@@ -234,7 +229,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 		pipe := s.Redis.Pipeline()
 		for _, user := range dbUsers {
-			info := UserInfo{Avatar: user.Avatar, Nickname: user.Nickname}
+			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname, UserID: user.Id}
 			result[user.Id] = info
 
 			// 写入缓存供下次使用
@@ -245,4 +240,45 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 	}
 
 	return result
+}
+
+// Modify send sms code 模拟发送短信验证码
+func (s *UserService) SendVerifyCode(ctx context.Context, mobile string) error {
+	//先定一个验证码，
+	code := "222444"
+	//存入redis
+	err := s.Redis.Set(ctx, "sms:bind"+mobile, code, 5*time.Minute).Err()
+	if err != nil {
+		return err
+	}
+	println("模拟发送短信验证码，验证码为：", code)
+	return nil
+}
+
+func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, UserId int, inputCode string) error {
+	//校验
+	cachedCode, err := s.Redis.Get(ctx, "sms:bind"+mobile).Result()
+	if err != nil {
+		errors.New("验证码已过期或未发送")
+	}
+	if cachedCode != inputCode {
+		return errors.New("验证码错误")
+	}
+
+	existUser, err := s.UsersRepo.FindByMobile(ctx, mobile)
+	if err == nil {
+		if int(existUser.Id) != UserId {
+			return errors.New("该手机号已被绑定")
+		}
+	}
+	err = s.UsersRepo.UpdateById(ctx, int64(UserId), map[string]any{
+		"mobile":     mobile,
+		"updated_at": time.Now(),
+	})
+
+	if err == nil {
+		s.Redis.Del(ctx, "sms:bind"+mobile)
+	}
+	return err
+
 }

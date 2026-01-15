@@ -11,15 +11,14 @@ import (
 	"hash/fnv"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type MessageService struct {
 	MessageDao *dao.MessageDAO
-	MqProducer rocketmq.Producer
+	MqProducer rmq_client.Producer
 	Redis      *redis.Client
 	DB         *gorm.DB
 }
@@ -28,17 +27,23 @@ var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
 	SaveMessage(msg *models.ImSingleMessage) error
+	SaveSingleMessage(msg *models.ImSingleMessage) error
+	SaveGroupMessage(msg *models.ImGroupMessage) error
 	SendMessage(msg *types.Message) error
-	SendGroupMessage(msg *models.Message) error
 	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
 	PullOfflineMessages(userID string) ([]models.Message, error)
 	SendSystemMessage(targetID string, content string) error
 	AckMessages(msgIDs []string) error
 	GetMessageByID(msgID string) (*models.Message, error)
-	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error)
+	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
 }
 
-func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, limit int) ([]types.ListMessageReq, error) {
+func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
+	// 执行插入
+	return s.MessageDao.Save(msg)
+}
+
+func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error) {
 
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -49,101 +54,116 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 	q := s.DB.WithContext(ctx).
 		Model(&models.ImSingleMessage{}).
 		Where("session_hash = ?", sessionHash)
-	if cursor > 0 {
-		q = q.Where("created_at < ?", cursor)
+
+	if since > 0 {
+		q = q.Where("created_at > ?", since).
+			Order("created_at ASC")
+	} else {
+		if cursor > 0 {
+			q = q.Where("created_at < ?", cursor)
+		}
+		q = q.Order("created_at DESC")
 	}
 
 	var msgs []models.ImSingleMessage
-	if err := q.
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&msgs).Error; err != nil {
+	if err := q.Limit(limit).Find(&msgs).Error; err != nil {
 		return nil, err
 	}
 
+	if since <= 0 {
+		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+			msgs[i], msgs[j] = msgs[j], msgs[i]
+		}
+	}
+
 	result := make([]types.ListMessageReq, 0, len(msgs))
-
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-
-		ext := make(map[string]interface{})
+	for _, m := range msgs {
+		ext := map[string]interface{}{}
 		if m.Ext != "" {
-			if err := json.Unmarshal([]byte(m.Ext), &ext); err != nil {
-				ext = make(map[string]interface{})
-			}
-		}
-		if ext == nil {
-			ext = make(map[string]interface{})
+			_ = json.Unmarshal([]byte(m.Ext), &ext)
 		}
 
-		item := types.ListMessageReq{
+		result = append(result, types.ListMessageReq{
 			Id:       uint64(m.Id),
 			SenderId: uint64(m.SenderId),
 			Content:  m.Content,
 			MsgType:  m.MsgType,
 			Ext:      ext,
 			Time:     m.CreatedAt,
-			IsSelf:   false,
-		}
-		if m.SenderId == int64(userId) {
-			item.IsSelf = true
-		}
-
-		result = append(result, item)
+			IsSelf:   m.SenderId == int64(userId),
+		})
 	}
 
 	return result, nil
 }
 
-func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
-	// 执行插入
-	return s.MessageDao.Save(msg)
+func (s *MessageService) SaveSingleMessage(msg *models.ImSingleMessage) error {
+	return s.MessageDao.SaveSingle(msg)
+}
+func (s *MessageService) SaveGroupMessage(msg *models.ImGroupMessage) error {
+	return s.MessageDao.SaveGroup(msg)
 }
 func (s *MessageService) SendMessage(msg *types.Message) error {
+	// 1) 服务端统一补字段：时间、状态、雪花ID、Ext兜底
 	msg.Timestamp = time.Now().UnixMilli()
-	msg.Status = 0
+	msg.Status = types.MsgStatusSending
+	msg.Id = snowflake.GenID()
 
 	if msg.Ext == nil {
 		msg.Ext = make(map[string]interface{})
 	}
 
-	//cacheKey := fmt.Sprintf("idempotent:%d:%s", msg.SenderID, msg.ClientMsgID)
-	//isNew, err := s.Redis.SetNX(context.Background(), cacheKey, "1", 24*time.Hour).Result()
-	//if err != nil {
-	//	return err
-	//}
-	//if !isNew {
-	//	return nil
-	//}
-
-	msg.Id = snowflake.GenID()
-
-	if msg.SessionType == types.SessionTypeSingle { // 假设 1 是单聊
-		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
+	// 2) 生成“会话标识”
+	// SessionID：用于展示/调试，稳定可读
+	// SessionHash：用于数据库索引/分表/查询（通常是整型）
+	switch msg.SessionType {
+	case types.SessionTypeSingle:
+		// 单聊：用双方uid生成稳定会话（A->B 和 B->A 一样）
 		msg.SessionID = s.generateSessionID(msg.SenderID, msg.TargetID)
-	}
-	msg.Channel = "chat"
+		msg.SessionHash = GetSessionHash(msg.SenderID, msg.TargetID)
 
-	body, _ := json.Marshal(msg)
-	mqMsg := &primitive.Message{
-		Topic: "IM_CHAT_MSGS",
+	case types.GroupChatSessionTypeGroup:
+		// 群聊：TargetID 此时就是 groupId
+		msg.SessionID = fmt.Sprintf("g_%d", msg.TargetID)
+		msg.SessionHash = GetGroupSessionHash(msg.TargetID)
+
+	default:
+		return fmt.Errorf("unknown session_type=%d", msg.SessionType)
+	}
+
+	// 3) 频道（给 ws / 路由用）
+	msg.Channel = types.ChannelChat
+
+	// 4) 发 MQ
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	mqMsg := &rmq_client.Message{
+		Topic: types.ImTopicChat,
 		Body:  body,
 	}
-	mqMsg.WithShardingKey(fmt.Sprintf("%d", msg.TargetID))
-	_, err := s.MqProducer.SendSync(context.Background(), mqMsg)
+	fmt.Println(s.MqProducer, 44)
+	s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
+		for i := 0; i < len(resp); i++ {
+			fmt.Printf("%#v\n", resp[i])
+		}
+	})
 	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
+
+	_, err = s.MqProducer.Send(context.Background(), mqMsg)
 	if err != nil {
-		//s.Redis.Del(context.Background(), cacheKey)
 		return err
 	}
 
 	return nil
 }
 
-func (s *MessageService) SendGroupMessage(msg *models.Message) error {
-	// 群消息仍然只存一条
-	return nil
-}
+//func (s *MessageService) SendGroupMessage(msg *models.Message) error {
+//	// 群消息仍然只存一条
+//	return nil
+//}
 
 // 查询某个用户/群的最近消息
 func (s *MessageService) GetRecentMessages(targetID string, limit int) ([]models.Message, error) {
@@ -206,5 +226,13 @@ func GetSessionHash(uid1, uid2 int64) int64 {
 	h.Write([]byte(rawID))
 
 	// 3. 返回 int64 类型（强转 uint64 为 int64）
+	return int64(h.Sum64())
+}
+
+func GetGroupSessionHash(groupID int64) int64 {
+	// 给群加个固定前缀，避免和 "私聊" 的 hash 产生碰撞
+	rawID := fmt.Sprintf("g_%d", groupID)
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(rawID))
 	return int64(h.Sum64())
 }

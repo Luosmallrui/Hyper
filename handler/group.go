@@ -1,0 +1,73 @@
+package handler
+
+import (
+	"Hyper/config"
+	"Hyper/middleware"
+	"Hyper/pkg/context"
+	"Hyper/pkg/response"
+	"Hyper/service"
+	"Hyper/types"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+type GroupHandler struct {
+	Config       *config.Config
+	GroupService service.IGroupService
+}
+
+func NewGroupHandler(config *config.Config, groupService service.IGroupService) *GroupHandler {
+	return &GroupHandler{
+		GroupService: groupService,
+		Config:       config,
+	}
+}
+
+func (h *GroupHandler) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
+	group := r.Group("/group")
+	group.POST("/create", authorize, context.Wrap(h.CreateGroup)) //创建群
+}
+
+// 创建群
+func (h *GroupHandler) CreateGroup(c *gin.Context) error {
+	var req types.CreateGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "请求参数错误: ",
+		})
+		return err
+	}
+
+	//从上下文中获取用户ID
+	UserIdval, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	UserId := int(UserIdval)
+	//调用服务层创建群
+	group, err := h.GroupService.CreateGroup(c, &req, UserId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "创建群失败: " + err.Error(),
+		})
+		return err
+	}
+
+	//构建响应
+	resp := types.CreateGroupResponse{
+		Id:          group.Id,
+		Name:        group.Name,
+		Avatar:      group.Avatar,
+		OwnerId:     group.OwnerId,
+		MemberCount: group.MemberCount,
+		CreatedAt:   group.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "创建群成功",
+		"data":    resp,
+	})
+	return nil
+}

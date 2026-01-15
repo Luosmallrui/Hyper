@@ -13,6 +13,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "golang.org/x/image/webp"
@@ -29,10 +30,12 @@ type Note struct {
 func (n *Note) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
-	g.POST("/upload", context.Wrap(n.UploadImage))
+	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
+
+	g.GET("/list", authorize, context.Wrap(n.ListNote))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
@@ -43,8 +46,30 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
+	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
 }
 
+func (n *Note) GetNoteDetail(c *gin.Context) error {
+	// 获取笔记ID
+	noteIDStr := c.Param("note_id")
+	noteID, err := strconv.ParseUint(noteIDStr, 10, 64)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "笔记ID格式错误")
+	}
+
+	// 获取当前用户ID (可选,未登录为0)
+	currentUserID, _ := context.GetUserID(c)
+
+	// 调用 Service 获取详情
+	detail, err := n.NoteService.GetNoteDetail(c.Request.Context(), noteID, uint64(currentUserID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	// 返回成功响应
+	response.Success(c, detail)
+	return nil
+}
 func (n *Note) UploadImage(c *gin.Context) error {
 	userID, err := context.GetUserID(c)
 	if err != nil {
@@ -56,9 +81,34 @@ func (n *Note) UploadImage(c *gin.Context) error {
 	}
 	img, err := n.OssService.UploadImage(c.Request.Context(), int(userID), header)
 	if err != nil {
-		return err
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, img)
+	return nil
+}
+
+func (n *Note) ListNote(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	var req types.ListNotesReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	if req.PageSize == 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+
+	// 调用 Service
+	rep, err := n.NoteService.ListNote(c.Request.Context(), req.Cursor, req.PageSize, uint64(userID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+	}
+
+	response.Success(c, rep)
 	return nil
 }
 
@@ -211,7 +261,7 @@ func (n *Note) Like(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
 	}
 
-	err = n.LikeService.Like(c.Request.Context(), uint64(userID), noteID)
+	err = n.LikeService.LikeNote(c.Request.Context(), uint64(userID), noteID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -235,7 +285,7 @@ func (n *Note) Unlike(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "note_id 格式错误")
 	}
 
-	err = n.LikeService.Unlike(c.Request.Context(), uint64(userID), noteID)
+	err = n.LikeService.UnlikeNote(c.Request.Context(), uint64(userID), noteID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
