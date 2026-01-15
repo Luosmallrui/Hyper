@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/redis/go-redis/v9"
 )
 
 var _ ICollectService = (*CollectService)(nil)
@@ -18,14 +20,30 @@ type ICollectService interface {
 	GetCollectionCount(ctx context.Context, noteID uint64) (int64, error)
 	GetUserCollections(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error)
 	GetUserTotalCollects(ctx context.Context, userID uint64) (int64, error)
+	CheckCollectStatus(ctx context.Context, userID, noteID uint64) (bool, error)
 }
 
 type CollectService struct {
 	CollectionDAO *dao.NoteCollectionDAO
 	StatsDAO      *dao.NoteStatsDAO
 	NoteDAO       *dao.NoteDAO
+	Redis         *redis.Client
 }
 
+func (s *CollectService) CheckCollectStatus(ctx context.Context, userID, noteID uint64) (bool, error) {
+	if userID == 0 {
+		return false, nil
+	}
+
+	// 类似点赞的逻辑,先查 Redis,再查数据库
+	key := fmt.Sprintf("user:collected:notes:%d", userID)
+	exists, err := s.Redis.SIsMember(ctx, key, noteID).Result()
+	if err == nil {
+		return exists, nil
+	}
+
+	return s.CollectionDAO.CheckExists(ctx, userID, noteID)
+}
 func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint64) error {
 	exist, err := s.NoteDAO.IsExist(ctx, "id = ?", noteID)
 	if err != nil {

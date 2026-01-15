@@ -74,8 +74,10 @@ type UserProfileResp struct {
 }
 
 type UserToken struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken   string `json:"access_token"`
+	RefreshToken  string `json:"refresh_token"`
+	AccessExpire  int64  `json:"access_expire"`
+	RefreshExpire int64  `json:"refresh_expire"`
 }
 type UserBasicInfo struct {
 	UserID      string `json:"user_id"`    // Snowflake ID（对外）
@@ -93,6 +95,15 @@ type UserStats struct {
 
 type BindPhoneRep struct {
 	PhoneNumber string `json:"phone_number"`
+}
+
+type SendSmsRequest struct {
+	Mobile string `json:"mobile" binding:"required,len=11"` // 手机号
+}
+
+type UpdatePhoneRequest struct {
+	Mobile string `json:"mobile" binding:"required,len=11"` // 手机号
+	Code   string `json:"code" binding:"required,len=6"`    // 验证码
 }
 
 type FollowingUser struct {

@@ -11,14 +11,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/gin-gonic/gin"
 )
 
 type Follow struct {
 	Config        *config.Config
 	FollowService service.IFollowService
-	MqProducer    rocketmq.Producer
+	MqProducer    rmq_client.Producer
 }
 
 func (f *Follow) RegisterRouter(r gin.IRouter) {

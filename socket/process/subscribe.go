@@ -1,13 +1,12 @@
 package process
 
 import (
+	"Hyper/dao"
 	"Hyper/dao/cache"
 	"Hyper/models"
-	"Hyper/pkg/server"
+	"Hyper/pkg/log"
 	"Hyper/rpc/kitex_gen/im/push"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
-
-	"Hyper/pkg/log"
 	"Hyper/service"
 	"Hyper/types"
 	"context"
@@ -17,9 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/consumer"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/cloudwego/kitex/client"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -28,12 +25,12 @@ import (
 
 type MessageSubscribe struct {
 	Redis          *redis.Client
-	MqConsumer     rocketmq.PushConsumer
 	DB             *gorm.DB
 	MessageService service.IMessageService
 	MessageStorage *cache.MessageStorage
 	SessionService service.ISessionService
 	UnreadStorage  *cache.UnreadStorage
+	GroupDAO       *dao.GroupDAO
 }
 
 var clientCache sync.Map // map[string]pushservice.Client
@@ -52,87 +49,150 @@ func (m *MessageSubscribe) getRpcClient(addr string) (pushservice.Client, error)
 	return newCli, nil
 }
 
+func (m *MessageSubscribe) Init() error {
+	return nil
+}
 func (m *MessageSubscribe) Setup(ctx context.Context) error {
-	log.L.Info("[MQ]MessageSubscribe 正在启动消息消费者", zap.String("serverId", server.GetServerId()))
-	err := m.MqConsumer.Subscribe(types.ImTopicChat, consumer.MessageSelector{}, m.handleMessage)
-	if err != nil {
-		return fmt.Errorf("subscribe topic error: %w", err)
-	}
-
-	if err := m.MqConsumer.Start(); err != nil {
-		log.Printf("[MQ Warning] Start message consumer failed: %v. Will retry in background...", err)
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := m.MqConsumer.Start(); err == nil {
-						log.Printf("[MQ] Message consumer started successfully in background")
-						return
-					}
-				}
-			}
-		}()
-	}
-
-	go func() {
-		<-ctx.Done()
-		log.L.Info("[MQ] 正在关闭消费者...")
-		m.MqConsumer.Shutdown()
-	}()
-
 	return nil
 }
 
-func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-	for _, msg := range msgs {
-		// 1. 反序列化
-		var imMsg types.Message
-		if err := json.Unmarshal(msg.Body, &imMsg); err != nil {
-			log.L.Error("unmarshal msg error", zap.Error(err))
-			continue
-		}
-		b, _ := json.Marshal(imMsg)
-		log.L.Info("[MQ] 解析成功:", zap.Any("imMsg", imMsg), zap.String("body", string(b)))
-		extBytes, _ := json.Marshal(imMsg.Ext)
-
-		if imMsg.SessionType == types.SessionTypeSingle {
-			immsg := &models.ImSingleMessage{
-				Id:          imMsg.Id,
-				SessionHash: imMsg.SessionHash,
-				SessionId:   imMsg.SessionID,
-				SenderId:    imMsg.SenderID,
-				TargetId:    imMsg.TargetID,
-				MsgType:     imMsg.MsgType,
-				Content:     imMsg.Content,
-				ParentMsgId: imMsg.ParentMsgID,
-				Status:      types.MsgStatusSuccess,
-				CreatedAt:   time.Now().Unix(),
-				Ext:         string(extBytes),
-				UpdatedAt:   time.Now(),
-			}
-			if err := m.MessageService.SaveMessage(immsg); err != nil {
-				log.L.Error("[MQ] 消息入库失败", zap.Error(err))
-				// 重要：如果是数据库临时不可用，返回 Suspend，让 MQ 稍后重试，保证顺序性
-				//return consumer.SuspendCurrentQueueAMoment, err
-			}
-			if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
-				log.L.Error("update session error", zap.Error(err))
-				//return consumer.SuspendCurrentQueueAMoment, err
-			}
-			go func(imMsg types.Message) {
-				m.updateUserCache(ctx, &imMsg)
-				m.dispatchMessage(&imMsg)
-				m.pushToUser(ctx, int(immsg.SenderId), &imMsg)
-			}(imMsg)
+func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.MessageView) error {
+	var imMsg types.Message
+	if err := json.Unmarshal(msgs.GetBody(), &imMsg); err != nil {
+		log.L.Error("unmarshal msg error", zap.Error(err))
+		return nil
+	}
+	extBytes, _ := json.Marshal(imMsg.Ext)
+	switch imMsg.SessionType {
+	case types.SessionTypeSingle:
+		immsg := &models.ImSingleMessage{
+			Id:          imMsg.Id,
+			SessionHash: imMsg.SessionHash,
+			SessionId:   imMsg.SessionID,
+			SenderId:    imMsg.SenderID,
+			TargetId:    imMsg.TargetID,
+			MsgType:     imMsg.MsgType,
+			Content:     imMsg.Content,
+			ParentMsgId: imMsg.ParentMsgID,
+			Status:      types.MsgStatusSuccess,
+			CreatedAt:   time.Now().Unix(),
+			Ext:         string(extBytes),
+			UpdatedAt:   time.Now(),
 		}
 
+		// 1. 同步持久化
+		if err := m.MessageService.SaveMessage(immsg); err != nil {
+			log.L.Error("[MQ] 消息入库失败", zap.Error(err))
+			// 数据库挂了建议让 MQ 重试
+			//return rmq_client.ActionNack, err/
+		}
+
+		if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
+			log.L.Error("update session error", zap.Error(err))
+		}
+
+		// 2. 异步分发推送
+		// 注意：闭包一定要传参，防止 imMsg 在循环/协程中被污染
+		go func(msg types.Message) {
+			// 推送前可以使用新的 background ctx，防止父 context 取消导致推送中断
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			m.updateUserCache(bgCtx, &msg)
+
+			// 给接收者推（dispatchMessage 的逻辑）
+			m.doBatchPush(bgCtx, int(msg.SenderID), &msg, int(msg.TargetID))
+
+			// 给发送者其他端推（多端同步，pushToUser 的逻辑）
+			if msg.SenderID != msg.TargetID {
+				m.doBatchPush(bgCtx, int(msg.SenderID), &msg, int(msg.SenderID))
+			}
+		}(imMsg)
+	case types.GroupChatSessionTypeGroup:
+		// 2) 群聊落库：只存 1 条到 im_message（models.Message）
+		gdb := &models.ImGroupMessage{
+			Id:          imMsg.Id,
+			SessionHash: imMsg.SessionHash,
+			SessionId:   imMsg.SessionID,
+			SenderId:    imMsg.SenderID,
+			TargetId:    imMsg.TargetID, // groupId
+			MsgType:     imMsg.MsgType,
+			Content:     imMsg.Content,
+			ParentMsgId: imMsg.ParentMsgID,
+			Status:      types.MsgStatusSuccess,
+			CreatedAt:   time.Now().Unix(),
+			Ext:         string(extBytes),
+			UpdatedAt:   time.Now(),
+		}
+		if err := m.MessageService.SaveGroupMessage(gdb); err != nil {
+			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
+		}
+		// 3) 查群成员（批量推送的“成员列表”来源）
+		memberUIDs, err := m.GroupDAO.GetGroupMembers(fmt.Sprintf("%d", imMsg.TargetID))
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[MQ] 获取群成员失败 group=%d err=%v", imMsg.TargetID, err))
+		}
+		go func(copyMsg types.Message, members []string) {
+			m.updateCacheGroup(ctx, &copyMsg, members)
+			m.dispatchToGroup(ctx, &copyMsg, members)
+		}(imMsg, memberUIDs)
+	default:
+		log.L.Error(fmt.Sprintf("[MQ] 未知 SessionType=%d, msg_id=%d", imMsg.SessionType, imMsg.Id))
+	}
+	return nil
+}
+func (m *MessageSubscribe) doBatchPush(ctx context.Context, uid int, msg *types.Message, targetUID int) {
+	trace := fmt.Sprintf("[PUSH msg=%d from=%d to=%d]", msg.Id, msg.SenderID, targetUID)
+
+	// 获取路由
+	routeMap, err := m.GetUserRoute(ctx, targetUID)
+	if err != nil {
+		log.L.Error("获取用户路由失败", zap.Error(err), zap.String("trace", trace))
+		return
 	}
 
-	return consumer.ConsumeSuccess, nil
+	if len(routeMap) == 0 {
+		log.L.Info("用户离线", zap.String("trace", trace))
+		return
+	}
+
+	payload, _ := json.Marshal(msg)
+
+	for sid, cids := range routeMap {
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			log.L.Error("获取 RPC 客户端失败", zap.String("sid", sid), zap.Error(err))
+			continue
+		}
+
+		// 转换 CID
+		cidsInt64 := make([]int64, 0, len(cids))
+		for _, s := range cids {
+			if id, err := strconv.ParseInt(s, 10, 64); err == nil {
+				cidsInt64 = append(cidsInt64, id)
+			}
+		}
+
+		if len(cidsInt64) == 0 {
+			continue
+		}
+
+		// 调用 BatchPush
+		_, err = cli.BatchPushToClient(ctx, &push.BatchPushRequest{
+			Cids:    cidsInt64,
+			Uid:     int32(targetUID),
+			Payload: string(payload),
+			Event:   "chat",
+		})
+
+		if err != nil {
+			log.L.Error("推送失败", zap.Error(err), zap.String("sid", sid), zap.Int("target", targetUID))
+			// 可选：如果 RPC 报错说明 sid 可能挂了，可以选择清理 clientCache
+			// clientCache.Delete(sid)
+		} else {
+			log.L.Info("推送成功", zap.String("trace", trace), zap.String("sid", sid), zap.Int("count", len(cidsInt64)))
+		}
+	}
 }
 
 type RouterKey struct{}
@@ -150,122 +210,56 @@ func (RouterKey) ClientMap(sid, channel string) string {
 }
 
 func (m *MessageSubscribe) pushToUser(ctx context.Context, uid int, msg *types.Message) {
-	key := RouterKey{}
-
-	log.L.Info("push to self other device", zap.Any("msg", msg),
-		zap.String("user_id", strconv.Itoa(uid)),
-	)
-	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
-	if err != nil || len(sids) == 0 {
-		return
-	}
-	log.L.Info("server_ids", zap.Any("sids", sids))
-
-	payload, _ := json.Marshal(msg)
-
-	for _, sid := range sids {
-		userKey := key.UserClients(sid, msg.Channel, uid)
-		cids, _ := m.Redis.SMembers(ctx, userKey).Result()
-		log.L.Info("client_ids", zap.Any("cids", cids),
-			zap.String("user_id", strconv.Itoa(uid)), zap.String("server_id", sid))
-
-		if len(cids) == 0 {
-			m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-			continue
-		}
-
-		cli, err := m.getRpcClient(sid)
-		if err != nil {
-			continue
-		}
-
-		for _, cidStr := range cids {
-			cid, _ := strconv.ParseInt(cidStr, 10, 64)
-			cli.PushToClient(ctx, &push.PushRequest{
-				Cid:     cid,
-				Uid:     int32(uid),
-				Payload: string(payload),
-				Event:   "chat",
-			})
-		}
-	}
-}
-
-func (m *MessageSubscribe) dispatchMessage(msg *types.Message) {
-	ctx := context.Background()
-	key := RouterKey{}
-	uid := int(msg.TargetID)
+	//ctx := context.Background()
+	uid = int(msg.SenderID)
 	msg.Status = types.MsgStatusSuccess
+	trace := fmt.Sprintf("[DISPATCH msg=%d from=%d to=%d]", msg.Id, msg.SenderID, msg.TargetID)
 
-	trace := fmt.Sprintf(
-		"[DISPATCH msg=%d from=%d to=%d]",
-		msg.Id, msg.SenderID, msg.TargetID,
-	)
-
-	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+	routeMap, err := m.GetUserRoute(ctx, uid)
 	if err != nil {
-		log.L.Error("redis HKeys error:", zap.Error(err))
-		return
-	}
-	if len(sids) == 0 {
-		log.L.Error(" user offline", zap.Any("trace", trace))
+		log.L.Error("获取用户路由失败", zap.Error(err), zap.String("trace", trace))
 		return
 	}
 
-	log.L.Info("user online status",
-		zap.String("trace", trace),
-		zap.Int("server_count", len(sids)),
-		zap.Any("sids", sids), // %v 对应的 slice/map 使用 zap.Any
-	)
+	if len(routeMap) == 0 {
+		log.L.Info("用户离线", zap.String("trace", trace))
+		return
+	}
+
+	log.L.Info("用户在线", zap.String("trace", trace), zap.Int("server_count", len(routeMap)))
 
 	payload, _ := json.Marshal(msg)
 
-	// 2️⃣ 遍历 server
-	for _, sid := range sids {
-		userKey := key.UserClients(sid, msg.Channel, uid)
-		cids, err := m.Redis.SMembers(ctx, userKey).Result()
-		if err != nil {
-			log.L.Error("redis SMembers error:", zap.Error(err))
-			continue
-		}
-
-		if len(cids) == 0 {
-			log.L.Error(" user offline", zap.Any("trace", trace))
-			m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-			continue
-		}
-
-		log.L.Info("user offline status", zap.String("trace", trace),
-			zap.Int("server_count", len(cids)),
-			zap.Any("cids", cids))
-
+	for sid, cids := range routeMap {
 		cli, err := m.getRpcClient(sid)
 		if err != nil {
-			log.L.Error("get rpc client error:", zap.Error(err))
+			log.L.Error("获取 RPC 客户端失败", zap.String("sid", sid), zap.Error(err))
 			continue
 		}
-
-		// 3️⃣ 遍历 client
-		for _, cidStr := range cids {
-			cid, _ := strconv.ParseInt(cidStr, 10, 64)
-			log.L.Info("client offline", zap.Any("trace", trace),
-				zap.Any("sid", sid), zap.Any("cid", cid))
-
-			_, err := cli.PushToClient(ctx, &push.PushRequest{
-				Cid:     cid,
-				Uid:     int32(uid),
-				Payload: string(payload),
-				Event:   "chat",
-			})
+		log.L.Debug("开始推送", zap.String("sid", sid), zap.Any("cids", cids))
+		cidsInt64 := make([]int64, 0, len(cids))
+		// 2. 遍历并转换
+		for _, s := range cids {
+			// 使用 strconv.ParseInt 转换为 10 进制的 int64
+			id, err := strconv.ParseInt(s, 10, 64)
 			if err != nil {
-				log.L.Error("push to client error:", zap.Error(err))
-
-				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-				clientCache.Delete(sid)
-			} else {
-				log.L.Info("push success", zap.String("trace", trace))
-
+				// 如果转换失败（例如字符串里有非法字符），记录日志并跳过
+				log.L.Warn("非法 CID 格式", zap.String("cid", s), zap.Error(err))
+				continue
 			}
+			cidsInt64 = append(cidsInt64, id)
+		}
+		_, err = cli.BatchPushToClient(ctx, &push.BatchPushRequest{
+			Cids:    cidsInt64,
+			Uid:     int32(uid),
+			Payload: string(payload),
+			Event:   "chat",
+		})
+		if err != nil {
+			//log.L.Error("推送失败", zap.Error(err), zap.String("sid", sid), zap.Int64("cid", cid))
+			//m.Redis.HDel(ctx, fmt.Sprintf("im:user:location:%d", uid), cidStr)
+		} else {
+			log.L.Info("推送成功", zap.String("trace", trace), zap.Any("cids", cids))
 		}
 	}
 }
@@ -319,4 +313,138 @@ func truncateContent(content string, maxLen int) string {
 		return string(runes[:maxLen]) + "..."
 	}
 	return content
+}
+
+func (m *MessageSubscribe) GetUserRoute(ctx context.Context, uid int) (map[string][]string, error) {
+	// 1. 一键获取该用户所有的 clientId 和对应的 serverId
+	// Key: im:user:location:100 -> { "c1": "sid_A", "c2": "sid_A", "c3": "sid_B" }
+	results, err := m.Redis.HGetAll(ctx, fmt.Sprintf("im:user:location:%d", uid)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 在内存中按 sid 进行分组
+	routeMap := make(map[string][]string)
+	for cid, sid := range results {
+		routeMap[sid] = append(routeMap[sid], cid)
+	}
+
+	// 返回结果示例: map["sid_A"]: ["c1", "c2"], map["sid_B"]: ["c3"]
+	return routeMap, nil
+}
+
+func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Message, members []string) {
+	const maxFanout = 32
+	sem := make(chan struct{}, maxFanout)
+	var wg sync.WaitGroup
+
+	for _, uidStr := range members {
+		uid, err := strconv.Atoi(uidStr)
+		if err != nil {
+			continue
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(receiver int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			m.dispatchToUser(ctx, receiver, msg)
+		}(uid)
+	}
+
+	wg.Wait()
+}
+
+// 私聊推送（也被群聊复用）
+func (m *MessageSubscribe) dispatchToUser(ctx context.Context, uid int, msg *types.Message) {
+	key := RouterKey{}
+	msg.Status = types.MsgStatusSuccess
+
+	// 1) 取出用户在哪些 sid 上在线
+	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+	if err != nil || len(sids) == 0 {
+		log.L.Error(fmt.Sprintf("[Router] uid=%d offline or no route (no sids), err=%v", uid, err))
+		return
+	}
+
+	payload, _ := json.Marshal(msg)
+
+	for _, sid := range sids {
+
+		userKey := key.UserClients(sid, msg.Channel, uid)
+
+		// 2) 这里做“短暂重试”，避免刚连接时 set 还没写完
+		var cids []string
+		for attempt := 0; attempt < 3; attempt++ {
+			cids, err = m.Redis.SMembers(ctx, userKey).Result()
+			if err == nil && len(cids) > 0 {
+				break
+			}
+			// 10ms, 30ms, 50ms（总共 < 100ms）
+			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
+		}
+
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s read cids err=%v", uid, sid, err))
+			continue
+		}
+
+		// 关键：不要因为 cids 空就删除 location
+		if len(cids) == 0 {
+			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s has route but empty cids (skip, no delete)", uid, sid))
+			continue
+		}
+
+		// 3) RPC 推送
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			log.L.Error(fmt.Sprintf("[RPC] get client fail sid=%s err=%v", sid, err))
+			continue
+		}
+
+		for _, cidStr := range cids {
+			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+			_, err := cli.PushToClient(ctx, &push.PushRequest{
+				Cid:     cid,
+				Uid:     int32(uid),
+				Payload: string(payload),
+				Event:   "chat",
+			})
+			if err != nil {
+				// 只有 RPC 明确不可达，才清理 sid（这个清理是合理的）
+				log.L.Error(fmt.Sprintf("[RPC] push fail uid=%d sid=%s cid=%d err=%v, cleanup route", uid, sid, cid, err))
+				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+				clientCache.Delete(sid)
+				break
+			}
+		}
+	}
+}
+
+func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) {
+	groupID := int(msg.TargetID)
+	senderID := int(msg.SenderID)
+	pipe := m.Redis.Pipeline()
+	summary := &cache.LastCacheMessage{
+		Content:   truncateContent(msg.Content, 50),
+		Timestamp: msg.Timestamp,
+	}
+	for _, uidStr := range members {
+		uid, err := strconv.Atoi(uidStr)
+		if err != nil {
+			continue
+		}
+		// sender 不加未读，其他人加未读
+		if uid != senderID {
+			m.UnreadStorage.PipeIncr(ctx, pipe, uid, types.GroupChatSessionTypeGroup, groupID)
+		}
+		// 所有人（含 sender）更新会话列表摘要：peerId 用 groupID
+		m.MessageStorage.Set(ctx, types.GroupChatSessionTypeGroup, uid, groupID, summary)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.L.Error(fmt.Sprintf("[Cache] group 更新失败 group=%d err=%v", groupID, err))
+	}
 }

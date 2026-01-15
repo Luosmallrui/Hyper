@@ -37,12 +37,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
-	producer := rocketmq.InitProducer()
+	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
+	producer := rocketmq.InitProducer(rocketMQConfig)
 	followService := &service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
 		Producer:  producer,
+		Redis:     redisClient,
 	}
 	noteLikeDAO := dao.NewNoteLikeDAO(db)
 	noteStatsDAO := dao.NewNoteStatsDAO(db)
@@ -51,12 +53,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeDAO:  noteLikeDAO,
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
+		Redis:    redisClient,
 	}
 	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
 	collectService := &service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		Redis:         redisClient,
 	}
 	auth := &handler.Auth{
 		Config:         cfg,
@@ -90,8 +94,25 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:    userService,
 		Config:         cfg,
 	}
+	comment := dao.NewComment(db)
+	commentLike := dao.NewCommentLike(db)
+	commentsService := &service.CommentsService{
+		DB:             db,
+		CommentDAO:     comment,
+		CommentLikeDAO: commentLike,
+		UserService:    userService,
+		Redis:          redisClient,
+	}
 	noteService := &service.NoteService{
-		NoteDAO: noteDAO,
+		NoteDAO:        noteDAO,
+		CommentDAO:     comment,
+		UserService:    userService,
+		LikeService:    likeService,
+		RedisClient:    redisClient,
+		StatsDAO:       noteStatsDAO,
+		FollowService:  followService,
+		CollectService: collectService,
+		CommentService: commentsService,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -103,21 +124,26 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	follow := &handler.Follow{
 		Config:        cfg,
 		FollowService: followService,
+		MqProducer:    producer,
 	}
 	serviceFollowService := service.FollowService{
 		FollowDAO: userFollowDAO,
 		StatsDAO:  userStatsDAO,
 		UserDAO:   users,
+		Producer:  producer,
+		Redis:     redisClient,
 	}
 	serviceLikeService := service.LikeService{
 		LikeDAO:  noteLikeDAO,
 		StatsDAO: noteStatsDAO,
 		NoteDAO:  noteDAO,
+		Redis:    redisClient,
 	}
 	serviceCollectService := service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		Redis:         redisClient,
 	}
 	user := &handler.User{
 		Config:         cfg,
@@ -138,14 +164,35 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
+	groupService := &service.GroupService{
+		DB: db,
+	}
+	groupHandler := &handler.GroupHandler{
+		Config:       cfg,
+		GroupService: groupService,
+	}
+	groupMemberService := &service.GroupMemberService{
+		DB: db,
+	}
+	groupMemberHandler := &handler.GroupMemberHandler{
+		Config:             cfg,
+		GroupMemberService: groupMemberService,
+	}
+	commentsHandler := &handler.CommentsHandler{
+		Config:          cfg,
+		CommentsService: commentsService,
+	}
 	handlers := &server.Handlers{
-		Auth:    auth,
-		Map:     handlerMap,
-		Message: message,
-		Note:    note,
-		Follow:  follow,
-		User:    user,
-		Session: session,
+		Auth:            auth,
+		Map:             handlerMap,
+		Message:         message,
+		Note:            note,
+		Follow:          follow,
+		User:            user,
+		Session:         session,
+		Group:           groupHandler,
+		GroupMember:     groupMemberHandler,
+		CommentsHandler: commentsHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

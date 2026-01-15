@@ -36,9 +36,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	relation := cache.NewRelation(redisClient)
 	groupMember := dao.NewGroupMember(db, relation)
 	groupMemberService := &service.GroupMemberService{
-		Db:              db,
-		Redis:           redisClient,
-		GroupMemberRepo: groupMember,
+		DB: db,
 	}
 	chatHandler := &chat.Handler{
 		Redis: redisClient,
@@ -62,17 +60,50 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	}
 	engine := router.NewRouter(cfg, handlerHandler)
 	healthSubscribe := process.NewHealthSubscribe(serverStorage)
-	pushConsumer := rocketmq.InitConsumer()
+	messageDAO := dao.NewMessageDAO(db)
+	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
+	producer := rocketmq.InitProducer(rocketMQConfig)
+	messageService := &service.MessageService{
+		MessageDao: messageDAO,
+		MqProducer: producer,
+		Redis:      redisClient,
+		DB:         db,
+	}
+	messageStorage := cache.NewMessageStorage(redisClient)
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	users := dao.NewUsers(db)
+	userService := &service.UserService{
+		UsersRepo: users,
+		Redis:     redisClient,
+		DB:        db,
+	}
+	sessionService := &service.SessionService{
+		DB:             db,
+		MessageStorage: messageStorage,
+		UnreadStorage:  unreadStorage,
+		UserService:    userService,
+	}
+	groupDAO := dao.NewGroupDAO(db)
+	messageSubscribe := &process.MessageSubscribe{
+		Redis:          redisClient,
+		DB:             db,
+		MessageService: messageService,
+		MessageStorage: messageStorage,
+		SessionService: sessionService,
+		UnreadStorage:  unreadStorage,
+		GroupDAO:       groupDAO,
+	}
 	noticeSubscribe := &process.NoticeSubscribe{
 		Redis:          redisClient,
-		MqConsumer:     pushConsumer,
 		ConnectService: clientConnectService,
 	}
 	subServers := &process.SubServers{
-		HealthSubscribe: healthSubscribe,
-		NoticeSubscribe: noticeSubscribe,
+		HealthSubscribe:  healthSubscribe,
+		MessageSubscribe: messageSubscribe,
+		NoticeSubscribe:  noticeSubscribe,
 	}
-	server := process.NewServer(subServers)
+	simpleConsumer := rocketmq.InitConsumer(rocketMQConfig)
+	server := process.NewServer(subServers, simpleConsumer)
 	appProvider := &socket.AppProvider{
 		Config:    cfg,
 		Engine:    engine,

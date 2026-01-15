@@ -111,3 +111,94 @@ type GetMyCollectionsResponse struct {
 	Notes []*Note `json:"notes"`
 	Total int     `json:"total"`
 }
+
+type Leaf struct {
+	Page     int `form:"page"`      // 页码（从1开始）
+	PageSize int `form:"pageSize" ` // 每页数量
+}
+
+type Notes struct {
+	ID        int64     `json:"id"`        // 雪花算法ID
+	UserID    int64     `json:"user_id"`   // 作者ID
+	Title     string    `json:"title"`     // 标题
+	Content   string    ` json:"content"`  // 正文内容
+	TopicIDs  []int64   `json:"topic_ids"` // 话题列表
+	Location  Location  `json:"location"`  // 地理位置{lat, lng, name}
+	MediaData NoteMedia `json:"media_data"`
+
+	Type        int       `json:"type"`         // 1-图文, 2-视频
+	Status      int       `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
+	VisibleConf int       `json:"visible_conf"` // 1-公开, 2-粉丝可见, 3-自己可见
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	TimeStamp   int64     `json:"time_stamp"`
+	Avatar      string    `json:"avatar"`
+	Nickname    string    `json:"nickname"`
+
+	// 统计数据
+	LikeCount    int64 `json:"like_count"`
+	CollCount    int64 `json:"coll_count"`
+	ShareCount   int64 `json:"share_count"`
+	CommentCount int64 `json:"comment_count"`
+	ViewCount    int64 `json:"view_count,omitempty"`
+
+	// 用户相关状态
+	IsLiked     bool `json:"is_liked"`     // 当前用户是否点赞
+	IsCollected bool `json:"is_collected"` // 当前用户是否收藏
+	IsFollowed  bool `json:"is_followed"`  // 当前用户是否关注作者
+}
+
+type ListNotesReq struct {
+	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
+	PageSize int   `form:"pageSize"`
+}
+type ListNotesRep struct {
+	Notes      []*Notes `json:"notes"`
+	NextCursor int64    `json:"next_cursor"` // 返回给前端，下次请求带上
+	HasMore    bool     `json:"has_more"`    // 告诉前端是否还有更多
+}
+
+type NoteStats struct {
+	NoteID       uint64 `json:"note_id"`
+	LikeCount    int64  `json:"like_count"`
+	CollCount    int64  `json:"coll_count"`
+	ShareCount   int64  `json:"share_count"`
+	CommentCount int64  `json:"comment_count"`
+	ViewCount    int64  `json:"view_count,omitempty"` // 如果后续加浏览数
+}
+
+type NoteDetail struct {
+	ID          int64       `json:"id"`
+	UserID      int64       `json:"user_id"`
+	Title       string      `json:"title"`
+	Content     string      `json:"content"`
+	TopicIDs    []int64     `json:"topic_ids"`
+	Location    Location    `json:"location"`
+	MediaData   []NoteMedia `json:"media_data"`
+	Type        int         `json:"type"`
+	Status      int         `json:"status"`
+	VisibleConf int         `json:"visible_conf"`
+
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+
+	// 统计数据
+	LikeCount    int64 `json:"like_count"`
+	CollCount    int64 `json:"coll_count"`
+	ShareCount   int64 `json:"share_count"`
+	CommentCount int64 `json:"comment_count"`
+	ViewCount    int64 `json:"view_count"`
+
+	// 用户交互状态
+	IsLiked        bool            `json:"is_liked"`
+	IsCollected    bool            `json:"is_collected"`
+	IsFollowed     bool            `json:"is_followed"` // 是否关注了作者
+	CommentPreview *CommentPreview `json:"comment_preview"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+type CommentPreview struct {
+	TotalCount int64              `json:"total_count"` // 评论总数
+	Comments   []*CommentResponse `json:"comments"`    // 前3条评论
+}

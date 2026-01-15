@@ -61,7 +61,7 @@ build-conn: gen-conn
 	@echo "==> build conn-server"
 	@mkdir -p $(BIN_DIR)
 	@CGO_ENABLED=$(CGO) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-		$(GO) build -o $(BIN_DIR)/conn-server ./$(CONN_CMD)
+		$(GO) build -o $(BIN_DIR)/conn-server $(CONN_CMD)/.
 
 build-fanout: gen-fanout
 	@echo "==> build fanout-server"
@@ -78,7 +78,7 @@ run-api: gen-api
 	@$(GO) run ./$(API_CMD) serve
 
 run-conn: gen-conn
-	@$(GO) run ./$(CONN_CMD) serve
+	@$(GO) run ./$(CONN_CMD)/.
 
 run-fanout: gen-fanout
 	@cd $(FANOUT_CMD) && $(GO) run .

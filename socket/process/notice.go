@@ -1,82 +1,49 @@
 package process
 
 import (
+	"Hyper/pkg/log"
 	"Hyper/pkg/server"
 	"Hyper/pkg/socket"
 	"Hyper/service"
 	"Hyper/types"
 	"context"
 	"encoding/json"
-	"fmt"
-	"log"
-	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type NoticeSubscribe struct {
-	Redis          *redis.Client
-	MqConsumer     rocketmq.PushConsumer
+	Redis *redis.Client
+
 	ConnectService service.IClientConnectService
 }
 
-func (m *NoticeSubscribe) Setup(ctx context.Context) error {
-	log.Printf("[MQ] 正在启动notice消费者，ServerID: %s", server.GetServerId())
-	err := m.MqConsumer.Subscribe("hyper_system_messages", consumer.MessageSelector{}, m.handleMessage)
-	if err != nil {
-		return fmt.Errorf("subscribe topic error: %w", err)
-	}
-
-	if err := m.MqConsumer.Start(); err != nil {
-		log.Printf("[MQ Warning] Start notice consumer failed: %v. Will retry in background...", err)
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if err := m.MqConsumer.Start(); err == nil {
-						log.Printf("[MQ] Notice consumer started successfully in background")
-						return
-					}
-				}
-			}
-		}()
-	}
-
-	go func() {
-		<-ctx.Done()
-		log.Println("[MQ] 正在关闭消费者...")
-		m.MqConsumer.Shutdown()
-	}()
+func (m *NoticeSubscribe) Init() error {
 
 	return nil
 }
 
-func (m *NoticeSubscribe) handleMessage(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-	for _, msg := range msgs {
-		fmt.Println("Received message:", string(msg.Body))
+func (m *NoticeSubscribe) Setup(ctx context.Context) error {
 
-		var event types.SystemMessage
-		if err := json.Unmarshal(msg.Body, &event); err != nil {
-			log.Printf("[NoticeSubscribe] Unmarshal error: %v", err)
-			continue
-		}
+	return nil
+}
 
-		switch event.Type {
-		case "follow":
-			var data types.FollowPayload
-			if err := json.Unmarshal(event.Data, &data); err != nil {
-				log.Printf("Unmarshal follow data error: %v", err)
-				continue
-			}
-			m.handleFollowNotice(ctx, &data)
+func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.MessageView) (consumer.ConsumeResult, error) {
+	var event types.SystemMessage
+	if err := json.Unmarshal(msgs.GetBody(), &event); err != nil {
+		log.L.Error("unmarshal msg error", zap.Error(err))
+	}
+
+	switch event.Type {
+	case "follow":
+		var data types.FollowPayload
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			log.L.Error("unmarshal msg error", zap.Error(err))
 		}
+		m.handleFollowNotice(ctx, &data)
 	}
 
 	return consumer.ConsumeSuccess, nil
@@ -92,7 +59,7 @@ func (m *NoticeSubscribe) handleFollowNotice(ctx context.Context, data *types.Fo
 	// 查找被关注者是否在当前服务器在线
 	cids, err := m.ConnectService.GetUidFromClientIds(ctx, sid, channel, data.TargetId)
 	if err != nil {
-		log.Printf("GetUidFromClientIds error: %v", err)
+		log.L.Error("GetUidFromClientIds error", zap.Error(err))
 		return
 	}
 

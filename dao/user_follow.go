@@ -110,3 +110,12 @@ func (d *UserFollowDAO) GetFollowingList(ctx context.Context, userID uint64, lim
 
 	return follows, total, err
 }
+
+func (d *UserFollowDAO) CheckExists(ctx context.Context, followerID, followeeID uint64) (bool, error) {
+	var count int64
+	err := d.Db.WithContext(ctx).
+		Model(&models.UserFollow{}).
+		Where("follower_id = ? AND followee_id = ?", followerID, followeeID).
+		Count(&count).Error
+	return count > 0, err
+}

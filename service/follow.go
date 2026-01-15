@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/redis/go-redis/v9"
 	"log"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 )
 
 var _ IFollowService = (*FollowService)(nil)
@@ -22,13 +23,15 @@ type IFollowService interface {
 	GetFollowerCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error)
+	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
 }
 
 type FollowService struct {
 	FollowDAO *dao.UserFollowDAO
 	StatsDAO  *dao.UserStatsDAO
 	UserDAO   *dao.Users
-	Producer  rocketmq.Producer
+	Producer  rmq_client.Producer
+	Redis     *redis.Client
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
@@ -72,7 +75,7 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 	// 发送 MQ 通知
 	go func() {
 		// 查询关注者信息
-		follower, err := s.UserDAO.FindById(context.Background(), followerID)
+		follower, err := s.UserDAO.FindById(ctx, followerID)
 		if err != nil {
 			log.Printf("[MQ] 获取关注者信息失败: %v", err)
 			return
@@ -93,12 +96,12 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 		}
 		body, _ := json.Marshal(msgMap)
 
-		msg := &primitive.Message{
+		msg := &rmq_client.Message{
 			Topic: "hyper_system_messages",
 			Body:  body,
 		}
 
-		if _, err := s.Producer.SendSync(context.Background(), msg); err != nil {
+		if _, err := s.Producer.Send(ctx, msg); err != nil {
 			log.Printf("[MQ] 发送关注通知失败: %v", err)
 		}
 	}()
@@ -175,4 +178,19 @@ func (s *FollowService) GetFollowingCount(ctx context.Context, userID uint64) (i
 
 func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
 	return s.FollowDAO.GetFollowingList(ctx, userID, limit, offset)
+}
+
+func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error) {
+	if followerID == 0 || followerID == followeeID {
+		return false, nil
+	}
+
+	// 类似的逻辑
+	key := fmt.Sprintf("user:following:%d", followerID)
+	exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
+	if err == nil {
+		return exists, nil
+	}
+
+	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }
