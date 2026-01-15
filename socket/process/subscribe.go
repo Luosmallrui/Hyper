@@ -30,7 +30,7 @@ type MessageSubscribe struct {
 	MessageStorage *cache.MessageStorage
 	SessionService service.ISessionService
 	UnreadStorage  *cache.UnreadStorage
-	GroupDAO       *dao.GroupDAO
+	GroupMemberDAO *dao.GroupMember
 }
 
 var clientCache sync.Map // map[string]pushservice.Client
@@ -102,9 +102,16 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			Content:     imMsg.Content,
 			ParentMsgId: imMsg.ParentMsgID,
 			Status:      types.MsgStatusSuccess,
-			CreatedAt:   time.Now().Unix(),
-			Ext:         string(extBytes),
-			UpdatedAt:   time.Now(),
+			//CreatedAt:   time.Now().Unix(),
+			CreatedAt: func() int64 {
+				if imMsg.Timestamp > 0 {
+					return imMsg.Timestamp // 毫秒：发送时用的毫秒
+				}
+				return time.Now().UnixMilli() // 兜底
+			}(),
+
+			Ext:       string(extBytes),
+			UpdatedAt: time.Now(),
 		}
 
 		// 1. 同步持久化
@@ -150,9 +157,16 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			Content:     imMsg.Content,
 			ParentMsgId: imMsg.ParentMsgID,
 			Status:      types.MsgStatusSuccess,
-			CreatedAt:   time.Now().Unix(),
-			Ext:         string(extBytes),
-			UpdatedAt:   time.Now(),
+			//CreatedAt:   time.Now().Unix(),
+			CreatedAt: func() int64 {
+				if imMsg.Timestamp > 0 {
+					return imMsg.Timestamp // 毫秒：发送时用的毫秒
+				}
+				return time.Now().UnixMilli() // 兜底
+			}(),
+
+			Ext:       string(extBytes),
+			UpdatedAt: time.Now(),
 		}
 		if err := m.MessageService.SaveGroupMessage(gdb); err != nil {
 			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
@@ -162,16 +176,24 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
 		_ = m.Redis.Del(ctx, lockKey).Err()
 
-		// 3) 查群成员（批量推送的“成员列表”来源）
-		memberUIDs, err := m.GroupDAO.GetGroupMembers(fmt.Sprintf("%d", imMsg.TargetID))
-		if err != nil {
-			log.L.Error(fmt.Sprintf("[MQ] 获取群成员失败 group=%d err=%v", imMsg.TargetID, err))
-			return err
+		// 3) 查群成员：使用 group_member DAO（真实成员表）
+		memberIDs := m.GroupMemberDAO.GetMemberIds(ctx, int(imMsg.TargetID))
+		if len(memberIDs) == 0 {
+			// 没成员就不推了（也可以只推给自己，按产品定义）
+			return nil
 		}
+
+		// 转成 []string（因为后面的函数签名是 []string）
+		memberUIDs := make([]string, 0, len(memberIDs))
+		for _, id := range memberIDs {
+			memberUIDs = append(memberUIDs, strconv.Itoa(id))
+		}
+
 		go func(copyMsg types.Message, members []string) {
 			m.updateCacheGroup(ctx, &copyMsg, members)
 			m.dispatchToGroup(ctx, &copyMsg, members)
 		}(imMsg, memberUIDs)
+
 	default:
 		log.L.Error(fmt.Sprintf("[MQ] 未知 SessionType=%d, msg_id=%d", imMsg.SessionType, imMsg.Id))
 	}
