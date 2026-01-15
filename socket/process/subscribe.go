@@ -408,78 +408,79 @@ func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Messa
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			m.dispatchToUser(ctx, receiver, msg)
+			m.doBatchPush(ctx, int(msg.SenderID), msg, receiver)
 		}(uid)
 	}
 
 	wg.Wait()
 }
 
-// 私聊推送（也被群聊复用）
-func (m *MessageSubscribe) dispatchToUser(ctx context.Context, uid int, msg *types.Message) {
-	key := RouterKey{}
-	msg.Status = types.MsgStatusSuccess
-
-	// 1) 取出用户在哪些 sid 上在线
-	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
-	if err != nil || len(sids) == 0 {
-		log.L.Error(fmt.Sprintf("[Router] uid=%d offline or no route (no sids), err=%v", uid, err))
-		return
-	}
-
-	payload, _ := json.Marshal(msg)
-
-	for _, sid := range sids {
-
-		userKey := key.UserClients(sid, msg.Channel, uid)
-
-		// 2) 这里做“短暂重试”，避免刚连接时 set 还没写完
-		var cids []string
-		for attempt := 0; attempt < 3; attempt++ {
-			cids, err = m.Redis.SMembers(ctx, userKey).Result()
-			if err == nil && len(cids) > 0 {
-				break
-			}
-			// 10ms, 30ms, 50ms（总共 < 100ms）
-			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
-		}
-
-		if err != nil {
-			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s read cids err=%v", uid, sid, err))
-			continue
-		}
-
-		// 关键：不要因为 cids 空就删除 location
-		if len(cids) == 0 {
-			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s has route but empty cids (skip, no delete)", uid, sid))
-			continue
-		}
-
-		// 3) RPC 推送
-		cli, err := m.getRpcClient(sid)
-		if err != nil {
-			log.L.Error(fmt.Sprintf("[RPC] get client fail sid=%s err=%v", sid, err))
-			continue
-		}
-
-		for _, cidStr := range cids {
-			cid, _ := strconv.ParseInt(cidStr, 10, 64)
-			_, err := cli.PushToClient(ctx, &push.PushRequest{
-				Cid:     cid,
-				Uid:     int32(uid),
-				Payload: string(payload),
-				Event:   "chat",
-			})
-			if err != nil {
-				// 只有 RPC 明确不可达，才清理 sid（这个清理是合理的）
-				log.L.Error(fmt.Sprintf("[RPC] push fail uid=%d sid=%s cid=%d err=%v, cleanup route", uid, sid, cid, err))
-				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-				clientCache.Delete(sid)
-				break
-			}
-		}
-	}
-}
+//已弃用，推送改为用doBatchPush，群聊推送也调用doBatchPush
+//// 私聊推送
+//func (m *MessageSubscribe) dispatchToUser(ctx context.Context, uid int, msg *types.Message) {
+//	key := RouterKey{}
+//	msg.Status = types.MsgStatusSuccess
+//
+//	// 1) 取出用户在哪些 sid 上在线
+//	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
+//	if err != nil || len(sids) == 0 {
+//		log.L.Error(fmt.Sprintf("[Router] uid=%d offline or no route (no sids), err=%v", uid, err))
+//		return
+//	}
+//
+//	payload, _ := json.Marshal(msg)
+//
+//	for _, sid := range sids {
+//
+//		userKey := key.UserClients(sid, msg.Channel, uid)
+//
+//		// 2) 这里做“短暂重试”，避免刚连接时 set 还没写完
+//		var cids []string
+//		for attempt := 0; attempt < 3; attempt++ {
+//			cids, err = m.Redis.SMembers(ctx, userKey).Result()
+//			if err == nil && len(cids) > 0 {
+//				break
+//			}
+//			// 10ms, 30ms, 50ms（总共 < 100ms）
+//			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
+//		}
+//
+//		if err != nil {
+//			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s read cids err=%v", uid, sid, err))
+//			continue
+//		}
+//
+//		// 关键：不要因为 cids 空就删除 location
+//		if len(cids) == 0 {
+//			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s has route but empty cids (skip, no delete)", uid, sid))
+//			continue
+//		}
+//
+//		// 3) RPC 推送
+//		cli, err := m.getRpcClient(sid)
+//		if err != nil {
+//			log.L.Error(fmt.Sprintf("[RPC] get client fail sid=%s err=%v", sid, err))
+//			continue
+//		}
+//
+//		for _, cidStr := range cids {
+//			cid, _ := strconv.ParseInt(cidStr, 10, 64)
+//			_, err := cli.PushToClient(ctx, &push.PushRequest{
+//				Cid:     cid,
+//				Uid:     int32(uid),
+//				Payload: string(payload),
+//				Event:   "chat",
+//			})
+//			if err != nil {
+//				// 只有 RPC 明确不可达，才清理 sid（这个清理是合理的）
+//				log.L.Error(fmt.Sprintf("[RPC] push fail uid=%d sid=%s cid=%d err=%v, cleanup route", uid, sid, cid, err))
+//				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
+//				clientCache.Delete(sid)
+//				break
+//			}
+//		}
+//	}
+//}
 
 func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) {
 	groupID := int(msg.TargetID)
