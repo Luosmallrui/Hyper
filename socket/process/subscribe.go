@@ -60,8 +60,35 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 	var imMsg types.Message
 	if err := json.Unmarshal(msgs.GetBody(), &imMsg); err != nil {
 		log.L.Error("unmarshal msg error", zap.Error(err))
+		return err //返回err防止Ack 掉
+	}
+	// 幂等去重：done + lock 两段式
+	doneKey := fmt.Sprintf("im:dedup:done:%d", imMsg.Id)
+	lockKey := fmt.Sprintf("im:dedup:lock:%d", imMsg.Id)
+
+	// 1) 已经成功处理过：直接返回 nil（上层会 Ack），避免重复推送/重复入库
+	done, err := m.Redis.Exists(ctx, doneKey).Result()
+	if err != nil {
+		return err
+	}
+	if done == 1 {
 		return nil
 	}
+
+	// 2) 抢占处理锁：抢不到说明其他进程/协程正在处理 -> 返回 error（不要 Ack，让 MQ 重试）
+	ok, err := m.Redis.SetNX(ctx, lockKey, 1, 2*time.Minute).Result()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("msg %d is being processed", imMsg.Id)
+	}
+
+	// 3) 后续失败要释放锁，保证能重试
+	defer func() {
+		_ = m.Redis.Del(context.Background(), lockKey).Err()
+	}()
+
 	extBytes, _ := json.Marshal(imMsg.Ext)
 	switch imMsg.SessionType {
 	case types.SessionTypeSingle:
@@ -83,9 +110,12 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		// 1. 同步持久化
 		if err := m.MessageService.SaveMessage(immsg); err != nil {
 			log.L.Error("[MQ] 消息入库失败", zap.Error(err))
+			return err // 让上层不 Ack，MQ 自动重试
 			// 数据库挂了建议让 MQ 重试
-			//return rmq_client.ActionNack, err/
 		}
+		// 入库成功：标记已完成（24h），并释放锁
+		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
+		_ = m.Redis.Del(ctx, lockKey).Err()
 
 		if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
 			log.L.Error("update session error", zap.Error(err))
@@ -126,11 +156,17 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		}
 		if err := m.MessageService.SaveGroupMessage(gdb); err != nil {
 			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
+			return err
 		}
+		// 入库成功：标记已完成（24h），并释放锁
+		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
+		_ = m.Redis.Del(ctx, lockKey).Err()
+
 		// 3) 查群成员（批量推送的“成员列表”来源）
 		memberUIDs, err := m.GroupDAO.GetGroupMembers(fmt.Sprintf("%d", imMsg.TargetID))
 		if err != nil {
 			log.L.Error(fmt.Sprintf("[MQ] 获取群成员失败 group=%d err=%v", imMsg.TargetID, err))
+			return err
 		}
 		go func(copyMsg types.Message, members []string) {
 			m.updateCacheGroup(ctx, &copyMsg, members)
