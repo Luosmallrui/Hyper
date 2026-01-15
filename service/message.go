@@ -144,14 +144,14 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		Topic: types.ImTopicChat,
 		Body:  body,
 	}
-	fmt.Println(s.MqProducer, 44)
-	s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
-		for i := 0; i < len(resp); i++ {
-			fmt.Printf("%#v\n", resp[i])
-		}
-	})
-	fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
-
+	//fmt.Println(s.MqProducer, 44)
+	//s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
+	//	for i := 0; i < len(resp); i++ {
+	//		fmt.Printf("%#v\n", resp[i])
+	//	}
+	//})
+	//fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
+	//MQ重发了，前者异步发送了后面又同步发送了
 	_, err = s.MqProducer.Send(context.Background(), mqMsg)
 	if err != nil {
 		return err
