@@ -32,6 +32,9 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(CommentsService), "*"),
 	wire.Bind(new(ICommentsService), new(*CommentsService)),
 
+	wire.Struct(new(TopicService), "*"),
+	wire.Bind(new(ITopicService), new(*TopicService)),
+
 	wire.Struct(new(LikeService), "*"),
 	wire.Bind(new(ILikeService), new(*LikeService)),
 	wire.Struct(new(CollectService), "*"),
