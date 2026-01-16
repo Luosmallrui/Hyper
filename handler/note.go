@@ -114,12 +114,12 @@ func (n *Note) ListNote(c *gin.Context) error {
 
 // CreateNote 创建笔记
 func (n *Note) CreateNote(c *gin.Context) error {
-	// 从 context 获取用户 ID
+	//从 context 获取用户 ID
 	userID, err := context.GetUserID(c)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
+	//userID := uint64(1)
 	// 绑定请求参数
 	var req types.CreateNoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

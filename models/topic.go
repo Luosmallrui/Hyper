@@ -6,7 +6,7 @@ import "time"
 type Topic struct {
 	// 1. 基础信息
 	// 显式关闭自增，配合你手动生成的唯一 ID
-	ID          uint64 `gorm:"primaryKey;autoIncrement:false" json:"id"`
+	ID          uint64 `gorm:"primaryKey;autoIncrement:true" json:"id"`
 	Name        string `gorm:"type:varchar(64);uniqueIndex:idx_topics_name;not null" json:"name"`
 	Description string `gorm:"type:varchar(255);default:''" json:"description"`
 	CoverURL    string `gorm:"type:varchar(255);default:''" json:"cover_url"`
