@@ -54,16 +54,20 @@ func (g *GroupMember) FindByUserId(ctx context.Context, gid, uid int) (*models.G
 	return member, err
 }
 
-// GetMemberIds 获取所有群成员用户ID
-func (g *GroupMember) GetMemberIds(ctx context.Context, groupId int) []int {
-
+// GetMemberIds 获取所有群成员用户ID（只查未退群成员）
+func (g *GroupMember) GetMemberIds(ctx context.Context, groupId int) ([]int, error) {
 	var ids []int
-	_ = g.Repo.Model(ctx).Select("user_id").Where("group_id = ? and is_quit = ?", groupId, models.No).Scan(&ids)
-
-	return ids
+	err := g.Repo.Model(ctx).
+		Where("group_id = ? AND is_quit = 0", groupId).
+		Pluck("user_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
-// GetUserGroupIds 获取所有群成员ID
+// group_member 表结构是'是否退群[0:否; 1:是]',跟models规定不同
+// GetUserGroupIds 获取所有群成员ID.
 func (g *GroupMember) GetUserGroupIds(ctx context.Context, uid int) []int {
 
 	var ids []int

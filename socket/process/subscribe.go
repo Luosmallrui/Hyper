@@ -172,17 +172,38 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
 			return err
 		}
+
 		// 入库成功：标记已完成（24h），并释放锁
 		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
 		_ = m.Redis.Del(ctx, lockKey).Err()
 
 		// 3) 查群成员：使用 group_member DAO（真实成员表）
-		memberIDs := m.GroupMemberDAO.GetMemberIds(ctx, int(imMsg.TargetID))
+		memberIDs, err := m.GroupMemberDAO.GetMemberIds(ctx, int(imMsg.TargetID))
+		if err != nil {
+			log.L.Error("[MQ] query group members failed",
+				zap.Error(err),
+				zap.Int64("group_id", imMsg.TargetID),
+			)
+			return err
+		}
+
+		log.L.Info("[DEBUG] group members",
+			zap.Int64("group_id", imMsg.TargetID),
+			zap.Ints("memberIDs", memberIDs),
+		)
+
 		if len(memberIDs) == 0 {
-			// 没成员就不推了（也可以只推给自己，按产品定义）
+			log.L.Warn("[MQ] group has no members in db",
+				zap.Int64("group_id", imMsg.TargetID),
+			)
 			return nil
 		}
 
+		// 群聊会话落库（im_session）：Redis 丢失时 DB 兜底会话列表不失真
+		if err := m.SessionService.UpsertGroupSessions(ctx, &imMsg, memberIDs); err != nil {
+			log.L.Error("[MQ] upsert group sessions error", zap.Error(err), zap.Int64("group_id", imMsg.TargetID))
+			// 不 return：会话落库失败不影响消息入库 & 推送（降级策略）
+		}
 		// 转成 []string（因为后面的函数签名是 []string）
 		memberUIDs := make([]string, 0, len(memberIDs))
 		for _, id := range memberIDs {
@@ -377,6 +398,13 @@ func (m *MessageSubscribe) GetUserRoute(ctx context.Context, uid int) (map[strin
 	// 1. 一键获取该用户所有的 clientId 和对应的 serverId
 	// Key: im:user:location:100 -> { "c1": "sid_A", "c2": "sid_A", "c3": "sid_B" }
 	results, err := m.Redis.HGetAll(ctx, fmt.Sprintf("im:user:location:%d", uid)).Result()
+	//测试
+	log.L.Info("[DEBUG] HGetAll route raw",
+		zap.Int("uid", uid),
+		zap.Int("count", len(results)),
+		zap.Any("raw", results),
+	)
+
 	if err != nil {
 		return nil, err
 	}

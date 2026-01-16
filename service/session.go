@@ -1,6 +1,7 @@
 package service
 
 import (
+	"Hyper/dao"
 	"Hyper/dao/cache"
 	"Hyper/models"
 	"Hyper/types"
@@ -18,11 +19,13 @@ type SessionService struct {
 	MessageStorage *cache.MessageStorage
 	UnreadStorage  *cache.UnreadStorage
 	UserService    IUserService
+	SessionDAO     *dao.SessionDAO
 }
 
 type ISessionService interface {
 	UpdateSingleSession(ctx context.Context, msg *types.Message) error
 	ListUserSessions(ctx context.Context, userId uint64, limit int) ([]*types.SessionDTO, error)
+	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
 }
 
 func (s *SessionService) UpdateSingleSession(
@@ -64,6 +67,60 @@ func (s *SessionService) UpdateSingleSession(
 	}
 
 	return nil
+}
+func (s *SessionService) UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error {
+	// msg.TargetID = group_id（数字）
+	groupID := uint64(msg.TargetID)
+	senderID := uint64(msg.SenderID)
+
+	lastTimeSec := msg.Timestamp
+	if lastTimeSec <= 0 {
+		lastTimeSec = time.Now().UnixMilli()
+	}
+	if lastTimeSec > 1_000_000_000_000 {
+		lastTimeSec = lastTimeSec / 1000
+	}
+
+	// last_msg_content 最大 255
+	lastContent := msg.Content
+	if len([]rune(lastContent)) > 200 { // 留点余量，避免 emoji 等导致超长
+		r := []rune(lastContent)
+		lastContent = string(r[:200]) + "..."
+	}
+
+	now := time.Now()
+
+	rows := make([]models.Session, 0, len(memberIDs))
+	for _, mid := range memberIDs {
+		uid := uint64(mid)
+		if uid == 0 {
+			continue
+		}
+
+		// 未读最小版：发送者不加，其他成员 +1
+		var unread uint32 = 0
+		if uid != senderID {
+			unread = 1
+		}
+
+		rows = append(rows, models.Session{
+			UserId: uid,
+			// session_type: 2=群聊
+			SessionType: 2,
+			PeerId:      groupID,
+
+			LastMsgId:      uint64(msg.Id),
+			LastMsgType:    msg.MsgType,
+			LastMsgContent: lastContent,
+			LastMsgTime:    lastTimeSec,
+
+			UnreadCount: unread,
+			UpdatedAt:   now,
+			CreatedAt:   now,
+		})
+	}
+
+	return s.SessionDAO.BatchUpsert(ctx, rows)
 }
 
 func truncateContent(content string, maxLen int) string {
