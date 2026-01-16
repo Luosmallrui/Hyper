@@ -9,7 +9,7 @@ type InviteMemberRequest struct {
 type InviteMemberResponse struct {
 	SuccessCount  int   `json:"success_count"`
 	FailedCount   int   `json:"failed_count"`
-	FailedUserIds []int `json:"failed_user_ids_user_ids"`
+	FailedUserIds []int `json:"failed_user_ids"`
 }
 
 // 踢出成员请求
