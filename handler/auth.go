@@ -11,6 +11,7 @@ import (
 	"Hyper/types"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,20 +48,50 @@ func (u *Auth) test(c *gin.Context) error {
 	fmt.Println(err)
 	return nil
 }
-func (u *Auth) GetToken(c *gin.Context) error {
 
-	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "access", 2*time.Hour)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
+// 本地测试
+func (u *Auth) GetToken(c *gin.Context) error {
+	secret := []byte(u.Config.Jwt.Secret)
+
+	// 本地测试：固定返回 8/9/10 三个用户的 token
+	uids := []uint{8, 9, 10}
+
+	result := make(map[string]gin.H, len(uids))
+	for _, uid := range uids {
+		access, err := jwt.GenerateToken(secret, uid, "XX", "access", 2*time.Hour)
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, err.Error())
+		}
+		refresh, err := jwt.GenerateToken(secret, uid, "XX", "refresh", 2*time.Hour)
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, err.Error())
+		}
+
+		// key 用字符串，方便前端/工具查看
+		result[strconv.FormatUint(uint64(uid), 10)] = gin.H{
+			"token":   access,
+			"refresh": refresh,
+		}
 	}
-	fmt.Println(u.Config.Jwt.Secret, 123)
-	f, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "refresh", 2*time.Hour)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
-	}
-	response.Success(c, gin.H{"token": token, "refresh": f})
+
+	response.Success(c, gin.H{"tokens": result})
 	return nil
 }
+
+//func (u *Auth) GetToken(c *gin.Context) error {
+//
+//	token, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "access", 2*time.Hour)
+//	if err != nil {
+//		return response.NewError(http.StatusInternalServerError, err.Error())
+//	}
+//	fmt.Println(u.Config.Jwt.Secret, 123)
+//	f, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), 1, "XX", "refresh", 2*time.Hour)
+//	if err != nil {
+//		return response.NewError(http.StatusInternalServerError, err.Error())
+//	}
+//	response.Success(c, gin.H{"token": token, "refresh": f})
+//	return nil
+//}
 
 func (u *Auth) Refresh(c *gin.Context) error {
 	authHeader := c.GetHeader("Authorization")
