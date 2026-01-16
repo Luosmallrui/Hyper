@@ -92,3 +92,16 @@ func (d *NoteStatsDAO) IncrementViewCount(ctx context.Context, noteID uint64, de
 func (d *NoteDAO) Transaction(ctx context.Context, fn func(*gorm.DB) error) error {
 	return d.Db.WithContext(ctx).Transaction(fn)
 }
+
+// GetNotesByTopicID - 根据话题ID获取相关笔记（按热度排序）
+func (d *NoteDAO) GetNotesByTopicID(ctx context.Context, topicID uint64, limit, offset int) ([]*models.Note, error) {
+	var notes []*models.Note
+	err := d.Db.WithContext(ctx).
+		Joins("INNER JOIN note_topics ON notes.id = note_topics.note_id").
+		Where("note_topics.topic_id = ? AND notes.status = ?", topicID, 1).
+		Order("notes.created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&notes).Error
+	return notes, err
+}

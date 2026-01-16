@@ -3,12 +3,22 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+
 	"gorm.io/gorm"
-	"time"
 )
 
 type Topic struct {
 	Repo[models.Topic]
+}
+
+type NoteTopic struct {
+	Repo[models.NoteTopic]
+}
+
+func NewNoteTopic(db *gorm.DB) *NoteTopic {
+	return &NoteTopic{
+		Repo: NewRepo[models.NoteTopic](db),
+	}
 }
 
 func NewTopic(db *gorm.DB) *Topic {
@@ -22,166 +32,91 @@ func (d *Topic) CreateTopic(ctx context.Context, topic *models.Topic) error {
 	return d.Db.WithContext(ctx).Create(topic).Error
 }
 
+// GetHotTopics - 获取热门话题（按热度和最后发帖时间排序）
+func (d *Topic) GetHotTopics(ctx context.Context, limit int) ([]*models.Topic, error) {
+	var topics []*models.Topic
+	err := d.Db.WithContext(ctx).
+		Where("status = ?", 1). // status=1 表示正常
+		Order("is_hot DESC, sort_weight DESC, last_post_at DESC").
+		Limit(limit).
+		Find(&topics).Error
+	return topics, err
+}
+
+// FindTopicsByName - 按名称模糊搜索话题（按热度排序）
+func (d *Topic) FindTopicsByName(ctx context.Context, keyword string, limit int) ([]*models.Topic, error) {
+	var topics []*models.Topic
+	err := d.Db.WithContext(ctx).
+		Where("status = ? AND name LIKE ?", 1, "%"+keyword+"%").
+		Order("view_count DESC, sort_weight DESC, last_post_at DESC").
+		Limit(limit).
+		Find(&topics).Error
+	return topics, err
+}
+
+// FindTopicByName - 根据名称精确查询话题
+func (d *Topic) FindTopicByName(ctx context.Context, name string) (*models.Topic, error) {
+	var topic *models.Topic
+	err := d.Db.WithContext(ctx).
+		Where("status = ? AND name = ?", 1, name).
+		First(&topic).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil // 不存在返回 nil
+	}
+	return topic, err
+}
 func (d *Topic) Transaction(ctx context.Context, f func(tx *gorm.DB) error) interface{} {
 	return d.Db.WithContext(ctx).Transaction(f)
 }
 
-func (d *Topic) FindTopicByName(ctx context.Context, name string) (*models.Topic, error) {
-	var topic models.Topic
-
-	err := d.Db.WithContext(ctx).
-		Model(&models.Topic{}).
-		Where("name = ? AND status = 1", name).
-		First(&topic).Error
-
-	if err != nil {
-		return nil, err
-	}
-	return &topic, nil
-}
-
-// 批量根据话题名称获取话题
-func (d *Topic) BatchTopicFindByNames(ctx context.Context, names []string) (map[string]*models.Topic, error) {
-	var topics []*models.Topic
-
-	err := d.Db.WithContext(ctx).
-		Where("name IN ? AND status = 1", names).
-		Find(&topics).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	// 转换为 map，方便查找
-	topicMap := make(map[string]*models.Topic)
-	for _, topic := range topics {
-		topicMap[topic.Name] = topic
-	}
-
-	return topicMap, nil
-}
-
-func (d *Topic) BatchTopicFindByIDs(ctx context.Context, topicIDs []uint64) (map[uint64]*models.Topic, error) {
-	var topics []*models.Topic
-
-	err := d.Db.WithContext(ctx).
-		Where("id IN ? AND status = 1", topicIDs).
-		Find(&topics).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	topicMap := make(map[uint64]*models.Topic)
-	for _, topic := range topics {
-		topicMap[topic.ID] = topic
-	}
-
-	return topicMap, nil
-}
-
-func (d *Topic) FindTopicByID(ctx context.Context, topicID uint64) (*models.Topic, error) {
-	var topic models.Topic
-	err := d.Db.WithContext(ctx).
-		Where("id = ? AND status = 1", topicID).
-		First(&topic).Error
-	if err != nil {
-		return nil, err
-	}
-	return &topic, nil
+// CreateNoteTopic - 创建笔记与话题的关联
+func (d *NoteTopic) CreateNoteTopic(ctx context.Context, noteTopic *models.NoteTopic) error {
+	return d.Db.WithContext(ctx).Create(noteTopic).Error
 }
 
 // 批量创建笔记与话题的关联
-func (d *Topic) BatchCreateNoteTopicAssociations(ctx context.Context, noteID uint64, topicIDs []uint64) error {
-	if len(topicIDs) == 0 {
+func (d *NoteTopic) BatchCreateNoteTopic(ctx context.Context, noteTopics []*models.NoteTopic) error {
+	if len(noteTopics) == 0 {
 		return nil
 	}
-
-	associations := make([]*models.NoteTopic, 0, len(topicIDs))
-	now := time.Now()
-
-	for _, topicID := range topicIDs {
-		associations = append(associations, &models.NoteTopic{
-			NoteID:    noteID,
-			TopicID:   topicID,
-			CreatedAt: now,
-		})
-	}
-
-	return d.Db.WithContext(ctx).CreateInBatches(associations, 100).Error
+	return d.Db.WithContext(ctx).Create(&noteTopics).Error
 }
 
-// 批量增加话题的发布数
-func (d *Topic) BatchUpdateTopicsUpdatedAt(ctx context.Context, topicIDs []uint64, delta int32) error {
-	if len(topicIDs) == 0 {
-		return nil
-	}
-
-	return d.Db.WithContext(ctx).
-		Model(&models.Topic{}).
-		Where("id IN ?", topicIDs).
-		Updates(map[string]interface{}{
-			// 使用 GREATEST 函数确保计数值不会低于 0
-			"post_count":   gorm.Expr("GREATEST(post_count + ?, 0)", delta),
-			"last_post_at": time.Now(),
-		}).Error
+// 根据笔记ID删除关联的话题
+func (d *NoteTopic) DeleteTopicByNoteID(ctx context.Context, noteID uint64) error {
+	return d.Db.WithContext(ctx).Where("note_id = ?", noteID).Delete(&models.NoteTopic{}).Error
 }
 
-func (d *Topic) GetNoteIDsByTopicWithCursor(ctx context.Context, topicID uint64, cursor int64, pageSize int) ([]uint64, int64, bool, error) {
-	var noteTopics []*models.NoteTopic
+// 获取笔记关联的所有话题
+func (d *NoteTopic) GetTopicsByNoteID(ctx context.Context, noteID uint64) ([]uint64, error) {
+	var topicIDs []uint64
+	err := d.Db.WithContext(ctx).
+		Where("note_id = ?", noteID).
+		Pluck("topic_id", &topicIDs).Error
+	return topicIDs, err
+}
 
-	limit := pageSize + 1 // 多查一条判断是否有更多
-
-	query := d.Db.WithContext(ctx).
-		Table("note_topics nt").
-		Select("nt.note_id, n.created_at").
-		Joins("JOIN notes n ON nt.note_id = n.id").
-		Joins("JOIN note_stats ns ON nt.note_id = ns.note_id").
-		Where("nt.topic_id = ? AND n.status = 1", topicID)
-
-	// Cursor 逻辑：根据 (创建时间, noteID) 排序，支持游标
-	if cursor > 0 {
-		query = query.Where("n.created_at < ?", time.UnixMicro(cursor/1000))
-		// 或者：
-		query = query.Where("n.created_at < ?", time.Unix(0, cursor))
-	}
-
-	err := query.
-		Order("n.created_at DESC, nt.note_id DESC").
+// GetNotesByTopic - 根据话题ID获取相关笔记（支持分页）
+func (d *Topic) GetNotesByTopic(ctx context.Context, topicID uint64, limit, offset int) ([]*models.Note, error) {
+	var notes []*models.Note
+	err := d.Db.WithContext(ctx).
+		Joins("INNER JOIN note_topics ON notes.id = note_topics.note_id").
+		Where("note_topics.topic_id = ? AND notes.status = ?", topicID, 1).
+		Order("notes.created_at DESC").
 		Limit(limit).
-		Scan(&noteTopics).Error
-
-	if err != nil {
-		return nil, 0, false, err
-	}
-
-	// 提取笔记ID
-	noteIDs := make([]uint64, 0)
-	hasMore := false
-	var nextCursor int64
-
-	displayCount := len(noteTopics)
-	if displayCount > pageSize {
-		hasMore = true
-		displayCount = pageSize
-	}
-
-	for i := 0; i < displayCount; i++ {
-		noteIDs = append(noteIDs, noteTopics[i].NoteID)
-	}
-
-	// 计算下一个 Cursor（最后一条记录的创建时间）
-	if displayCount > 0 {
-		lastTopic := noteTopics[displayCount-1]
-		nextCursor = lastTopic.CreatedAt.UnixNano()
-	}
-
-	return noteIDs, nextCursor, hasMore, nil
+		Offset(offset).
+		Find(&notes).Error
+	return notes, err
 }
 
-func (d *Topic) BatchCreateTopics(ctx context.Context, topics []*models.Topic) error {
-	if len(topics) == 0 {
-		return nil
+// GetTopicByID - 根据ID获取话题
+func (d *Topic) GetTopicByID(ctx context.Context, topicID uint64) (*models.Topic, error) {
+	var topic *models.Topic
+	err := d.Db.WithContext(ctx).
+		Where("id = ? AND status = 1", topicID).
+		First(&topic).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
 	}
-	return d.Db.WithContext(ctx).CreateInBatches(topics, 100).Error
+	return topic, err
 }

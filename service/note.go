@@ -180,27 +180,6 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	// 生成笔记ID
 	noteID := uint64(snowflake.GenUserID())
 
-	//创建话题提取和关联
-	if s.TopicService != nil && req.Content != "" {
-		topics, err := s.TopicService.ExtractAndAssociateTopics(ctx, noteID, req.Content, userID)
-		if err != nil {
-			// 话题提取失败不影响笔记创建，仅记录日志
-			log.Error("提取并关联话题失败", "error", err)
-		} else if len(topics) > 0 {
-			// 将提取的话题ID追加到请求中（去重）
-			topicIDMap := make(map[int64]bool)
-			for _, id := range req.TopicIDs {
-				topicIDMap[id] = true
-			}
-			for _, topic := range topics {
-				topicID := int64(topic.ID)
-				if !topicIDMap[topicID] {
-					req.TopicIDs = append(req.TopicIDs, topicID)
-				}
-			}
-		}
-	}
-
 	if len(req.TopicIDs) == 0 {
 		req.TopicIDs = make([]int64, 0)
 	}
@@ -265,17 +244,30 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}
+
 		if err := tx.Create(stats).Error; err != nil {
 			return err
 		}
-
+		if len(req.TopicIDs) > 0 {
+			// 3. 创建笔记与话题的关联
+			noteTopics := make([]*models.NoteTopic, 0, len(req.TopicIDs))
+			for _, topicID := range req.TopicIDs {
+				noteTopics = append(noteTopics, &models.NoteTopic{
+					NoteID:    noteID,
+					TopicID:   uint64(topicID),
+					CreatedAt: time.Now(),
+				})
+			}
+			if err := tx.CreateInBatches(noteTopics, 100).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 
 	if err != nil {
 		return 0, err
 	}
-
 	return noteID, nil
 }
 
