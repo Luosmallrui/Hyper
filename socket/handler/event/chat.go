@@ -28,7 +28,12 @@ func (c *ChatEvent) OnOpen(client socket.IClient) {
 	now := time.Now()
 
 	// 客户端加入群房间
-	for _, groupId := range c.GroupMemberRepo.GetUserGroupIds(ctx, client.Uid()) {
+	groupIds, err := c.GroupMemberRepo.GetUserGroupIds(ctx, client.Uid())
+	if err != nil {
+		return
+	}
+
+	for _, groupId := range groupIds {
 		_ = c.RoomStorage.Insert(int32(groupId), client.Cid(), now.Unix())
 	}
 
@@ -64,7 +69,12 @@ func (c *ChatEvent) OnClose(client socket.IClient, code int, text string) {
 	now := time.Now()
 
 	// 客户端退出群房间
-	for _, groupId := range c.GroupMemberRepo.GetUserGroupIds(ctx, client.Uid()) {
+	groupIds, err := c.GroupMemberRepo.GetUserGroupIds(ctx, client.Uid())
+	if err != nil {
+		return
+	}
+
+	for _, groupId := range groupIds {
 		_ = c.RoomStorage.Delete(int32(groupId), client.Cid(), now.Unix())
 	}
 

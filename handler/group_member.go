@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -27,7 +28,7 @@ func NewGroupMemberHandler(config *config.Config, groupMemberService service.IGr
 func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(hm.Config.Jwt.Secret))
 	group := r.Group("/groupmember")
-	group.POST("/invit", authorize, context.Wrap(hm.InviteMember)) //邀请成员
+	group.POST("/invite", authorize, context.Wrap(hm.InviteMember)) //邀请成员
 	group.POST("/kick", authorize, context.Wrap(hm.KickMember))
 }
 
@@ -70,17 +71,15 @@ func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 		return err
 	}
 
-	UserIdval, err := context.GetUserID(c)
+	userId := c.GetInt("user_id")
+
+	v, ok := c.Get("user_id")
+	fmt.Printf("[DEBUG] ctx user_id raw=%v ok=%v type=%T GetInt=%d\n", v, ok, v, userId)
+
+	err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
+
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
-	}
-	UserId := int(UserIdval)
-
-	if err := h.GroupMemberService.KickMember(c, req.GroupId, UserId, req.KickedUserId); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "踢出成员失败: " + err.Error(),
-		})
-		return err
 	}
 
 	response.Success(c, "踢出成员成功")
