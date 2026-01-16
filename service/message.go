@@ -35,7 +35,7 @@ type IMessageService interface {
 	SendSystemMessage(targetID string, content string) error
 	AckMessages(msgIDs []string) error
 	GetMessageByID(msgID string) (*models.Message, error)
-	ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
+	ListMessages(ctx context.Context, userId, peerId uint64, sessionType int, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
 }
 
 func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
@@ -43,58 +43,110 @@ func (s *MessageService) SaveMessage(msg *models.ImSingleMessage) error {
 	return s.MessageDao.Save(msg)
 }
 
-func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, cursor int64, since int64, limit int) ([]types.ListMessageReq, error) {
-
+func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64, sessionType int, cursor int64, since int64, limit int) ([]types.ListMessageReq, error) {
+	// 1) 参数兜底：接口必须有硬限制，避免被人传超大 limit 拖垮 DB
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	// 2) 分流：私聊查 im_single_messages；群聊查 im_group_messages
+	switch sessionType {
 
-	sessionHash := GetSessionHash(int64(userId), int64(peerId))
+	case types.SessionTypeSingle:
+		// 私聊：用双方 uid 算 session_hash，保证 A->B 与 B->A 一致
+		sessionHash := GetSessionHash(int64(userId), int64(peerId))
 
-	q := s.DB.WithContext(ctx).
-		Model(&models.ImSingleMessage{}).
-		Where("session_hash = ?", sessionHash)
+		q := s.DB.WithContext(ctx).
+			Model(&models.ImSingleMessage{}).
+			Where("session_hash = ?", sessionHash)
 
-	if since > 0 {
-		q = q.Where("created_at > ?", since).
-			Order("created_at ASC")
-	} else {
-		if cursor > 0 {
-			q = q.Where("created_at < ?", cursor)
-		}
-		q = q.Order("created_at DESC")
-	}
-
-	var msgs []models.ImSingleMessage
-	if err := q.Limit(limit).Find(&msgs).Error; err != nil {
-		return nil, err
-	}
-
-	if since <= 0 {
-		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
-			msgs[i], msgs[j] = msgs[j], msgs[i]
-		}
-	}
-
-	result := make([]types.ListMessageReq, 0, len(msgs))
-	for _, m := range msgs {
-		ext := map[string]interface{}{}
-		if m.Ext != "" {
-			_ = json.Unmarshal([]byte(m.Ext), &ext)
+		// 分页逻辑：since 模式向前拉新；cursor 模式向上翻旧
+		if since > 0 {
+			q = q.Where("created_at > ?", since).Order("created_at ASC")
+		} else {
+			if cursor > 0 {
+				q = q.Where("created_at < ?", cursor)
+			}
+			q = q.Order("created_at DESC")
 		}
 
-		result = append(result, types.ListMessageReq{
-			Id:       uint64(m.Id),
-			SenderId: uint64(m.SenderId),
-			Content:  m.Content,
-			MsgType:  m.MsgType,
-			Ext:      ext,
-			Time:     m.CreatedAt,
-			IsSelf:   m.SenderId == int64(userId),
-		})
-	}
+		var msgs []models.ImSingleMessage
+		if err := q.Limit(limit).Find(&msgs).Error; err != nil {
+			return nil, err
+		}
+		// cursor 模式查的是 DESC，需要翻转为时间正序返回给前端
+		if since <= 0 {
+			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+				msgs[i], msgs[j] = msgs[j], msgs[i]
+			}
+		}
+		// 统一映射为 types.ListMessageReq
+		result := make([]types.ListMessageReq, 0, len(msgs))
+		for _, m := range msgs {
+			ext := map[string]interface{}{}
+			if m.Ext != "" {
+				_ = json.Unmarshal([]byte(m.Ext), &ext)
+			}
+			result = append(result, types.ListMessageReq{
+				Id:       uint64(m.Id),
+				SenderId: uint64(m.SenderId),
+				Content:  m.Content,
+				MsgType:  m.MsgType,
+				Ext:      ext,
+				Time:     m.CreatedAt,
+				IsSelf:   m.SenderId == int64(userId),
+			})
+		}
+		return result, nil
+	case types.GroupChatSessionTypeGroup:
+		// 群聊：peerId 在这里就是 groupId
+		// conn-server 写库时就是按 GetGroupSessionHash(groupId) 填的 SessionHash
+		sessionHash := GetGroupSessionHash(int64(peerId))
 
-	return result, nil
+		q := s.DB.WithContext(ctx).
+			Model(&models.ImGroupMessage{}).
+			Where("session_hash = ?", sessionHash)
+
+		if since > 0 {
+			q = q.Where("created_at > ?", since).Order("created_at ASC")
+		} else {
+			if cursor > 0 {
+				q = q.Where("created_at < ?", cursor)
+			}
+			q = q.Order("created_at DESC")
+		}
+
+		var msgs []models.ImGroupMessage
+		if err := q.Limit(limit).Find(&msgs).Error; err != nil {
+			return nil, err
+		}
+
+		if since <= 0 {
+			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+				msgs[i], msgs[j] = msgs[j], msgs[i]
+			}
+		}
+
+		result := make([]types.ListMessageReq, 0, len(msgs))
+		for _, m := range msgs {
+			ext := map[string]interface{}{}
+			if m.Ext != "" {
+				_ = json.Unmarshal([]byte(m.Ext), &ext)
+			}
+			result = append(result, types.ListMessageReq{
+				Id:       uint64(m.Id),
+				SenderId: uint64(m.SenderId),
+				Content:  m.Content,
+				MsgType:  m.MsgType,
+				Ext:      ext,
+				Time:     m.CreatedAt,
+				IsSelf:   m.SenderId == int64(userId),
+			})
+		}
+		return result, nil
+
+	default:
+		return nil, fmt.Errorf("invalid session_type=%d (only 1 or 2)", sessionType)
+	}
 }
 
 func (s *MessageService) SaveSingleMessage(msg *models.ImSingleMessage) error {
