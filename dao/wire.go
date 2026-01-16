@@ -12,6 +12,7 @@ var ProviderSet = wire.NewSet(
 	NewMapDao,
 	NewNoteDAO,
 	NewMessageDAO,
+	NewSessionDAO,
 	//NewGroupDAO,
 	NewMessageReadDAO,
 	NewGroupMember,
