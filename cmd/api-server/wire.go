@@ -34,6 +34,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Session), "*"),
 		wire.Struct(new(handler.Message), "*"),
 		wire.Struct(new(handler.CommentsHandler), "*"),
+		wire.Struct(new(handler.TopicHandler), "*"),
 		wire.Struct(new(handler.GroupHandler), "*"),
 		wire.Struct(new(handler.GroupMemberHandler), "*"),
 		wire.Struct(new(server.AppProvider), "*"),

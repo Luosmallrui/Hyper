@@ -36,6 +36,7 @@ type NoteService struct {
 	FollowService  IFollowService
 	CollectService ICollectService
 	CommentService ICommentsService
+	TopicService   ITopicService
 }
 
 func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error) {
@@ -178,6 +179,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 
 	// 生成笔记ID
 	noteID := uint64(snowflake.GenUserID())
+
 	if len(req.TopicIDs) == 0 {
 		req.TopicIDs = make([]int64, 0)
 	}
@@ -242,17 +244,30 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}
+
 		if err := tx.Create(stats).Error; err != nil {
 			return err
 		}
-
+		if len(req.TopicIDs) > 0 {
+			// 3. 创建笔记与话题的关联
+			noteTopics := make([]*models.NoteTopic, 0, len(req.TopicIDs))
+			for _, topicID := range req.TopicIDs {
+				noteTopics = append(noteTopics, &models.NoteTopic{
+					NoteID:    noteID,
+					TopicID:   uint64(topicID),
+					CreatedAt: time.Now(),
+				})
+			}
+			if err := tx.CreateInBatches(noteTopics, 100).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 
 	if err != nil {
 		return 0, err
 	}
-
 	return noteID, nil
 }
 

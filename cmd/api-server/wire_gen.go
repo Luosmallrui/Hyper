@@ -103,6 +103,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:    userService,
 		Redis:          redisClient,
 	}
+	topic := dao.NewTopic(db)
+	topicService := &service.TopicService{
+		Config:      cfg,
+		DB:          db,
+		TopicDAO:    topic,
+		NoteDAO:     noteDAO,
+		UserService: userService,
+		LikeService: likeService,
+		Redis:       redisClient,
+	}
 	noteService := &service.NoteService{
 		NoteDAO:        noteDAO,
 		CommentDAO:     comment,
@@ -113,6 +123,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		FollowService:  followService,
 		CollectService: collectService,
 		CommentService: commentsService,
+		TopicService:   topicService,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -182,6 +193,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:          cfg,
 		CommentsService: commentsService,
 	}
+	topicHandler := &handler.TopicHandler{
+		Config:       cfg,
+		TopicService: topicService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Map:             handlerMap,
@@ -193,6 +208,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Group:           groupHandler,
 		GroupMember:     groupMemberHandler,
 		CommentsHandler: commentsHandler,
+		TopicHandler:    topicHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
