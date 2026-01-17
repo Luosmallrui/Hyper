@@ -44,7 +44,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			c.Header("X-New-Access-Token", newToken)
 		}
 		log.L.Info("claims", zap.Any("claims", claims))
-		c.Set("user_id", claims.UserID)
+		c.Set("user_id", int(claims.UserID))
 		c.Set("openid", claims.OpenID)
 
 		c.Next()

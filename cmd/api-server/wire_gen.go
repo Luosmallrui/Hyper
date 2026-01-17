@@ -165,11 +165,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: serviceCollectService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
+	sessionDAO := dao.NewSessionDAO(db)
 	sessionService := &service.SessionService{
 		DB:             db,
 		MessageStorage: messageStorage,
 		UnreadStorage:  unreadStorage,
 		UserService:    userService,
+		SessionDAO:     sessionDAO,
 	}
 	session := &handler.Session{
 		SessionService: sessionService,
