@@ -16,8 +16,8 @@ type GroupMember struct {
 	UserId    int       `gorm:"column:user_id;" json:"user_id"`                 // 用户ID
 	Role      int       `gorm:"column:role;" json:"role"`                       // 成员属性[1:群主;2:管理员;3:普通成员;]
 	UserCard  string    `gorm:"column:user_card;" json:"user_card"`             // 群名片
-	IsQuit    int       `gorm:"column:is_quit;" json:"is_quit"`                 // 是否退群[1:否;2:是;]
-	IsMute    int       `gorm:"column:is_mute;" json:"is_mute"`                 // 是否禁言[1:否;2:是;]
+	IsQuit    int       `gorm:"column:is_quit;" json:"is_quit"`                 // 是否退群[0:否;1:是]
+	IsMute    int       `gorm:"column:is_mute;" json:"is_mute"`                 // 是否禁言[0:否;1:是;]
 	JoinTime  time.Time `gorm:"column:join_time;" json:"join_time"`             // 入群时间
 	CreatedAt time.Time `gorm:"column:created_at;" json:"created_at"`           // 创建时间
 	UpdatedAt time.Time `gorm:"column:updated_at;" json:"updated_at"`           // 更新时间

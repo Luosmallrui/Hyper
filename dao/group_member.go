@@ -19,13 +19,13 @@ func NewGroupMember(db *gorm.DB, relation *cache.Relation) *GroupMember {
 
 // IsMaster 判断是否是群主
 func (g *GroupMember) IsMaster(ctx context.Context, gid, uid int) bool {
-	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and leader = ? and is_quit = ?", gid, uid, models.GroupMemberLeaderOwner, models.No)
+	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and role = ? and is_quit = 0", gid, uid, models.GroupMemberLeaderOwner)
 	return err == nil && exist
 }
 
 // IsLeader 判断是否是群主或管理员
 func (g *GroupMember) IsLeader(ctx context.Context, gid, uid int) bool {
-	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and leader in ? and is_quit = ?", gid, uid, []int{models.GroupMemberLeaderAdmin, models.GroupMemberLeaderOwner}, models.No)
+	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and role in ? and is_quit = 0", gid, uid, []int{models.GroupMemberLeaderAdmin, models.GroupMemberLeaderOwner})
 	return err == nil && exist
 }
 
@@ -36,7 +36,7 @@ func (g *GroupMember) IsMember(ctx context.Context, gid, uid int, cache bool) bo
 		return true
 	}
 
-	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and is_quit = ?", gid, uid, models.No)
+	exist, err := g.Repo.IsExist(ctx, "group_id = ? and user_id = ? and is_quit = 0", gid, uid)
 	if err != nil {
 		return false
 	}
@@ -54,27 +54,33 @@ func (g *GroupMember) FindByUserId(ctx context.Context, gid, uid int) (*models.G
 	return member, err
 }
 
-// GetMemberIds 获取所有群成员用户ID
-func (g *GroupMember) GetMemberIds(ctx context.Context, groupId int) []int {
-
+// GetMemberIds 获取所有群成员用户ID（只查未退群成员）
+func (g *GroupMember) GetMemberIds(ctx context.Context, groupId int) ([]int, error) {
 	var ids []int
-	_ = g.Repo.Model(ctx).Select("user_id").Where("group_id = ? and is_quit = ?", groupId, models.No).Scan(&ids)
-
-	return ids
+	err := g.Repo.Model(ctx).
+		Where("group_id = ? AND is_quit = 0", groupId).
+		Pluck("user_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
-// GetUserGroupIds 获取所有群成员ID
-func (g *GroupMember) GetUserGroupIds(ctx context.Context, uid int) []int {
-
+// GetUserGroupIds 获取用户加入的群ID（只查未退群）
+func (g *GroupMember) GetUserGroupIds(ctx context.Context, uid int) ([]int, error) {
 	var ids []int
-	_ = g.Repo.Model(ctx).Where("user_id = ? and is_quit = ?", uid, models.No).Pluck("group_id", &ids)
-
-	return ids
+	err := g.Repo.Model(ctx).
+		Where("user_id = ? AND is_quit = 0", uid).
+		Pluck("group_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // CountMemberTotal 统计群成员总数
 func (g *GroupMember) CountMemberTotal(ctx context.Context, gid int) int64 {
-	count, _ := g.Repo.FindCount(ctx, "group_id = ? and is_quit = ?", gid, models.No)
+	count, _ := g.Repo.FindCount(ctx, "group_id = ? and is_quit = 0", gid)
 	return count
 }
 
@@ -91,7 +97,7 @@ func (g *GroupMember) GetMemberRemark(ctx context.Context, groupId int, userId i
 func (g *GroupMember) GetMembers(ctx context.Context, groupId int) []*models.MemberItem {
 	fields := []string{
 		"group_member.id",
-		"group_member.leader",
+		"group_member.role as leader",
 		"group_member.user_card",
 		"group_member.user_id",
 		"group_member.is_mute",
@@ -103,8 +109,8 @@ func (g *GroupMember) GetMembers(ctx context.Context, groupId int) []*models.Mem
 
 	tx := g.Repo.Db.WithContext(ctx).Table("group_member")
 	tx.Joins("left join users on users.id = group_member.user_id")
-	tx.Where("group_member.group_id = ? and group_member.is_quit = ?", groupId, models.No)
-	tx.Order("group_member.leader desc")
+	tx.Where("group_member.group_id = ? and group_member.is_quit = 0", groupId)
+	tx.Order("group_member.role asc") // 群主(1)在前
 
 	var items []*models.MemberItem
 	tx.Unscoped().Select(fields).Scan(&items)
@@ -120,7 +126,7 @@ type CountGroupMember struct {
 func (g *GroupMember) CountGroupMemberNum(ids []int) ([]*CountGroupMember, error) {
 
 	var items []*CountGroupMember
-	err := g.Repo.Model(context.TODO()).Select("group_id,count(*) as count").Where("group_id in ? and is_quit = ?", ids, models.No).Group("group_id").Scan(&items).Error
+	err := g.Repo.Model(context.TODO()).Select("group_id,count(*) as count").Where("group_id in ? and is_quit = 0", ids).Group("group_id").Scan(&items).Error
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +137,7 @@ func (g *GroupMember) CountGroupMemberNum(ids []int) ([]*CountGroupMember, error
 func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
 	items := make([]int, 0)
 
-	err := g.Repo.Model(context.TODO()).Select("group_id").Where("group_id in ? and user_id = ? and is_quit = ?", ids, userId, models.No).Scan(&items).Error
+	err := g.Repo.Model(context.TODO()).Select("group_id").Where("group_id in ? and user_id = ? and is_quit = 0", ids, userId).Scan(&items).Error
 	if err != nil {
 		return nil, err
 	}

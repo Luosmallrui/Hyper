@@ -3,6 +3,7 @@ package process
 import (
 	"Hyper/pkg/log"
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -103,9 +104,11 @@ func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 							if mv == nil {
 								continue
 							}
-							c.processMessage(ctx, mv)
-
-							// 确认消费
+							if err := c.processMessage(ctx, mv); err != nil {
+								// 处理失败：不要 Ack，让 MQ 在 invisibleDuration 之后重投
+								continue
+							}
+							// 处理成功：Ack
 							if err := c.MqConsumer.Ack(ctx, mv); err != nil {
 								log.L.Error("ack message error", zap.Error(err))
 							}
@@ -118,7 +121,8 @@ func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 }
 
 // 建议提取一个简单的处理函数，保持代码整洁
-func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView) {
+func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView) error {
+
 	topic := mv.GetTopic()
 	var err error
 
@@ -131,9 +135,14 @@ func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView)
 		if c.NoticeSubscribe != nil {
 			_, err = c.NoticeSubscribe.handleSystem(ctx, mv)
 		}
+	default:
+		// 不认识的 topic，直接返回错误看日志
+		err = fmt.Errorf("unknown topic: %s", topic)
 	}
 
 	if err != nil {
 		log.L.Warn("消息处理失败", zap.String("topic", topic), zap.Error(err))
+		return err
 	}
+	return nil
 }
