@@ -26,6 +26,7 @@ type ISessionService interface {
 	UpdateSingleSession(ctx context.Context, msg *types.Message) error
 	ListUserSessions(ctx context.Context, userId uint64, limit int) ([]*types.SessionDTO, error)
 	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
+	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionUpdateRequest) error
 }
 
 func (s *SessionService) UpdateSingleSession(
@@ -253,4 +254,33 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 	}
 
 	return result, nil
+}
+func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionUpdateRequest) error {
+	// service 再做一次防御性校验
+	if req.SessionType != 1 && req.SessionType != 2 {
+		return errors.New("session_type 必须是 1 或 2")
+	}
+	if req.PeerID == 0 {
+		return errors.New("peer_id 不能为空")
+	}
+
+	// 指针校验：既要“必须传”，又要“允许 0”
+	if req.IsTop == nil {
+		return errors.New("is_top 不能为空")
+	}
+	if *req.IsTop != 0 && *req.IsTop != 1 {
+		return errors.New("is_top 只能是 0 或 1")
+	}
+
+	if req.IsMute == nil {
+		return errors.New("is_mute 不能为空")
+	}
+	if *req.IsMute != 0 && *req.IsMute != 1 {
+		return errors.New("is_mute 只能是 0 或 1")
+	}
+
+	isTop := *req.IsTop
+	isMute := *req.IsMute
+
+	return s.SessionDAO.UpsertSessionSettings(ctx, userID, req.SessionType, req.PeerID, isTop, isMute)
 }
