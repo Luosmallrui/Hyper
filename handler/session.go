@@ -6,6 +6,7 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
+	"Hyper/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +21,7 @@ func (s *Session) RegisterRouter(r gin.IRouter) {
 	session := r.Group("/v1/session/")
 	session.Use(authorize)
 	session.GET("", context.Wrap(s.ListSessions))
+	session.POST("update", context.Wrap(s.UpdateSession))
 }
 func (s *Session) ListSessions(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -38,5 +40,34 @@ func (s *Session) ListSessions(c *gin.Context) error {
 	response.Success(c, gin.H{
 		"list": list,
 	})
+	return nil
+}
+func (s *Session) UpdateSession(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+
+	in := &types.SessionUpdateRequest{}
+	if err := c.ShouldBindJSON(in); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	if in.SessionType != 1 && in.SessionType != 2 {
+		return response.NewError(400, "session_type 必须是 1 或 2")
+	}
+	if in.PeerID == 0 {
+		return response.NewError(400, "peer_id 不能为空")
+	}
+	if in.IsTop == nil || (*in.IsTop != 0 && *in.IsTop != 1) {
+		return response.NewError(400, "is_top 只能是 0 或 1")
+	}
+	if in.IsMute == nil || (*in.IsMute != 0 && *in.IsMute != 1) {
+		return response.NewError(400, "is_mute 只能是 0 或 1")
+	}
+	if err := s.SessionService.UpdateSessionSettings(c.Request.Context(), uint64(userId), in); err != nil {
+		return response.NewError(500, "参数错误")
+	}
+
+	response.Success(c, "ok")
 	return nil
 }
