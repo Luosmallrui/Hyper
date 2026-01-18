@@ -26,7 +26,7 @@ type ISessionService interface {
 	UpdateSingleSession(ctx context.Context, msg *types.Message) error
 	ListUserSessions(ctx context.Context, userId uint64, limit int) ([]*types.SessionDTO, error)
 	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
-	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionUpdateRequest) error
+	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 }
 
 func (s *SessionService) UpdateSingleSession(
@@ -255,7 +255,7 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 
 	return result, nil
 }
-func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionUpdateRequest) error {
+func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error {
 	// service 再做一次防御性校验
 	if req.SessionType != 1 && req.SessionType != 2 {
 		return errors.New("session_type 必须是 1 或 2")

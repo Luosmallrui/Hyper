@@ -1,7 +1,7 @@
 package types
 
-// SessionUpdateRequest 更新会话设置请求
-type SessionUpdateRequest struct {
+// SessionSettingRequest 更新会话设置请求
+type SessionSettingRequest struct {
 	SessionType int    `json:"session_type" binding:"required"` // 1=单聊 2=群聊
 	PeerID      uint64 `json:"peer_id" binding:"required"`      // 单聊=对方uid 群聊=group_id
 	IsTop       *int   `json:"is_top" binding:"required"`       // 0/1
