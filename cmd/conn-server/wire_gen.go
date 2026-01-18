@@ -36,7 +36,8 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	relation := cache.NewRelation(redisClient)
 	groupMember := dao.NewGroupMember(db, relation)
 	groupMemberService := &service.GroupMemberService{
-		DB: db,
+		DB:             db,
+		GroupMemberDAO: groupMember,
 	}
 	chatHandler := &chat.Handler{
 		Redis: redisClient,

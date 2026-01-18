@@ -7,8 +7,8 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
-	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,30 +30,25 @@ func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	group := r.Group("/groupmember")
 	group.POST("/invite", authorize, context.Wrap(hm.InviteMember)) //邀请成员
 	group.POST("/kick", authorize, context.Wrap(hm.KickMember))
+	group.GET("/list", authorize, context.Wrap(hm.ListMembers))
+
 }
 
 func (h *GroupMemberHandler) InviteMember(c *gin.Context) error {
 	var req types.InviteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "请求参数错误: ",
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "请求参数错误")
 	}
-	//执行邀请的用户ID
-	//从上下文中获取用户ID
-	UserIdval, err := context.GetUserID(c)
+
+	uid, err := context.GetUserID(c)
 	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
-	UserId := int(UserIdval)
-	//req.GroupId,req.UserIds,请求参数前者是群ID，后者是被邀请的用户ID列表
+	UserId := int(uid)
+
 	resp, err := h.GroupMemberService.InviteMembers(c, req.GroupId, req.UserIds, UserId)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "邀请成员失败: " + err.Error(),
-		})
-		return err
+		return response.NewError(http.StatusInternalServerError, "邀请成员失败: "+err.Error())
 	}
 	response.Success(c, gin.H{
 		"invited_members": resp,
@@ -65,23 +60,50 @@ func (h *GroupMemberHandler) InviteMember(c *gin.Context) error {
 func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 	var req types.KickMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "请求参数错误: ",
-		})
-		return err
+		return response.NewError(http.StatusBadRequest, "请求参数错误")
 	}
 
-	userId := c.GetInt("user_id")
+	uid, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	UserId := int(uid)
 
-	v, ok := c.Get("user_id")
-	fmt.Printf("[DEBUG] ctx user_id raw=%v ok=%v type=%T GetInt=%d\n", v, ok, v, userId)
+	if err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, UserId); err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
 
-	err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
 
+func (h *GroupMemberHandler) ListMembers(c *gin.Context) error {
+	// 1) 解析 group_id
+	gidStr := c.Query("group_id")
+	if gidStr == "" {
+		return response.NewError(http.StatusBadRequest, "group_id 不能为空")
+	}
+	gid, err := strconv.Atoi(gidStr)
+	if err != nil || gid <= 0 {
+		return response.NewError(400, "group_id 参数错误")
+	}
+
+	// 2) 获取当前登录用户
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	uid := int(uid64)
+
+	// 3) 调 service
+	members, err := h.GroupMemberService.ListMembers(c, gid, uid)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	response.Success(c, "踢出成员成功")
+	// 4) 返回
+	response.Success(c, types.GroupMemberListResponse{
+		Members: members,
+	})
 	return nil
 }
