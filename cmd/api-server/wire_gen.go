@@ -71,11 +71,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeService:    likeService,
 		CollectService: collectService,
 	}
-	payService := &service.PayService{
-		DB:     db,
-		Config: cfg,
-	}
-	pay := handler.NewPay(cfg, payService, db)
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
 		MapDao: mapDao,
@@ -129,7 +124,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		CommentService: commentsService,
 		TopicService:   topicService,
-		DB:             db,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -169,7 +163,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		FollowService:  serviceFollowService,
 		LikeService:    serviceLikeService,
 		CollectService: serviceCollectService,
-		NoteService:    noteService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
 	sessionDAO := dao.NewSessionDAO(db)
@@ -184,25 +177,18 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
-	relation := cache.NewRelation(redisClient)
-	groupMember := dao.NewGroupMember(db, relation)
-	group := dao.NewGroup(db)
 	groupService := &service.GroupService{
-		DB:             db,
-		GroupMemberDAO: groupMember,
-		GroupDAO:       group,
-		Relation:       relation,
+		DB: db,
 	}
 	groupHandler := &handler.GroupHandler{
 		Config:       cfg,
 		GroupService: groupService,
 	}
+	relation := cache.NewRelation(redisClient)
+	groupMember := dao.NewGroupMember(db, relation)
 	groupMemberService := &service.GroupMemberService{
-		DB:              db,
-		Redis:           redisClient,
-		GroupMemberRepo: groupMember,
-		GroupRepo:       group,
-		Relation:        relation,
+		DB:             db,
+		GroupMemberDAO: groupMember,
 	}
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,
@@ -216,42 +202,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:       cfg,
 		TopicService: topicService,
 	}
-	product := dao.NewProduct(db)
-	productService := &service.ProductService{
-		Config:     cfg,
-		DB:         db,
-		Redis:      redisClient,
-		ProductDAO: product,
-	}
-	productHandler := &handler.ProductHandler{
-		Config:         cfg,
-		ProductService: productService,
-	}
-	party := &handler.Party{
-		DB: db,
-	}
-	orderService := &service.OrderService{
-		Redis: redisClient,
-		DB:    db,
-	}
-	order := &handler.Order{
-		Config:       cfg,
-		OrderService: orderService,
-	}
-	point := dao.NewPoint(db)
-	pointService := &service.PointService{
-		Config:   cfg,
-		DB:       db,
-		Redis:    redisClient,
-		PointDAO: point,
-	}
-	pointHandler := &handler.PointHandler{
-		Config:       cfg,
-		PointService: pointService,
-	}
 	handlers := &server.Handlers{
 		Auth:            auth,
-		Pay:             pay,
 		Map:             handlerMap,
 		Message:         message,
 		Note:            note,
@@ -262,10 +214,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		GroupMember:     groupMemberHandler,
 		CommentsHandler: commentsHandler,
 		TopicHandler:    topicHandler,
-		ProductHandler:  productHandler,
-		Party:           party,
-		Order:           order,
-		Points:          pointHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
