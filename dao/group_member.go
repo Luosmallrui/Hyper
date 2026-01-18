@@ -97,7 +97,7 @@ func (g *GroupMember) GetMemberRemark(ctx context.Context, groupId int, userId i
 func (g *GroupMember) GetMembers(ctx context.Context, groupId int) []*models.MemberItem {
 	fields := []string{
 		"group_member.id",
-		"group_member.role as leader",
+		"group_member.role",
 		"group_member.user_card",
 		"group_member.user_id",
 		"group_member.is_mute",

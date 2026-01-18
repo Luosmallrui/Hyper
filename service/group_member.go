@@ -4,6 +4,7 @@ import (
 	"Hyper/dao"
 	"Hyper/dao/cache"
 	"Hyper/models"
+	"Hyper/pkg/response"
 	"Hyper/types"
 	"context"
 	"errors"
@@ -18,22 +19,16 @@ var _ IGroupMemberService = (*GroupMemberService)(nil)
 type IGroupMemberService interface {
 	InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error)
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
+	ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error)
 }
 
 type GroupMemberService struct {
+	GroupMemberDAO  *dao.GroupMember
 	DB              *gorm.DB
 	Redis           *redis.Client
 	GroupMemberRepo *dao.GroupMember
 	GroupRepo       *dao.Group
 	Relation        *cache.Relation
-}
-
-func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
-	return &GroupMemberService{
-		DB: db,
-		//Redis:           redisClient,
-		//GroupMemberRepo: dao.NewGroupMemberDao(db),
-	}
 }
 
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
@@ -175,4 +170,33 @@ func (s *GroupMemberService) KickMember(ctx context.Context, GroupId int, Kicked
 		return err
 	}
 	return nil
+}
+
+func (s *GroupMemberService) ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error) {
+	// 1) 权限：必须是群成员
+	if !s.GroupMemberDAO.IsMember(ctx, groupId, userId, true) {
+		return nil, response.NewError(403, "你不在群内或已退出")
+	}
+
+	// 2) DAO 拿到 models.MemberItem 列表
+	items := s.GroupMemberDAO.GetMembers(ctx, groupId)
+
+	// 3) 映射成 DTO
+	dtos := make([]types.GroupMemberItemDTO, 0, len(items))
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		dtos = append(dtos, types.GroupMemberItemDTO{
+			Role:     it.Role,
+			UserCard: it.UserCard,
+			UserId:   it.UserId,
+			IsMute:   it.IsMute,
+			Avatar:   it.Avatar,
+			Nickname: it.Nickname,
+			Gender:   it.Gender,
+			Motto:    it.Motto,
+		})
+	}
+	return dtos, nil
 }

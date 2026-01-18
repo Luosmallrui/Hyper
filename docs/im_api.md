@@ -43,6 +43,10 @@ POST /groupmember/invite（需要认证）
 POST /groupmember/kick（需要认证）
 说明：将指定成员踢出群聊（服务端实现为把该成员标记为退群 is_quit=1，并扣减群成员数
 
+9) 获取群成员列表
+GET /groupmember/list（需要认证）
+说明：获取指定群聊的成员列表（仅返回未退群成员）
+
 ) 建立 WebSocket 连接（IM）(未完成)
 WebSocket /im/wss（需要认证）
 说明：建立 IM WebSocket 长连接（用于实时消息推送/心跳/ACK）。
@@ -270,10 +274,10 @@ list 元素结构
 | id | uint64 | 消息ID |
 | sender_id | uint64 | 发送者ID |
 | content | string | 消息内容 |
-| msg_type  | int | 消息类型 |
+| msg_type | int | 消息类型 |
 | ext | object | 扩展字段  |
 |  time   | int64 | 消息时间（用于排序/翻页） |
-| is_self    | bool |  是否自己发送  |
+| is_self  | bool |  是否自己发送  |
 
 
 
@@ -627,7 +631,6 @@ Content-Type: application/json
   "group_id": 6,
   "kicked_user_id": 10
 }
-
 ```
 ### 参数说明
 
@@ -646,6 +649,99 @@ Content-Type: application/json
   "data": "踢出成员成功"
 }
 ```
+
+## 9) 获取群成员列表
+```
+GET /groupmember/list（需要认证）
+说明：获取指定群聊的成员列表。
+- 仅返回未退群成员（group_member.is_quit = 0）
+- 默认按成员角色升序排列：群主(1) -> 管理员(2) -> 普通成员(3)
+
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+
+请求示例：
+`GET /groupmember/list?group_id=6`
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|----|----|----|----|----|
+| group_id | int | 是  | -  | 群ID（groups.id） |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "members": [
+      {
+        "user_id": 8,
+        "avatar": "https://cdn.hypercn.cn/avatars/08/8/5f349c00.jpeg",
+        "nickname": "帜羲",
+        "gender": 0,
+        "motto": "",
+        "role": 1,
+        "is_mute": 0,
+        "user_card": ""
+      },
+      {
+        "user_id": 9,
+        "avatar": "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0",
+        "nickname": "泥嚎",
+        "gender": 0,
+        "motto": "",
+        "role": 3,
+        "is_mute": 0,
+        "user_card": ""
+      }
+    ]
+  }
+}
+```
+
+
+## 响应参数说明
+data 字段
+
+| 字段 | 类型 | 说明 | 
+|----|----|----|
+| members | array | 成员列表 |
+
+members 元素结构
+
+| 字段 | 类型 | 说明 | 
+|----|----|----|
+| user_id | int | 	成员用户ID |
+| avatar | string | 用户头像 |
+| nickname | string | 用户昵称 |
+| gender | int | 用户性别（1:男 ;2:女;3:未知） |
+| motto | string | 个性签名 |
+| role | int | 成员角色：1群主/2管理员/3普通成员 |
+| is_mute |   int  |   是否禁言：0否 / 1是 |
+| user_card | string  |  群名片 |
+说明：gender不知道为什么在数据库中所有人都是0，明明默认值是3
+
+## 状态码说明
+
+| 状态码 | 说明 | 触发场景 | 
+|-----|----|------|
+| 200 | 成功 |  返回成员列表 |
+| 400 | 参数错误 | group_id 缺失或非法 |
+| 401 | 未登录/鉴权失败 | token 缺失/无效 |
+| 403 |  无权限 | 当前用户不在该群内（或已退群）|
+| 500 |  服务器内部错误 | DB 查询失败 |
 
 
 ## ) 建立 WebSocket 连接（IM）（未完成）

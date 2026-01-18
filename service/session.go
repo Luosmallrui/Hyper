@@ -74,12 +74,9 @@ func (s *SessionService) UpsertGroupSessions(ctx context.Context, msg *types.Mes
 	groupID := uint64(msg.TargetID)
 	senderID := uint64(msg.SenderID)
 
-	lastTimeSec := msg.Timestamp
-	if lastTimeSec <= 0 {
-		lastTimeSec = time.Now().UnixMilli()
-	}
-	if lastTimeSec > 1_000_000_000_000 {
-		lastTimeSec = lastTimeSec / 1000
+	lastTimeMs := msg.Timestamp
+	if lastTimeMs <= 0 {
+		lastTimeMs = time.Now().UnixMilli()
 	}
 
 	// last_msg_content 最大 255
@@ -113,7 +110,7 @@ func (s *SessionService) UpsertGroupSessions(ctx context.Context, msg *types.Mes
 			LastMsgId:      uint64(msg.Id),
 			LastMsgType:    msg.MsgType,
 			LastMsgContent: lastContent,
-			LastMsgTime:    lastTimeSec,
+			LastMsgTime:    lastTimeMs,
 
 			UnreadCount: unread,
 			UpdatedAt:   now,
