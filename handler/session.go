@@ -20,8 +20,8 @@ func (s *Session) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
 	session := r.Group("/v1/session/")
 	session.Use(authorize)
-	session.GET("", context.Wrap(s.ListSessions))
-	session.POST("update", context.Wrap(s.UpdateSession))
+	session.GET("list", context.Wrap(s.ListSessions))
+	session.POST("setting", context.Wrap(s.SessionSetting))
 }
 func (s *Session) ListSessions(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -42,13 +42,13 @@ func (s *Session) ListSessions(c *gin.Context) error {
 	})
 	return nil
 }
-func (s *Session) UpdateSession(c *gin.Context) error {
+func (s *Session) SessionSetting(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
 	if err != nil {
 		return response.NewError(401, "未登录")
 	}
 
-	in := &types.SessionUpdateRequest{}
+	in := &types.SessionSettingRequest{}
 	if err := c.ShouldBindJSON(in); err != nil {
 		return response.NewError(400, err.Error())
 	}
