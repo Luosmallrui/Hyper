@@ -21,6 +21,8 @@ type IGroupMemberService interface {
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
 	ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error)
 	QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error)
+	MuteMember(ctx context.Context, groupId int, operatorId int, targetUserId int, mute bool) error
+	SetMuteAll(ctx context.Context, groupId int, operatorId int, mute bool) (*types.MuteAllResponse, error)
 }
 
 type GroupMemberService struct {
@@ -34,6 +36,7 @@ type GroupMemberService struct {
 	GroupMemberDAO *dao.GroupMember
 	SessionDAO     *dao.SessionDAO
 	UnreadStorage  *cache.UnreadStorage
+	GroupDAO       *dao.GroupDAO
 	//Redis           *redis.Client
 	//GroupMemberRepo *dao.GroupMember
 }
@@ -303,4 +306,61 @@ func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId 
 	}
 
 	return resp, nil
+}
+
+// 个人禁言
+func (s *GroupMemberService) MuteMember(ctx context.Context, gid int, operatorId int, targetId int, mute bool) error {
+	// 1) 操作者必须在群里且未退群
+	op, err := s.GroupMemberDAO.FindByUserId(ctx, gid, operatorId)
+	if err != nil || op.IsQuit == 1 {
+		return errors.New("你不在群内或已退群")
+	}
+
+	// 2) 目标必须在群里且未退群
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, gid, targetId)
+	if err != nil || target.IsQuit == 1 {
+		return errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 权限判断（只允许群主/管理员操作）
+	if op.Role != 1 && op.Role != 2 {
+		return errors.New("无权限操作")
+	}
+
+	// 4) 不能禁言群主
+	if target.Role == 1 {
+		return errors.New("不能禁言群主")
+	}
+
+	// 5) 管理员不能禁言管理员
+	if op.Role == 2 && target.Role == 2 {
+		return errors.New("管理员不能禁言其他管理员")
+	}
+
+	val := 0
+	if mute {
+		val = 1
+	}
+
+	return s.GroupMemberDAO.SetMemberMute(ctx, gid, targetId, val)
+}
+
+// 群禁言开关
+func (s *GroupMemberService) SetMuteAll(ctx context.Context, gid int, operatorId int, mute bool) (*types.MuteAllResponse, error) {
+	op, err := s.GroupMemberDAO.FindByUserId(ctx, gid, operatorId)
+	if err != nil || op.IsQuit == 1 {
+		return nil, errors.New("你不在群内或已退群")
+	}
+	if op.Role != 1 && op.Role != 2 {
+		return nil, errors.New("无权限操作")
+	}
+
+	val := 0
+	if mute {
+		val = 1
+	}
+	if err := s.GroupDAO.SetMuteAll(ctx, gid, val); err != nil {
+		return nil, err
+	}
+	return &types.MuteAllResponse{IsMuteAll: mute}, nil
 }

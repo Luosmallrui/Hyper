@@ -65,7 +65,7 @@ func (s *Session) SessionSetting(c *gin.Context) error {
 		return response.NewError(400, "is_mute 只能是 0 或 1")
 	}
 	if err := s.SessionService.UpdateSessionSettings(c.Request.Context(), uint64(userId), in); err != nil {
-		return response.NewError(500, "参数错误")
+		return response.NewError(500, err.Error())
 	}
 
 	response.Success(c, "ok")

@@ -18,6 +18,22 @@ type GroupMemberHandler struct {
 	GroupMemberService service.IGroupMemberService
 }
 
+func NewGroupMemberHandler(config *config.Config, groupMemberService service.IGroupMemberService) *GroupMemberHandler {
+	return &GroupMemberHandler{
+		GroupMemberService: groupMemberService,
+		Config:             config,
+	}
+}
+
+func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(hm.Config.Jwt.Secret))
+	group := r.Group("/groupmember")
+	group.POST("/invite", authorize, context.Wrap(hm.InviteMember)) //邀请成员
+	group.POST("/kick", authorize, context.Wrap(hm.KickMember))
+	group.GET("/list", authorize, context.Wrap(hm.ListMembers))
+	group.POST("/quit", authorize, context.Wrap(hm.QuitGroup))
+	group.POST("/mute", authorize, context.Wrap(hm.MuteMember))
+	group.POST("/mute-all", authorize, context.Wrap(hm.MuteAll))
 func (h *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	group := r.Group("/v1/groupmember")
@@ -109,6 +125,58 @@ func (h *GroupMemberHandler) QuitGroup(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *GroupMemberHandler) MuteMember(c *gin.Context) error {
+	var req types.MuteMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	if req.Mute == nil {
+		return response.NewError(400, "mute 不能为空")
+	}
+
+	if err := h.GroupMemberService.MuteMember(
+		c.Request.Context(),
+		req.GroupId,
+		int(uid64),
+		req.TargetUserId,
+		*req.Mute,
+	); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, "ok")
+	return nil
+}
+
+func (h *GroupMemberHandler) MuteAll(c *gin.Context) error {
+	var req types.MuteAllRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	if req.Mute == nil {
+		return response.NewError(400, "mute 不能为空")
+	}
+
+	resp, err := h.GroupMemberService.SetMuteAll(
+		c.Request.Context(),
+		req.GroupId,
+		int(uid64),
+		*req.Mute,
+	)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
 	response.Success(c, resp)
 	return nil
 }
