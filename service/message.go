@@ -17,10 +17,12 @@ import (
 )
 
 type MessageService struct {
-	MessageDao *dao.MessageDAO
-	MqProducer rmq_client.Producer
-	Redis      *redis.Client
-	DB         *gorm.DB
+	MessageDao     *dao.MessageDAO
+	GroupMemberDAO *dao.GroupMember
+	GroupDAO       *dao.GroupDAO
+	MqProducer     rmq_client.Producer
+	Redis          *redis.Client
+	DB             *gorm.DB
 }
 
 var _ IMessageService = (*MessageService)(nil)
@@ -181,6 +183,32 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 	default:
 		return fmt.Errorf("unknown session_type=%d", msg.SessionType)
+	}
+	// 3.5) 群聊禁言校验：必须在发 MQ 之前做
+	if msg.SessionType == types.GroupChatSessionTypeGroup {
+
+		gid := int(msg.TargetID) // 群ID
+		uid := int(msg.SenderID) // 发送者ID
+
+		// 1) 查群成员记录：是否成员/是否退群/角色/个人禁言
+		m, err := s.GroupMemberDAO.FindByUserId(context.Background(), gid, uid)
+		if err != nil || m.IsQuit == 1 {
+			return fmt.Errorf("你不在群内或已退群")
+		}
+
+		// 2) 个人禁言：优先级最高
+		if m.IsMute == 1 {
+			return fmt.Errorf("你已被禁言")
+		}
+
+		// 3) 群全员禁言：只禁普通成员(role=3)，群主/管理员仍可发言
+		g, err := s.GroupDAO.FindByID(context.Background(), gid)
+		if err != nil {
+			return fmt.Errorf("群不存在")
+		}
+		if g.IsMuteAll == 1 && m.Role == 3 {
+			return fmt.Errorf("群已开启全员禁言")
+		}
 	}
 
 	// 3) 频道（给 ws / 路由用）

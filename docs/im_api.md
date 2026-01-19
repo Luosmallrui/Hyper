@@ -51,6 +51,14 @@ GET /groupmember/list（需要认证）
 POST /groupmember/quit（需要认证）
 说明：普通成员/管理员退出群聊；若群主退群则自动解散群聊
 
+11) 个人禁言/解除禁言
+POST /groupmember/mute（需要认证）
+说明：群主/管理员对单个成员进行禁言或解除禁言
+
+12) 群全员禁言开关
+POST /groupmember/mute-all（需要认证）
+说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
+
 ) 建立 WebSocket 连接（IM）(未完成)
 WebSocket /im/wss（需要认证）
 说明：建立 IM WebSocket 长连接（用于实时消息推送/心跳/ACK）。
@@ -795,6 +803,181 @@ Content-Type: application/json
 | 字段 | 类型 | 说明                                   | 
 |----|----|--------------------------------------|
 | disbanded | bool | 是否解散群聊：true=群主退群并解散；false=普通成员/管理员退群 |
+
+
+## 11) 发送消息
+```
+POST /groupmember/mute（需要认证）
+说明：群主/管理员对单个成员进行禁言或解除禁言
+权限规则（业务约束）:
+只有 群主(role=1) 或 管理员(role=2) 可以操作
+群主：可以禁言管理员和普通成员
+管理员：只能禁言普通成员，不能禁言群主/其他管理员
+禁言状态对“发群消息”生效：被禁言者发群消息会被服务端拦截（在发 MQ 前拦截）
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+请求示例(禁言)：
+```json
+{
+  "group_id": 8,
+  "target_user_id": 9,
+  "mute": true
+}
+```
+请求示例(解除禁言)：
+```json
+{
+  "group_id": 8,
+  "target_user_id": 9,
+  "mute": false
+}
+```
+### 参数说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|----|----|----|----|
+| group_id | int | 是  | 群ID |
+| target_user_id | int | 是  | 被禁言/解除禁言的用户ID |
+| mute | bool | 是  | true=禁言；false=解除禁言 |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": "ok"
+}
+```
+
+### 常见失败响应
+失败示例：
+```json
+{
+  "code": 400,
+  "msg": "无权限操作"
+}
+```
+
+### 被禁言者发言响应
+
+示例：
+```json
+{
+  "code": 500,
+  "msg": "你已被禁言"
+}
+```
+
+
+## 12) 群全员禁言开关
+```
+POST /groupmember/mute-all（需要认证）
+说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
+权限规则：只有群主/管理员可以操作
+开启全员禁言后：
+普通成员(role=3)：禁止发送群消息
+群主/管理员：仍可以发送群消息（不受影响）
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+请求示例（开启群禁言）：
+```json
+{
+  "group_id": 8,
+  "mute": true
+}
+
+```
+请求示例（关闭群禁言）：
+```json
+{
+  "group_id": 8,
+  "mute": false
+}
+
+```
+### 参数说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|----|----|----|----|
+| group_id | int | 是  | 群ID |
+| mute | bool | 是  | true=开启全员禁言；false=关闭 |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "is_mute_all": true
+  }
+}
+```
+
+### 常见失败响应
+失败示例：
+```json
+{
+  "code": 400,
+  "msg": "无权限操作"
+}
+```
+
+### 普通成员发言响应
+示例：
+```json
+{
+  "code": 500,
+  "msg": "群已开启全员禁言"
+}
+```
+
+### 群主发言响应
+示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "msg_id": "2013250725441703936",
+    "sender_id": "8",
+    "target_id": "8",
+    "session_type": 2,
+    "session_hash": -3055099603108578055,
+    "session_id": "g_8",
+    "msg_type": 1,
+    "content": "群禁言，管我群主什么事",
+    "parent_msg_id": "0",
+    "timestamp": 1768831351992,
+    "status": 0,
+    "ext": {
+      "device": "iPhone 15"
+    },
+    "channel": "chat"
+  }
+}
+```
 
 
 ## ) 建立 WebSocket 连接（IM）（未完成）

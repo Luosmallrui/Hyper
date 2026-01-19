@@ -49,3 +49,20 @@ type QuitGroupRequest struct {
 type QuitGroupResponse struct {
 	Disbanded bool `json:"disbanded"` // true=群主触发解散；false=普通退群
 }
+
+// 个人禁言/解除
+type MuteMemberRequest struct {
+	GroupId      int   `json:"group_id" binding:"required"`
+	TargetUserId int   `json:"target_user_id" binding:"required"`
+	Mute         *bool `json:"mute" binding:"required"` // true=禁言 false=解除
+}
+
+// 群全员禁言开关
+type MuteAllRequest struct {
+	GroupId int   `json:"group_id" binding:"required"`
+	Mute    *bool `json:"mute" binding:"required"` // true=开启 false=关闭
+}
+
+type MuteAllResponse struct {
+	IsMuteAll bool `json:"is_mute_all"`
+}

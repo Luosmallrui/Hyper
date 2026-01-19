@@ -148,3 +148,8 @@ func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
 func (g *GroupMember) ClearGroupRelation(ctx context.Context, uid int, gid int) {
 	g.relation.DelGroupRelation(ctx, uid, gid)
 }
+func (g *GroupMember) SetMemberMute(ctx context.Context, gid int, uid int, mute int) error {
+	return g.Repo.Model(ctx).
+		Where("group_id = ? AND user_id = ? AND is_quit = 0", gid, uid).
+		Update("is_mute", mute).Error
+}
