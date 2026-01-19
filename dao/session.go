@@ -87,3 +87,17 @@ func (d *SessionDAO) UpsertSessionSettings(
 		}).
 		Create(&row).Error
 }
+
+// DeleteSession 删除某个用户的某个会话
+func (d *SessionDAO) DeleteSession(ctx context.Context, userID uint64, sessionType int, peerID uint64) error {
+	return d.db.WithContext(ctx).
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", userID, sessionType, peerID).
+		Delete(&models.Session{}).Error
+}
+
+// DeleteSessionsByPeer 删除某个群/对端的所有会话（解散群用）
+func (d *SessionDAO) DeleteSessionsByPeer(ctx context.Context, sessionType int, peerID uint64) error {
+	return d.db.WithContext(ctx).
+		Where("session_type = ? AND peer_id = ?", sessionType, peerID).
+		Delete(&models.Session{}).Error
+}
