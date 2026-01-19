@@ -93,3 +93,22 @@ func (h *GroupMemberHandler) ListMembers(c *gin.Context) error {
 	response.Success(c, "踢出成功")
 	return nil
 }
+func (h *GroupMemberHandler) QuitGroup(c *gin.Context) error {
+	var req types.QuitGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "请求参数错误")
+	}
+
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+
+	resp, err := h.GroupMemberService.QuitGroup(c.Request.Context(), req.GroupId, int(uid64))
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+
+	response.Success(c, resp)
+	return nil
+}

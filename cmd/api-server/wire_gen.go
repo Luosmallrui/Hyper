@@ -189,6 +189,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	groupMemberService := &service.GroupMemberService{
 		DB:             db,
 		GroupMemberDAO: groupMember,
+		SessionDAO:     sessionDAO,
+		UnreadStorage:  unreadStorage,
 	}
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,

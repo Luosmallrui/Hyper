@@ -39,3 +39,13 @@ type GroupMemberItemDTO struct {
 type GroupMemberListResponse struct {
 	Members []GroupMemberItemDTO `json:"members"`
 }
+
+// 退群/解散群 请求
+type QuitGroupRequest struct {
+	GroupId int `json:"group_id" binding:"required"`
+}
+
+// 退群/解散群 响应
+type QuitGroupResponse struct {
+	Disbanded bool `json:"disbanded"` // true=群主触发解散；false=普通退群
+}

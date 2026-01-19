@@ -47,6 +47,10 @@ POST /groupmember/kick（需要认证）
 GET /groupmember/list（需要认证）
 说明：获取指定群聊的成员列表（仅返回未退群成员）
 
+10) 退出群聊（退群/群主解散群聊）
+POST /groupmember/quit（需要认证）
+说明：普通成员/管理员退出群聊；若群主退群则自动解散群聊
+
 ) 建立 WebSocket 连接（IM）(未完成)
 WebSocket /im/wss（需要认证）
 说明：建立 IM WebSocket 长连接（用于实时消息推送/心跳/ACK）。
@@ -668,6 +672,7 @@ Authorization: Bearer <token>
 ## 请求参数
 
 ### 请求体 (JSON)
+无
 
 请求示例：
 `GET /groupmember/list?group_id=6`
@@ -742,6 +747,54 @@ members 元素结构
 | 401 | 未登录/鉴权失败 | token 缺失/无效 |
 | 403 |  无权限 | 当前用户不在该群内（或已退群）|
 | 500 |  服务器内部错误 | DB 查询失败 |
+
+## 10) 退出群聊（退群/群主解散群聊）
+```
+POST /groupmember/quit（需要认证）
+说明：
+普通成员/管理员：退出群聊（服务端实现为把该成员标记为退群 is_quit=1，并扣减群成员数）
+群主：退出时自动解散群聊
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+请求示例：
+```json
+{
+  "group_id": 7
+}
+```
+### 参数说明
+
+| 字段 | 类型  | 必填 | 说明 |
+|----|-----|----|----|
+| group_id | int | 是  | 群ID（groups.id） |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "disbanded": true
+  }
+}
+```
+
+## 响应参数说明
+
+| 字段 | 类型 | 说明                                   | 
+|----|----|--------------------------------------|
+| disbanded | bool | 是否解散群聊：true=群主退群并解散；false=普通成员/管理员退群 |
 
 
 ## ) 建立 WebSocket 连接（IM）（未完成）

@@ -144,3 +144,7 @@ func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
 
 	return items, nil
 }
+
+func (g *GroupMember) ClearGroupRelation(ctx context.Context, uid int, gid int) {
+	g.relation.DelGroupRelation(ctx, uid, gid)
+}

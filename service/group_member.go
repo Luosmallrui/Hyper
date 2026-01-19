@@ -20,6 +20,7 @@ type IGroupMemberService interface {
 	InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error)
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
 	ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error)
+	QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error)
 }
 
 type GroupMemberService struct {
@@ -29,6 +30,20 @@ type GroupMemberService struct {
 	GroupMemberRepo *dao.GroupMember
 	GroupRepo       *dao.Group
 	Relation        *cache.Relation
+	DB             *gorm.DB
+	GroupMemberDAO *dao.GroupMember
+	SessionDAO     *dao.SessionDAO
+	UnreadStorage  *cache.UnreadStorage
+	//Redis           *redis.Client
+	//GroupMemberRepo *dao.GroupMember
+}
+
+func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
+	return &GroupMemberService{
+		DB: db,
+		//Redis:           redisClient,
+		//GroupMemberRepo: dao.NewGroupMemberDao(db),
+	}
 }
 
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
@@ -199,4 +214,93 @@ func (s *GroupMemberService) ListMembers(ctx context.Context, groupId int, userI
 		})
 	}
 	return dtos, nil
+}
+func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error) {
+	// 1) 先查成员记录，判断是否在群里
+	member, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, userId)
+	if err != nil {
+		return nil, errors.New("你不在该群，无法退群")
+	}
+	if member.IsQuit == 1 {
+		return nil, errors.New("你已经退过该群了")
+	}
+
+	// 2) 开事务处理：退群/解散 + 清会话 + 清未读
+	resp := &types.QuitGroupResponse{Disbanded: false}
+
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+
+		// 群主退群 => 解散群
+		if member.Role == models.GroupMemberLeaderOwner { // 1=群主 :contentReference[oaicite:10]{index=10}
+			resp.Disbanded = true
+
+			// 2.1 先拿到所有未退群成员（用于清未读/删会话）
+			memberIDs, err := s.GroupMemberDAO.GetMemberIds(ctx, groupId)
+			if err != nil {
+				return err
+			}
+
+			// 2.2 全员标记退群
+			if err := tx.Table("group_member").
+				Where("group_id = ? AND is_quit = 0", groupId).
+				Updates(map[string]any{
+					"is_quit":    1,
+					"updated_at": time.Now(),
+				}).Error; err != nil {
+				return err
+			}
+
+			// 2.3 删除群（表结构没软删字段，这里用硬删）
+			if err := tx.Table("groups").Where("id = ?", groupId).Delete(nil).Error; err != nil {
+				return err
+			}
+
+			// 2.4 删除所有人的群会话
+			if err := s.SessionDAO.DeleteSessionsByPeer(ctx, 2, uint64(groupId)); err != nil {
+				return err
+			}
+
+			// 2.5 清所有人该群的未读（Redis）
+			for _, uid := range memberIDs {
+				s.UnreadStorage.Reset(ctx, uid, 2, groupId)
+				// 同时建议删关系缓存（否则 IsMember cache 命中会误判）
+				s.GroupMemberDAO.ClearGroupRelation(ctx, uid, groupId)
+			}
+
+			return nil
+		}
+
+		// 普通成员退群
+		if err := tx.Table("group_member").
+			Where("group_id = ? AND user_id = ? AND is_quit = 0", groupId, userId).
+			Updates(map[string]any{
+				"is_quit":    1,
+				"updated_at": time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+
+		// member_count - 1
+		_ = tx.Table("groups").
+			Where("id = ? AND member_count > 0", groupId).
+			UpdateColumn("member_count", gorm.Expr("member_count - 1")).Error
+
+		// 删除该用户的群会话
+		if err := s.SessionDAO.DeleteSession(ctx, uint64(userId), 2, uint64(groupId)); err != nil {
+			return err
+		}
+
+		// 清该用户该群未读
+		s.UnreadStorage.Reset(ctx, userId, 2, groupId)
+
+		// 删关系缓存，避免缓存命中仍被当成员
+		s.GroupMemberDAO.ClearGroupRelation(ctx, userId, groupId)
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
