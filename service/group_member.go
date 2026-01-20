@@ -24,6 +24,7 @@ type IGroupMemberService interface {
 	MuteMember(ctx context.Context, groupId int, operatorId int, targetUserId int, mute bool) error
 	SetMuteAll(ctx context.Context, groupId int, operatorId int, mute bool) (*types.MuteAllResponse, error)
 	SetAdmin(ctx context.Context, groupId int, operatorId int, targetUserId int, admin bool) error
+	TransferOwner(ctx context.Context, groupId int, operatorId int, newOwnerId int) (*types.TransferOwnerResponse, error)
 }
 
 type GroupMemberService struct {
@@ -395,4 +396,53 @@ func (s *GroupMemberService) SetAdmin(ctx context.Context, groupId int, operator
 
 	// 6) 更新角色
 	return s.GroupMemberDAO.UpdateRole(ctx, groupId, targetUserId, newRole)
+}
+
+func (s *GroupMemberService) TransferOwner(
+	ctx context.Context,
+	groupId int,
+	operatorId int,
+	newOwnerId int,
+) (*types.TransferOwnerResponse, error) {
+
+	if groupId <= 0 || operatorId <= 0 || newOwnerId <= 0 {
+		return nil, errors.New("参数错误")
+	}
+	// 1) 只有群主能转让
+	if !s.GroupMemberDAO.IsMaster(ctx, groupId, operatorId) {
+		return nil, errors.New("无权限操作")
+	}
+	if operatorId == newOwnerId {
+		return nil, errors.New("不能转让给自己")
+	}
+	// 2) 新群主必须在群且未退群
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, newOwnerId)
+	if err != nil || target.IsQuit == 1 {
+		return nil, errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 事务：三步必须原子
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		groupDAO := s.GroupDAO.WithDB(tx)
+		gmDAO := s.GroupMemberDAO.WithDB(tx)
+
+		// 3.1 更新群主字段
+		if err := groupDAO.UpdateOwnerId(ctx, groupId, newOwnerId); err != nil {
+			return err
+		}
+		// 3.2 旧群主降级为普通成员(3)
+		if err := gmDAO.UpdateRole(ctx, groupId, operatorId, 3); err != nil {
+			return err
+		}
+		// 3.3 新群主升为群主(1)
+		if err := gmDAO.UpdateRole(ctx, groupId, newOwnerId, 1); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.TransferOwnerResponse{Success: true}, nil
 }

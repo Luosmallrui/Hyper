@@ -59,10 +59,14 @@ POST /groupmember/mute（需要认证）
 POST /groupmember/mute-all（需要认证）
 说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
 
-12) 设置/撤销管理员
+13) 设置/撤销管理员
 POST /groupmember/admin（需要认证）
 说明:仅群主可使用。用于将某个群成员设置为管理员或撤销管理员身份
 不允许对群主本身进行该操作
+
+14) 转让群主
+POST /groupmember/transfer-owner（需要认证）
+说明：群主将群聊所有权转让给群内其他成员。
 
 ) 建立 WebSocket 连接（IM）(未完成)
 WebSocket /im/wss（需要认证）
@@ -1063,6 +1067,51 @@ Content-Type: application/json
   "msg": "对方不在群内或已退群"
 }
 ```
+
+## 14) 转让群主
+```
+POST /groupmember/transfer-owner（需要认证）
+说明：群主将群聊所有权转让给群内其他成员。
+
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+设置管理员：
+```json
+{
+  "group_id": 8,
+  "new_owner_id": 10
+}
+```
+
+### 参数说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|----|----|----|----|
+| group_id | int | 是  | 群ID（groups.id） |
+| new_owner_id | int | 是  | 新群主ID |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "success": true
+  }
+}
+```
+
 
 ## ) 建立 WebSocket 连接（IM）（未完成）
 ```

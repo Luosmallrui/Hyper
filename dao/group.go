@@ -35,3 +35,16 @@ func (g *Group) GetGroup(ctx context.Context, groupId int) (*models.Group, error
 	}
 	return &group, nil
 }
+
+func (d *GroupDAO) WithDB(db *gorm.DB) *GroupDAO {
+	nd := *d
+	nd.db = db
+	return &nd
+}
+
+func (d *GroupDAO) UpdateOwnerId(ctx context.Context, groupId int, newOwnerId int) error {
+	return d.db.WithContext(ctx).
+		Model(&models.Group{}).
+		Where("id = ?", groupId).
+		Update("owner_id", newOwnerId).Error
+}

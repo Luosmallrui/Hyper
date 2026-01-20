@@ -73,3 +73,14 @@ type SetAdminRequest struct {
 	TargetUserId int   `json:"target_user_id" binding:"required"`
 	Admin        *bool `json:"admin" binding:"required"` // true=设为管理员 false=撤销
 }
+
+// 转让群主 请求
+type TransferOwnerRequest struct {
+	GroupId    int `json:"group_id" binding:"required"`
+	NewOwnerId int `json:"new_owner_id" binding:"required"`
+}
+
+// 转让群主 响应
+type TransferOwnerResponse struct {
+	Success bool `json:"success"`
+}
