@@ -13,6 +13,12 @@ type GroupMember struct {
 	relation *cache.Relation
 }
 
+func (g *GroupMember) WithDB(db *gorm.DB) *GroupMember {
+	ng := *g // 浅拷贝：relation 指针会保留
+	ng.Repo = NewRepo[models.GroupMember](db)
+	return &ng
+}
+
 func NewGroupMember(db *gorm.DB, relation *cache.Relation) *GroupMember {
 	return &GroupMember{Repo: NewRepo[models.GroupMember](db), relation: relation}
 }

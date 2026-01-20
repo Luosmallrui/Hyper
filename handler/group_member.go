@@ -35,6 +35,8 @@ func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	group.POST("/mute", authorize, context.Wrap(hm.MuteMember))
 	group.POST("/mute-all", authorize, context.Wrap(hm.MuteAll))
 	group.POST("/admin", authorize, context.Wrap(hm.SetAdmin))
+	group.POST("/transfer-owner", authorize, context.Wrap(hm.TransferOwner))
+
 func (h *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	group := r.Group("/v1/groupmember")
@@ -74,6 +76,15 @@ func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 	err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	UserId := int(uid)
+
+	if err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, UserId); err != nil {
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	response.Success(c, gin.H{"success": true})
 	return nil
@@ -87,7 +98,7 @@ func (h *GroupMemberHandler) ListMembers(c *gin.Context) error {
 	}
 	gid, err := strconv.Atoi(gidStr)
 	if err != nil || gid <= 0 {
-		return response.NewError(400, "group_id 参数错误")
+		return response.NewError(http.StatusBadRequest, "group_id 参数错误")
 	}
 
 	// 2) 获取当前登录用户
@@ -113,17 +124,20 @@ func (h *GroupMemberHandler) ListMembers(c *gin.Context) error {
 func (h *GroupMemberHandler) QuitGroup(c *gin.Context) error {
 	var req types.QuitGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(400, "请求参数错误")
+		return response.NewError(http.StatusBadRequest, "请求参数错误")
 	}
 
 	uid64, err := context.GetUserID(c)
 	if err != nil {
-		return response.NewError(401, "未登录")
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
 
 	resp, err := h.GroupMemberService.QuitGroup(c.Request.Context(), req.GroupId, int(uid64))
 	if err != nil {
-		return response.NewError(500, err.Error())
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
 	response.Success(c, resp)
@@ -133,14 +147,14 @@ func (h *GroupMemberHandler) QuitGroup(c *gin.Context) error {
 func (h *GroupMemberHandler) MuteMember(c *gin.Context) error {
 	var req types.MuteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(400, err.Error())
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	uid64, err := context.GetUserID(c)
 	if err != nil {
-		return response.NewError(401, "未登录")
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
 	if req.Mute == nil {
-		return response.NewError(400, "mute 不能为空")
+		return response.NewError(http.StatusBadRequest, "mute 不能为空")
 	}
 
 	if err := h.GroupMemberService.MuteMember(
@@ -150,7 +164,10 @@ func (h *GroupMemberHandler) MuteMember(c *gin.Context) error {
 		req.TargetUserId,
 		*req.Mute,
 	); err != nil {
-		return response.NewError(403, err.Error())
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	response.Success(c, "ok")
 	return nil
@@ -159,14 +176,14 @@ func (h *GroupMemberHandler) MuteMember(c *gin.Context) error {
 func (h *GroupMemberHandler) MuteAll(c *gin.Context) error {
 	var req types.MuteAllRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(400, err.Error())
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	uid64, err := context.GetUserID(c)
 	if err != nil {
-		return response.NewError(401, "未登录")
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
 	if req.Mute == nil {
-		return response.NewError(400, "mute 不能为空")
+		return response.NewError(http.StatusBadRequest, "mute 不能为空")
 	}
 
 	resp, err := h.GroupMemberService.SetMuteAll(
@@ -176,7 +193,10 @@ func (h *GroupMemberHandler) MuteAll(c *gin.Context) error {
 		*req.Mute,
 	)
 	if err != nil {
-		return response.NewError(400, err.Error())
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	response.Success(c, resp)
 	return nil
@@ -184,16 +204,16 @@ func (h *GroupMemberHandler) MuteAll(c *gin.Context) error {
 func (h *GroupMemberHandler) SetAdmin(c *gin.Context) error {
 	var req types.SetAdminRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(400, err.Error())
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
 	uid64, err := context.GetUserID(c)
 	if err != nil {
-		return response.NewError(401, "未登录")
+		return response.NewError(http.StatusUnauthorized, "未登录")
 	}
 
 	if req.Admin == nil {
-		return response.NewError(400, "admin 不能为空")
+		return response.NewError(http.StatusBadRequest, "admin 不能为空")
 	}
 
 	if err := h.GroupMemberService.SetAdmin(
@@ -203,9 +223,39 @@ func (h *GroupMemberHandler) SetAdmin(c *gin.Context) error {
 		req.TargetUserId,
 		*req.Admin,
 	); err != nil {
-		return response.NewError(403, err.Error())
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
 	response.Success(c, "ok")
+	return nil
+}
+func (h *GroupMemberHandler) TransferOwner(c *gin.Context) error {
+	var req types.TransferOwnerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+
+	resp, err := h.GroupMemberService.TransferOwner(
+		c.Request.Context(),
+		req.GroupId,
+		int(uid64),
+		req.NewOwnerId,
+	)
+	if err != nil {
+		if err.Error() == "无权限操作" {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+
+	response.Success(c, resp)
 	return nil
 }
