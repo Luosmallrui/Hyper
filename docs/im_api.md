@@ -59,6 +59,11 @@ POST /groupmember/mute（需要认证）
 POST /groupmember/mute-all（需要认证）
 说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
 
+12) 设置/撤销管理员
+POST /groupmember/admin（需要认证）
+说明:仅群主可使用。用于将某个群成员设置为管理员或撤销管理员身份
+不允许对群主本身进行该操作
+
 ) 建立 WebSocket 连接（IM）(未完成)
 WebSocket /im/wss（需要认证）
 说明：建立 IM WebSocket 长连接（用于实时消息推送/心跳/ACK）。
@@ -979,6 +984,85 @@ Content-Type: application/json
 }
 ```
 
+
+## 13) 设置/撤销管理员
+```
+POST /groupmember/admin（需要认证）
+说明:仅群主可使用。用于将某个群成员设置为管理员或撤销管理员身份
+不允许对群主本身进行该操作
+
+```
+
+**请求头**:
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+
+```
+
+## 请求参数
+
+### 请求体 (JSON)
+设置管理员：
+```json
+{
+  "group_id": 8,
+  "target_user_id": 10,
+  "admin": true
+}
+```
+撤销管理员：
+```json
+{
+  "group_id": 8,
+  "target_user_id": 10,
+  "admin": false
+}
+```
+### 参数说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|----|----|----|----|
+| group_id | int | 是  | 群ID（groups.id） |
+| target_user_id | int | 是  | 目标成员用户ID |
+| admin | bool | 是  | true=设为管理员；false=撤销管理员 |
+
+### 成功响应
+成功示例：
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": "ok"
+}
+```
+
+### 常见失败响应
+失败示例：
+```json
+{
+  "code": 400,
+  "msg": "无权限操作"
+}
+```
+
+### 群主将自己设置为管理员响应
+示例：
+```json
+{
+  "code": 403,
+  "msg": "不能操作群主"
+}
+```
+
+### 对不在群里的用户操作响应
+示例：
+```json
+{
+  "code": 403,
+  "msg": "对方不在群内或已退群"
+}
+```
 
 ## ) 建立 WebSocket 连接（IM）（未完成）
 ```

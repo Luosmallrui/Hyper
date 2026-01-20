@@ -66,3 +66,10 @@ type MuteAllRequest struct {
 type MuteAllResponse struct {
 	IsMuteAll bool `json:"is_mute_all"`
 }
+
+// 设置/撤销管理员 请求
+type SetAdminRequest struct {
+	GroupId      int   `json:"group_id" binding:"required"`
+	TargetUserId int   `json:"target_user_id" binding:"required"`
+	Admin        *bool `json:"admin" binding:"required"` // true=设为管理员 false=撤销
+}

@@ -34,6 +34,7 @@ func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	group.POST("/quit", authorize, context.Wrap(hm.QuitGroup))
 	group.POST("/mute", authorize, context.Wrap(hm.MuteMember))
 	group.POST("/mute-all", authorize, context.Wrap(hm.MuteAll))
+	group.POST("/admin", authorize, context.Wrap(hm.SetAdmin))
 func (h *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	group := r.Group("/v1/groupmember")
@@ -149,7 +150,7 @@ func (h *GroupMemberHandler) MuteMember(c *gin.Context) error {
 		req.TargetUserId,
 		*req.Mute,
 	); err != nil {
-		return response.NewError(400, err.Error())
+		return response.NewError(403, err.Error())
 	}
 	response.Success(c, "ok")
 	return nil
@@ -178,5 +179,33 @@ func (h *GroupMemberHandler) MuteAll(c *gin.Context) error {
 		return response.NewError(400, err.Error())
 	}
 	response.Success(c, resp)
+	return nil
+}
+func (h *GroupMemberHandler) SetAdmin(c *gin.Context) error {
+	var req types.SetAdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+
+	if req.Admin == nil {
+		return response.NewError(400, "admin 不能为空")
+	}
+
+	if err := h.GroupMemberService.SetAdmin(
+		c.Request.Context(),
+		req.GroupId,
+		int(uid64),
+		req.TargetUserId,
+		*req.Admin,
+	); err != nil {
+		return response.NewError(403, err.Error())
+	}
+
+	response.Success(c, "ok")
 	return nil
 }
