@@ -153,3 +153,10 @@ func (g *GroupMember) SetMemberMute(ctx context.Context, gid int, uid int, mute 
 		Where("group_id = ? AND user_id = ? AND is_quit = 0", gid, uid).
 		Update("is_mute", mute).Error
 }
+
+// UpdateRole 更新群成员角色（只允许更新未退群成员）
+func (g *GroupMember) UpdateRole(ctx context.Context, gid int, uid int, role int) error {
+	return g.Repo.Model(ctx).
+		Where("group_id = ? AND user_id = ? AND is_quit = 0", gid, uid).
+		Update("role", role).Error
+}

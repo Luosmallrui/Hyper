@@ -23,6 +23,7 @@ type IGroupMemberService interface {
 	QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error)
 	MuteMember(ctx context.Context, groupId int, operatorId int, targetUserId int, mute bool) error
 	SetMuteAll(ctx context.Context, groupId int, operatorId int, mute bool) (*types.MuteAllResponse, error)
+	SetAdmin(ctx context.Context, groupId int, operatorId int, targetUserId int, admin bool) error
 }
 
 type GroupMemberService struct {
@@ -234,7 +235,7 @@ func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId 
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 
 		// 群主退群 => 解散群
-		if member.Role == models.GroupMemberLeaderOwner { // 1=群主 :contentReference[oaicite:10]{index=10}
+		if member.Role == models.GroupMemberLeaderOwner {
 			resp.Disbanded = true
 
 			// 2.1 先拿到所有未退群成员（用于清未读/删会话）
@@ -363,4 +364,35 @@ func (s *GroupMemberService) SetMuteAll(ctx context.Context, gid int, operatorId
 		return nil, err
 	}
 	return &types.MuteAllResponse{IsMuteAll: mute}, nil
+}
+func (s *GroupMemberService) SetAdmin(ctx context.Context, groupId int, operatorId int, targetUserId int, admin bool) error {
+	// 1) 只有群主可操作
+	if !s.GroupMemberDAO.IsMaster(ctx, groupId, operatorId) {
+		return errors.New("无权限操作")
+	}
+
+	// 2) 查目标成员是否在群内（未退群）
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, targetUserId)
+	if err != nil || target.IsQuit == 1 {
+		return errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 不能操作群主
+	if target.Role == models.GroupMemberLeaderOwner {
+		return errors.New("不能操作群主")
+	}
+
+	// 4) 计算目标角色
+	newRole := models.GroupMemberLeaderOrdinary // 3 普通成员
+	if admin {
+		newRole = models.GroupMemberLeaderAdmin // 2 管理员
+	} //admin=true → role=2;admin=false → role=3
+
+	// 5) 幂等：已经是该角色就直接成功
+	if int(target.Role) == newRole {
+		return nil
+	}
+
+	// 6) 更新角色
+	return s.GroupMemberDAO.UpdateRole(ctx, groupId, targetUserId, newRole)
 }
