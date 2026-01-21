@@ -82,14 +82,3 @@ type ListMessageReq struct {
 	Time     int64                  `json:"time"`
 	IsSelf   bool                   `json:"is_self"`
 }
-
-type TalkSessionClearUnreadNumRequest struct {
-	// TalkMode indicates the chat mode (e.g., 1 for private chat, 2 for group chat)
-	SessionType int32 `json:"session_type" binding:"required,oneof=1 2"`
-
-	// ToFromID represents the ID of the other participant in the chat
-	PeerId int32 `json:"peer_id" binding:"required"`
-}
-
-type TalkSessionClearUnreadNumResponse struct {
-}

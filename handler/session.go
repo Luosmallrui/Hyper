@@ -22,6 +22,7 @@ func (s *Session) RegisterRouter(r gin.IRouter) {
 	session.Use(authorize)
 	session.GET("list", context.Wrap(s.ListSessions))
 	session.POST("setting", context.Wrap(s.SessionSetting))
+	session.POST("clear-unread", context.Wrap(s.ClearUnread)) //清除会话未读数
 }
 func (s *Session) ListSessions(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -65,6 +66,31 @@ func (s *Session) SessionSetting(c *gin.Context) error {
 		return response.NewError(400, "is_mute 只能是 0 或 1")
 	}
 	if err := s.SessionService.UpdateSessionSettings(c.Request.Context(), uint64(userId), in); err != nil {
+		return response.NewError(500, err.Error())
+	}
+
+	response.Success(c, "ok")
+	return nil
+}
+func (s *Session) ClearUnread(c *gin.Context) error {
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+
+	in := &types.TalkSessionClearUnreadNumRequest{}
+	// 建议 JSON bind（小程序更稳）
+	if err := c.ShouldBindJSON(in); err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	if err := s.SessionService.ClearUnread(
+		c.Request.Context(),
+		uint64(userId),
+		int(in.SessionType),
+		uint64(in.PeerId),
+		in.ReadTime,
+	); err != nil {
 		return response.NewError(500, err.Error())
 	}
 
