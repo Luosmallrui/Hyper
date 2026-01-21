@@ -267,7 +267,9 @@ func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId 
 
 			// 2.5 清所有人该群的未读（Redis）
 			for _, uid := range memberIDs {
-				s.UnreadStorage.Reset(ctx, uid, 2, groupId)
+				if s.UnreadStorage != nil {
+					s.UnreadStorage.Reset(ctx, uid, 2, groupId)
+				} //实际上现在已经改为以DB为未读权威了
 				// 同时建议删关系缓存（否则 IsMember cache 命中会误判）
 				s.GroupMemberDAO.ClearGroupRelation(ctx, uid, groupId)
 			}
@@ -286,9 +288,11 @@ func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId 
 		}
 
 		// member_count - 1
-		_ = tx.Table("groups").
+		if err := tx.Table("groups").
 			Where("id = ? AND member_count > 0", groupId).
-			UpdateColumn("member_count", gorm.Expr("member_count - 1")).Error
+			UpdateColumn("member_count", gorm.Expr("member_count - 1")).Error; err != nil {
+			return err
+		}
 
 		// 删除该用户的群会话
 		if err := s.SessionDAO.DeleteSession(ctx, uint64(userId), 2, uint64(groupId)); err != nil {
@@ -296,7 +300,11 @@ func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId 
 		}
 
 		// 清该用户该群未读
-		s.UnreadStorage.Reset(ctx, userId, 2, groupId)
+		// DB 权威未读：会话行已删除，因此 DB 未读自动消失
+		// Redis unread 仅用于清理历史残留 key（兼容旧逻辑/防鬼未读）
+		if s.UnreadStorage != nil {
+			s.UnreadStorage.Reset(ctx, userId, 2, groupId)
+		}
 
 		// 删关系缓存，避免缓存命中仍被当成员
 		s.GroupMemberDAO.ClearGroupRelation(ctx, userId, groupId)

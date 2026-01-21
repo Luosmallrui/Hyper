@@ -7,6 +7,7 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,11 +23,16 @@ type SessionService struct {
 	SessionDAO     *dao.SessionDAO
 }
 
+func SessionMapKey(sessionType int, peerId uint64) string {
+	return fmt.Sprintf("%d:%d", sessionType, peerId)
+}
+
 type ISessionService interface {
 	UpdateSingleSession(ctx context.Context, msg *types.Message) error
 	ListUserSessions(ctx context.Context, userId uint64, limit int) ([]*types.SessionDTO, error)
 	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
+	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
 }
 
 func (s *SessionService) UpdateSingleSession(
@@ -102,9 +108,8 @@ func (s *SessionService) UpsertGroupSessions(ctx context.Context, msg *types.Mes
 		}
 
 		rows = append(rows, models.Session{
-			UserId: uid,
-			// session_type: 2=群聊
-			SessionType: 2,
+			UserId:      uid,
+			SessionType: types.GroupChatSessionTypeGroup,
 			PeerId:      groupID,
 
 			LastMsgId:      uint64(msg.Id),
@@ -178,8 +183,6 @@ func (s *SessionService) upsertConversation(
 			update["unread_count"] = gorm.Expr(
 				"unread_count + ?", unreadDelta,
 			)
-		} else {
-			update["unread_count"] = 0
 		}
 
 		return tx.Model(&models.Session{}).
@@ -208,45 +211,56 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 		return []*types.SessionDTO{}, nil
 	}
 
-	// 2. 提取所有需要查询的 PeerId (去重)
+	// 2. 只收集私聊需要查的 user_id（群聊 peer_id 是 group_id，不能拿去查用户）
 	peerIds := make([]uint64, 0, len(convs))
 	for _, c := range convs {
-		peerIds = append(peerIds, c.PeerId)
+		if c.SessionType == types.SessionTypeSingle {
+			peerIds = append(peerIds, c.PeerId)
+		}
 	}
 
 	// 3. 批量获取用户信息 (从 Redis + DB 回源)
 	// 建议封装成我们之前讨论的 BatchGetUserInfo
 	userInfoMap := s.UserService.BatchGetUserInfo(ctx, peerIds)
 
-	// 4. 批量获取 Redis 中的未读数和最后一条消息
+	// 4. 批量获取 Redis 中的最后一条消息
 	// 注意：这里推荐在 MessageService 内部实现一个 Pipeline 批量获取方法
-	unreadMap := s.UnreadStorage.BatchGet(ctx, userId, convs)
+	//DB作为权威未读
+	//unreadMap := s.UnreadStorage.BatchGet(ctx, userId, convs)
 	lastMsgMap := s.MessageStorage.BatchGet(ctx, userId, convs)
 
 	// 5. 在内存中组装结果
 	result := make([]*types.SessionDTO, 0, len(convs))
 	for _, c := range convs {
-		info := userInfoMap[c.PeerId]
 		dto := &types.SessionDTO{
 			SessionType: c.SessionType,
 			PeerId:      c.PeerId,
 			IsTop:       c.IsTop,
 			IsMute:      c.IsMute,
-			PeerName:    info.Nickname,
-			PeerAvatar:  info.Avatar,
+			Unread:      c.UnreadCount, //DB作为权威未读
+		}
+		// A) 私聊：peer_id 是对方 uid，才去 userInfoMap 拿昵称头像
+		if c.SessionType == types.SessionTypeSingle {
+			if info, ok := userInfoMap[c.PeerId]; ok {
+				dto.PeerName = info.Nickname
+				dto.PeerAvatar = info.Avatar
+			}
+		} else {
+			// B) 群聊：peer_id 是 group_id，先兜底显示，避免串到用户
+			dto.PeerName = fmt.Sprintf("群聊(%d)", c.PeerId)
+			dto.PeerAvatar = ""
 		}
 
 		// 优先使用 Redis 中的实时数据，如果不存在再用数据库里的兜底
-		if last, ok := lastMsgMap[c.PeerId]; ok {
+		k := SessionMapKey(c.SessionType, c.PeerId)
+
+		if last, ok := lastMsgMap[k]; ok {
 			dto.LastMsg = last.Content
 			dto.LastMsgTime = last.Timestamp
 		} else {
 			dto.LastMsg = c.LastMsgContent
 			dto.LastMsgTime = c.LastMsgTime
 		}
-
-		dto.Unread = unreadMap[c.PeerId]
-
 		result = append(result, dto)
 	}
 
@@ -280,4 +294,24 @@ func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint6
 	isMute := *req.IsMute
 
 	return s.SessionDAO.UpsertSessionSettings(ctx, userID, req.SessionType, req.PeerID, isTop, isMute)
+}
+
+func (s *SessionService) ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error {
+	q := s.DB.WithContext(ctx).
+		Model(&models.Session{}).
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", userId, sessionType, peerId)
+
+	// 关键：只在 last_msg_time <= readTime 时清零，避免清掉之后到来的新消息
+	if readTime > 0 {
+		q = q.Where("last_msg_time <= ?", readTime)
+	}
+
+	if err := q.Update("unread_count", 0).Error; err != nil {
+		return err
+	}
+	// DB 权威未读：Redis unread 仅用于清理历史残留 key（兼容旧逻辑/防鬼未读）
+	if s.UnreadStorage != nil {
+		s.UnreadStorage.Reset(ctx, int(userId), sessionType, int(peerId))
+	}
+	return nil
 }

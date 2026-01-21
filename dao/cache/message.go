@@ -31,8 +31,8 @@ type LastCacheMessage struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func (m *MessageStorage) BatchGet(ctx context.Context, userId uint64, convs []models.Session) map[uint64]*LastCacheMessage {
-	resMap := make(map[uint64]*LastCacheMessage)
+func (m *MessageStorage) BatchGet(ctx context.Context, userId uint64, convs []models.Session) map[string]*LastCacheMessage {
+	resMap := make(map[string]*LastCacheMessage)
 	pipe := m.redis.Pipeline()
 
 	for _, c := range convs {
@@ -49,7 +49,9 @@ func (m *MessageStorage) BatchGet(ctx context.Context, userId uint64, convs []mo
 			msg := &LastCacheMessage{}
 			if json.Unmarshal([]byte(val), msg) == nil {
 				// 返回给前端时，用 PeerId 作为 Key，方便 DTO 匹配
-				resMap[convs[i].PeerId] = msg
+				k := fmt.Sprintf("%d:%d", convs[i].SessionType, convs[i].PeerId)
+				//由于私聊和群聊的peerid数值空间共用会串数据，因此需要加sessiontype
+				resMap[k] = msg
 			}
 		}
 	}

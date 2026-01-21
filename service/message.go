@@ -32,11 +32,6 @@ type IMessageService interface {
 	SaveSingleMessage(msg *models.ImSingleMessage) error
 	SaveGroupMessage(msg *models.ImGroupMessage) error
 	SendMessage(msg *types.Message) error
-	GetRecentMessages(targetID string, limit int) ([]models.Message, error)
-	PullOfflineMessages(userID string) ([]models.Message, error)
-	SendSystemMessage(targetID string, content string) error
-	AckMessages(msgIDs []string) error
-	GetMessageByID(msgID string) (*models.Message, error)
 	ListMessages(ctx context.Context, userId, peerId uint64, sessionType int, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
 }
 
@@ -224,65 +219,13 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		Topic: types.ImTopicChat,
 		Body:  body,
 	}
-	//fmt.Println(s.MqProducer, 44)
-	//s.MqProducer.SendAsync(context.Background(), mqMsg, func(ctx context.Context, resp []*rmq_client.SendReceipt, err error) {
-	//	for i := 0; i < len(resp); i++ {
-	//		fmt.Printf("%#v\n", resp[i])
-	//	}
-	//})
-	//fmt.Println(time.Now().Format("2006-01-02 15:04:05"))
-	//MQ重发了，前者异步发送了后面又同步发送了
+
 	_, err = s.MqProducer.Send(context.Background(), mqMsg)
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-//func (s *MessageService) SendGroupMessage(msg *models.Message) error {
-//	// 群消息仍然只存一条
-//	return nil
-//}
-
-// 查询某个用户/群的最近消息
-func (s *MessageService) GetRecentMessages(targetID string, limit int) ([]models.Message, error) {
-	return s.MessageDao.GetMessagesByTarget(targetID, limit)
-}
-
-// PullOfflineMessages 拉取需要补发的消息
-func (s *MessageService) PullOfflineMessages(userID string) ([]models.Message, error) {
-	msgs, err := s.MessageDao.GetOfflineMessages(userID, 100)
-	if err != nil {
-		return nil, err
-	}
-	return msgs, nil
-}
-
-// 发送系统消息
-func (s *MessageService) SendSystemMessage(targetID string, content string) error {
-	//msg := &models.Message{
-	//	MsgID:       uuid.NewString(),
-	//	SenderID:    "system",
-	//	TargetID:    targetID,
-	//	SessionType: 3,
-	//	MsgType:     1,
-	//	Content:     content,
-	//	Timestamp:   time.Now().UnixMilli(),
-	//	Status:      1,
-	//	Ext:         "{}",
-	//}
-	return nil
-}
-
-// ack
-func (s *MessageService) AckMessages(msgIDs []string) error {
-	return s.MessageDao.MarkMessagesRead(msgIDs)
-}
-
-// 已读回执
-func (s *MessageService) GetMessageByID(msgID string) (*models.Message, error) {
-	return s.MessageDao.GetByID(msgID)
 }
 
 func (s *MessageService) generateSessionID(uid1, uid2 int64) string {

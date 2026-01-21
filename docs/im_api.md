@@ -20,7 +20,7 @@ GET /v1/message/list（需要认证）
 说明：拉取指定会话的历史消息列表（相当于加载聊天记录）
 
 3）清除会话未读数
-POST /v1/message/clear-unread（需要认证）
+POST /v1/session/clear-unread（需要认证）
 说明：清除指定会话的未读数（服务端实现为重置未读，相当于标记这个会话已读）
 
 4)获取会话列表
@@ -304,7 +304,7 @@ list 元素结构
 
 ## 3) 清除会话未读数
 ```
-POST /v1/message/clear-unread（需要认证）
+POST /v1/session/clear-unread（需要认证）
 说明：清除指定会话的未读数（服务端实现为 Reset/重置，相当于标记这个会话已读）
 常见使用场景：进入会话页后调用一次
 
