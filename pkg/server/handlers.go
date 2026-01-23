@@ -6,6 +6,7 @@ import (
 
 type Handlers struct {
 	Auth            *handler.Auth
+	Pay             *handler.Pay
 	Map             *handler.Map
 	Message         *handler.Message
 	Note            *handler.Note
