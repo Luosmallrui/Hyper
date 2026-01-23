@@ -71,6 +71,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeService:    likeService,
 		CollectService: collectService,
 	}
+	payService := &service.PayService{
+		DB: db,
+	}
+	pay := &handler.Pay{
+		Config:     cfg,
+		PayService: payService,
+	}
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
 		MapDao: mapDao,
@@ -201,6 +208,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	handlers := &server.Handlers{
 		Auth:            auth,
+		Pay:             pay,
 		Map:             handlerMap,
 		Message:         message,
 		Note:            note,
