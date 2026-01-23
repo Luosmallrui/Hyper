@@ -23,6 +23,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		client.NewRedisClient,
 		config.ProvideOssConfig,
 		config.ProvideRocketMQConfig,
+		config.ProvideWechatPayConfig,
 		rocketmq.InitProducer,
 		server.NewGinEngine,
 		cache.ProviderSet,
@@ -37,7 +38,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.TopicHandler), "*"),
 		wire.Struct(new(handler.GroupHandler), "*"),
 		wire.Struct(new(handler.GroupMemberHandler), "*"),
-		wire.Struct(new(handler.Pay), "*"),
 
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
@@ -45,6 +45,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		dao.ProviderSet,
 
 		service.ProviderSet,
+		handler.NewPay,
 		database.NewDB,
 	)
 	return nil

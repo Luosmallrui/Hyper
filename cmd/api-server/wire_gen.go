@@ -71,13 +71,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeService:    likeService,
 		CollectService: collectService,
 	}
+	wechatPayConfig := config.ProvideWechatPayConfig(cfg)
 	payService := &service.PayService{
 		DB: db,
 	}
-	pay := &handler.Pay{
-		Config:     cfg,
-		PayService: payService,
-	}
+	pay := handler.NewPay(wechatPayConfig, payService)
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
 		MapDao: mapDao,

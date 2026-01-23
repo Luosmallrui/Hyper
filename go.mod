@@ -22,6 +22,7 @@ require (
 	github.com/speps/go-hashids/v2 v2.0.1
 	github.com/tidwall/gjson v1.18.0
 	github.com/urfave/cli/v2 v2.27.7
+	github.com/wechatpay-apiv3/wechatpay-go v0.2.21
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.44.0
 	golang.org/x/image v0.34.0
