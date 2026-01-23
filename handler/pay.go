@@ -56,6 +56,7 @@ func NewPay(cfg *config.WechatPayConfig, payService service.IPayService) *Pay {
 
 	// 初始化时创建微信支付客户端
 	if err := p.initWechatClient(); err != nil {
+		log.L.Info("init wechat client failed", zap.Error(err))
 		return nil
 	}
 
@@ -200,9 +201,10 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	}
 	fmt.Println(notifyReq.Summary)
 	fmt.Println(transaction.TransactionId)
-	
+	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
+
 	// TODO：幂等更新订单
-	// p.PayService.PaySuccess(ctx, outTradeNo, transactionId, transaction)
+	//p.PayService.PaySuccess(ctx, outTradeNo, transactionId, transaction)
 
 	c.JSON(200, gin.H{
 		"code": "SUCCESS",
