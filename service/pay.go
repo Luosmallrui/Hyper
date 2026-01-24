@@ -28,7 +28,11 @@ func (s *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 	orderSn := *notify.OutTradeNo
 	transactionId := *notify.TransactionId
 	tradeState := *notify.TradeState
-
+	tradeType := *notify.TradeType
+	var openid string
+	if notify.Payer != nil && notify.Payer.Openid != nil {
+		openid = *notify.Payer.Openid
+	}
 	// 只有当支付状态为 SUCCESS 时才处理逻辑
 	if tradeState != "SUCCESS" {
 		log.L.Info("支付未成功，跳过处理", zap.String("order_sn", orderSn), zap.String("state", tradeState))
@@ -57,6 +61,8 @@ func (s *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 			"transaction_id":  transactionId,
 			"pay_status":      2,
 			"raw_trade_state": tradeState,
+			"pay_method":      tradeType,
+			"payer_id":        openid,
 			"notify_raw":      rawJson,
 			"finished_at":     time.Now(),
 		}
