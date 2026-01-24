@@ -9,6 +9,7 @@ import (
 	base "context"
 	"crypto/rsa"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
@@ -36,6 +37,7 @@ type Pay struct {
 	PayService    service.IPayService
 	wechatClient  *core.Client // 微信支付客户端（复用）
 	MchPrivateKey *rsa.PrivateKey
+	MchPublicKey  *rsa.PublicKey
 }
 
 func (p *Pay) RegisterRouter(r gin.IRouter) {
@@ -80,6 +82,7 @@ func (p *Pay) initWechatClient() error {
 		return fmt.Errorf("加载微信支付公钥失败: %w", err)
 	}
 
+	p.MchPublicKey = wechatPayPublicKey
 	// 3. 创建微信支付客户端
 	opts := []core.ClientOption{
 		option.WithWechatPayPublicKeyAuthCipher(
@@ -97,6 +100,7 @@ func (p *Pay) initWechatClient() error {
 	}
 
 	p.wechatClient = client
+	log.L.Info("info", zap.Any("info", p.Config))
 
 	return nil
 }
@@ -124,7 +128,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 		Appid:       core.String(p.Config.AppID),
 		Mchid:       core.String(p.Config.MchID),
 		Description: core.String(req.Description),
-		OutTradeNo:  core.String(req.OutTradeNo),
+		OutTradeNo:  core.String(GenerateOutTradeNo("ORD", 1)),
 		NotifyUrl:   core.String(p.Config.NotifyURL),
 		Amount: &jsapi.Amount{
 			Total: core.Int64(req.Amount),
@@ -145,7 +149,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 		log.L.Error("微信预支付下单失败",
 			zap.String("out_trade_no", req.OutTradeNo),
 			zap.Error(err))
-		return response.NewError(500, "支付下单失败")
+		return response.NewError(500, err.Error())
 	}
 
 	// 4. 记录日志
@@ -174,11 +178,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 // PayNotify 支付回调处理
 func (p *Pay) PayNotify(c *gin.Context) error {
 	ctx := c.Request.Context()
-	// 1. 使用 `RegisterDownloaderWithPrivateKey` 注册下载器
-	err := downloader.MgrInstance().RegisterDownloaderWithPrivateKey(ctx, p.MchPrivateKey, p.Config.MchCertificateSerialNumber, p.Config.MchID, p.Config.MchAPIv3Key)
-	// 2. 获取商户号对应的微信支付平台证书访问器
 	certificateVisitor := downloader.MgrInstance().GetCertificateVisitor(p.Config.MchID)
-	// 3. 使用证书访问器初始化 `notify.Handler`
 	handler, err := notify.NewRSANotifyHandler(p.Config.MchAPIv3Key, verifiers.NewSHA256WithRSAVerifier(certificateVisitor))
 	if err != nil {
 		log.L.Error("创建微信支付回调处理器失败", zap.Error(err))
@@ -199,8 +199,6 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 		})
 		return nil
 	}
-	fmt.Println(notifyReq.Summary)
-	fmt.Println(transaction.TransactionId)
 	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
 
 	// TODO：幂等更新订单
@@ -244,4 +242,10 @@ func (p *Pay) QueryOrder(c *gin.Context) error {
 		zap.Int("status", result.Response.StatusCode))
 	response.Success(c, resp)
 	return nil
+}
+
+func GenerateOutTradeNo(prefix string, orderID int64) string {
+	// 时间精确到毫秒
+	now := time.Now().Format("20060102150405")
+	return fmt.Sprintf("%s%s%d", prefix, now, orderID)
 }
