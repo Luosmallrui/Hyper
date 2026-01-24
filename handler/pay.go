@@ -5,11 +5,12 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
+	utilBase "Hyper/pkg/utils"
 	"Hyper/service"
+	"Hyper/types"
 	base "context"
 	"crypto/rsa"
 	"fmt"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
@@ -24,13 +25,6 @@ import (
 )
 
 // PrepayRequest 预支付请求参数
-type PrepayRequest struct {
-	Description string `json:"description" binding:"required"`  // 商品描述
-	OutTradeNo  string `json:"out_trade_no" binding:"required"` // 商户订单号
-	Amount      int64  `json:"amount" binding:"required,min=1"` // 金额（分）
-	Openid      string `json:"openid" binding:"required"`       // 用户openid
-	Attach      string `json:"attach"`                          // 附加数据（可选）
-}
 
 type Pay struct {
 	Config        *config.WechatPayConfig
@@ -85,17 +79,17 @@ func (p *Pay) initWechatClient() error {
 	p.MchPublicKey = wechatPayPublicKey
 	// 3. 创建微信支付客户端
 	opts := []core.ClientOption{
-		option.WithWechatPayPublicKeyAuthCipher(
+		option.WithWechatPayAutoAuthCipher(
 			p.Config.MchID,
 			p.Config.MchCertificateSerialNumber,
 			mchPrivateKey,
-			p.Config.WechatPayPublicKeyID,
-			wechatPayPublicKey,
+			p.Config.MchAPIv3Key,
 		),
 	}
 
 	client, err := core.NewClient(base.Background(), opts...)
 	if err != nil {
+		log.L.Error("new client failed", zap.Error(err))
 		return fmt.Errorf("创建微信支付客户端失败: %w", err)
 	}
 
@@ -110,7 +104,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 	ctx := c.Request.Context()
 
 	// 1. 参数绑定和验证
-	var req PrepayRequest
+	var req types.PrepayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数错误: "+err.Error())
 	}
@@ -128,7 +122,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 		Appid:       core.String(p.Config.AppID),
 		Mchid:       core.String(p.Config.MchID),
 		Description: core.String(req.Description),
-		OutTradeNo:  core.String(GenerateOutTradeNo("ORD", 1)),
+		OutTradeNo:  core.String(utilBase.GenerateOutTradeNo("ORD", 1)),
 		NotifyUrl:   core.String(p.Config.NotifyURL),
 		Amount: &jsapi.Amount{
 			Total: core.Int64(req.Amount),
@@ -182,32 +176,21 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	handler, err := notify.NewRSANotifyHandler(p.Config.MchAPIv3Key, verifiers.NewSHA256WithRSAVerifier(certificateVisitor))
 	if err != nil {
 		log.L.Error("创建微信支付回调处理器失败", zap.Error(err))
-		c.JSON(500, gin.H{
-			"code":    "FAIL",
-			"message": "init notify handler error",
-		})
-		return nil
+		return response.NewError(500, err.Error())
 	}
 
 	transaction := new(payments.Transaction)
 	notifyReq, err := handler.ParseNotifyRequest(ctx, c.Request, transaction)
 	if err != nil {
 		log.L.Error("微信支付回调验签或解密失败", zap.Error(err))
-		c.JSON(500, gin.H{
-			"code":    "FAIL",
-			"message": err.Error(),
-		})
-		return nil
+		return response.NewError(500, err.Error())
 	}
 	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
 
 	// TODO：幂等更新订单
 	//p.PayService.PaySuccess(ctx, outTradeNo, transactionId, transaction)
 
-	c.JSON(200, gin.H{
-		"code": "SUCCESS",
-		"data": notifyReq,
-	})
+	response.Success(c, notifyReq)
 	return nil
 }
 
@@ -215,37 +198,25 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 func (p *Pay) QueryOrder(c *gin.Context) error {
 	ctx := c.Request.Context()
 	outTradeNo := c.Param("out_trade_no")
-
 	if outTradeNo == "" {
 		return response.NewError(400, "订单号不能为空")
 	}
-
-	// 调用微信支付查询订单 API
 	svc := jsapi.JsapiApiService{Client: p.wechatClient}
-
 	resp, result, err := svc.QueryOrderByOutTradeNo(ctx,
 		jsapi.QueryOrderByOutTradeNoRequest{
 			OutTradeNo: core.String(outTradeNo),
 			Mchid:      core.String(p.Config.MchID),
 		},
 	)
-
 	if err != nil {
 		log.L.Error("查询订单失败",
 			zap.String("out_trade_no", outTradeNo),
 			zap.Error(err))
 		return response.NewError(500, "查询订单失败")
 	}
-
 	log.L.Info("查询订单成功",
 		zap.String("out_trade_no", outTradeNo),
 		zap.Int("status", result.Response.StatusCode))
 	response.Success(c, resp)
 	return nil
-}
-
-func GenerateOutTradeNo(prefix string, orderID int64) string {
-	// 时间精确到毫秒
-	now := time.Now().Format("20060102150405")
-	return fmt.Sprintf("%s%s%d", prefix, now, orderID)
 }
