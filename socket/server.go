@@ -44,10 +44,10 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 	// 初始化 IM 渠道配置
 	socket.Initialize(groupCtx, eg, func(name string) {
 		//emailClient := app.Providers.EmailClient
-		//if app.Config.App.Env == "prod" {
+		//if app.WechatPayConfig.App.Env == "prod" {
 		//	_ = emailClient.SendMail(&email.Option{
-		//		To:      app.Config.App.AdminEmail,
-		//		Subject: fmt.Sprintf("[%s]守护进程异常", app.Config.App.Env),
+		//		To:      app.WechatPayConfig.App.AdminEmail,
+		//		Subject: fmt.Sprintf("[%s]守护进程异常", app.WechatPayConfig.App.Env),
 		//		Body:    fmt.Sprintf("守护进程异常[%s]", name),
 		//	})
 		//}
