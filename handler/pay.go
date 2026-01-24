@@ -2,6 +2,8 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
+	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
@@ -22,32 +24,38 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
 	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // PrepayRequest 预支付请求参数
 
 type Pay struct {
-	Config        *config.WechatPayConfig
-	PayService    service.IPayService
-	wechatClient  *core.Client // 微信支付客户端（复用）
-	MchPrivateKey *rsa.PrivateKey
-	MchPublicKey  *rsa.PublicKey
+	WechatPayConfig *config.WechatPayConfig
+	Config          *config.Config
+	PayService      service.IPayService
+	wechatClient    *core.Client // 微信支付客户端（复用）
+	MchPrivateKey   *rsa.PrivateKey
+	MchPublicKey    *rsa.PublicKey
+	DB              *gorm.DB
 }
 
 func (p *Pay) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(p.Config.Jwt.Secret))
 	pay := r.Group("/v1/pay")
 	{
-		pay.POST("/prepay", context.Wrap(p.Prepay))
+		pay.POST("/prepay", authorize, context.Wrap(p.Prepay))
 		pay.POST("/notify", context.Wrap(p.PayNotify))              // 支付回调
 		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder)) // 查询订单
 	}
 }
 
 // NewPay 创建支付处理器
-func NewPay(cfg *config.WechatPayConfig, payService service.IPayService) *Pay {
+func NewPay(cfg *config.Config, payService service.IPayService, Db *gorm.DB) *Pay {
 	p := &Pay{
-		Config:     cfg,
-		PayService: payService,
+		WechatPayConfig: cfg.WechatPayConfig,
+		PayService:      payService,
+		DB:              Db,
+		Config:          cfg,
 	}
 
 	// 初始化时创建微信支付客户端
@@ -62,7 +70,7 @@ func NewPay(cfg *config.WechatPayConfig, payService service.IPayService) *Pay {
 // initWechatClient 初始化微信支付客户端（只执行一次）
 func (p *Pay) initWechatClient() error {
 	// 1. 加载商户私钥
-	mchPrivateKey, err := utils.LoadPrivateKeyWithPath(p.Config.MchPrivateKeyPath)
+	mchPrivateKey, err := utils.LoadPrivateKeyWithPath(p.WechatPayConfig.MchPrivateKeyPath)
 	if err != nil {
 		return fmt.Errorf("加载商户私钥失败: %w", err)
 	}
@@ -71,7 +79,7 @@ func (p *Pay) initWechatClient() error {
 	// 2. 加载微信支付公钥（如果有公钥文件的话）
 	// 注意：新版建议使用平台证书序列号模式，而不是公钥文件
 	// 这里保留了公钥加载的逻辑，实际使用时可以根据需要选择
-	wechatPayPublicKey, err := utils.LoadPublicKeyWithPath(p.Config.WechatPayPublicKeyPath)
+	wechatPayPublicKey, err := utils.LoadPublicKeyWithPath(p.WechatPayConfig.WechatPayPublicKeyPath)
 	if err != nil {
 		return fmt.Errorf("加载微信支付公钥失败: %w", err)
 	}
@@ -80,10 +88,10 @@ func (p *Pay) initWechatClient() error {
 	// 3. 创建微信支付客户端
 	opts := []core.ClientOption{
 		option.WithWechatPayAutoAuthCipher(
-			p.Config.MchID,
-			p.Config.MchCertificateSerialNumber,
+			p.WechatPayConfig.MchID,
+			p.WechatPayConfig.MchCertificateSerialNumber,
 			mchPrivateKey,
-			p.Config.MchAPIv3Key,
+			p.WechatPayConfig.MchAPIv3Key,
 		),
 	}
 
@@ -94,86 +102,103 @@ func (p *Pay) initWechatClient() error {
 	}
 
 	p.wechatClient = client
-	log.L.Info("info", zap.Any("info", p.Config))
+	log.L.Info("info", zap.Any("info", p.WechatPayConfig))
 
 	return nil
 }
 
 // Prepay 预支付下单
+// Prepay 预支付下单接口
 func (p *Pay) Prepay(c *gin.Context) error {
 	ctx := c.Request.Context()
 
-	// 1. 参数绑定和验证
+	// 1. 参数绑定 (获取金额、描述、OpenID等)
 	var req types.PrepayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数错误: "+err.Error())
 	}
 
-	// 2. 业务逻辑验证（如订单号是否重复等）
-	// 这里可以调用 PayService 进行业务验证
-	// if err := p.PayService.ValidateOrder(ctx, req.OutTradeNo); err != nil {
-	//     return response.NewError(400, "订单验证失败: "+err.Error())
-	// }
+	// 2. 获取当前用户 ID
+	userId := c.GetInt("user_id")
+	openId := c.GetString("openid")
 
-	// 3. 调用微信支付预下单 API
-	svc := jsapi.JsapiApiService{Client: p.wechatClient}
+	// 3. 生成全局唯一的业务订单号 (使用你喜欢的格式)
+	orderSn := utilBase.GenerateOrderSn(userId)
 
-	prepayReq := jsapi.PrepayRequest{
-		Appid:       core.String(p.Config.AppID),
-		Mchid:       core.String(p.Config.MchID),
-		Description: core.String(req.Description),
-		OutTradeNo:  core.String(utilBase.GenerateOutTradeNo("ORD", 1)),
-		NotifyUrl:   core.String(p.Config.NotifyURL),
-		Amount: &jsapi.Amount{
-			Total: core.Int64(req.Amount),
-		},
-		Payer: &jsapi.Payer{
-			Openid: core.String(req.Openid),
-		},
-	}
+	// 4. 开启数据库事务
+	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A. 创建本地主订单
+		newOrder := &models.Order{
+			UserID:      userId,
+			OrderSn:     orderSn,
+			TotalAmount: uint64(req.Amount), // 单位：分
+			Description: req.Description,
+			Status:      10, // 待支付
+		}
+		if err := tx.Create(newOrder).Error; err != nil {
+			return err
+		}
 
-	// 如果有附加数据
-	if req.Attach != "" {
-		prepayReq.Attach = core.String(req.Attach)
-	}
+		// B. 创建初始支付流水
+		payRecord := &models.PayRecord{
+			OrderSn:     orderSn,
+			PayPlatform: 1, // 1-微信
+			AmountTotal: uint64(req.Amount),
+			PayStatus:   0, // 支付中/待支付
+		}
+		if err := tx.Create(payRecord).Error; err != nil {
+			return err
+		}
 
-	// 发起请求
-	resp, result, err := svc.PrepayWithRequestPayment(ctx, prepayReq)
-	if err != nil {
-		log.L.Error("微信预支付下单失败",
-			zap.String("out_trade_no", req.OutTradeNo),
-			zap.Error(err))
-		return response.NewError(500, err.Error())
-	}
+		// C. 调用微信支付预下单 API
+		svc := jsapi.JsapiApiService{Client: p.wechatClient}
+		prepayReq := jsapi.PrepayRequest{
+			Appid:       core.String(p.WechatPayConfig.AppID),
+			Mchid:       core.String(p.WechatPayConfig.MchID),
+			Description: core.String(req.Description),
+			OutTradeNo:  core.String(orderSn), // 使用我们生成的单号
+			NotifyUrl:   core.String(p.WechatPayConfig.NotifyURL),
+			Amount: &jsapi.Amount{
+				Total: core.Int64(req.Amount),
+			},
+			Payer: &jsapi.Payer{
+				Openid: core.String(openId),
+			},
+		}
 
-	// 4. 记录日志
-	log.L.Info("微信预支付下单成功",
-		zap.String("out_trade_no", req.OutTradeNo),
-		zap.String("prepay_id", *resp.PrepayId),
-		zap.Int("status", result.Response.StatusCode))
+		resp, _, err := svc.PrepayWithRequestPayment(ctx, prepayReq)
+		if err != nil {
+			return fmt.Errorf("微信下单失败: %w", err)
+		}
 
-	// 5. 保存订单信息到数据库（可选）
-	// if err := p.PayService.SaveOrder(ctx, req, resp); err != nil {
-	//     log.L.Error("保存订单失败", zap.Error(err))
-	// }
+		// D. 将微信返回的 prepay_id 更新到流水表中，方便后续追踪
+		if err := tx.Model(&models.PayRecord{}).
+			Where("order_sn = ?", orderSn).
+			Update("out_request_no", *resp.PrepayId).Error; err != nil {
+			return err
+		}
 
-	// 6. 返回前端所需的支付参数
-	response.Success(c, gin.H{
-		"prepay_id": resp.PrepayId,
-		"timestamp": resp.TimeStamp,
-		"nonce_str": resp.NonceStr,
-		"package":   resp.Package,
-		"sign_type": resp.SignType,
-		"pay_sign":  resp.PaySign,
+		// E. 将支付参数保存或直接准备返回
+		c.Set("pay_params", resp)
+		return nil
 	})
+
+	if err != nil {
+		log.L.Error("创建订单失败", zap.Error(err))
+		return response.NewError(500, "下单失败")
+	}
+
+	// 5. 返回给前端唤起支付所需的参数
+	payParams, _ := c.Get("pay_params")
+	response.Success(c, payParams)
 	return nil
 }
 
 // PayNotify 支付回调处理
 func (p *Pay) PayNotify(c *gin.Context) error {
 	ctx := c.Request.Context()
-	certificateVisitor := downloader.MgrInstance().GetCertificateVisitor(p.Config.MchID)
-	handler, err := notify.NewRSANotifyHandler(p.Config.MchAPIv3Key, verifiers.NewSHA256WithRSAVerifier(certificateVisitor))
+	certificateVisitor := downloader.MgrInstance().GetCertificateVisitor(p.WechatPayConfig.MchID)
+	handler, err := notify.NewRSANotifyHandler(p.WechatPayConfig.MchAPIv3Key, verifiers.NewSHA256WithRSAVerifier(certificateVisitor))
 	if err != nil {
 		log.L.Error("创建微信支付回调处理器失败", zap.Error(err))
 		return response.NewError(500, err.Error())
@@ -187,8 +212,11 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	}
 	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
 
-	// TODO：幂等更新订单
-	//p.PayService.PaySuccess(ctx, outTradeNo, transactionId, transaction)
+	err = p.PayService.ProcessOrderPaySuccess(ctx, transaction)
+	if err != nil {
+		log.L.Error("处理订单回调业务失败", zap.Error(err))
+		return response.NewError(500, "process failed")
+	}
 
 	response.Success(c, notifyReq)
 	return nil
@@ -205,7 +233,7 @@ func (p *Pay) QueryOrder(c *gin.Context) error {
 	resp, result, err := svc.QueryOrderByOutTradeNo(ctx,
 		jsapi.QueryOrderByOutTradeNoRequest{
 			OutTradeNo: core.String(outTradeNo),
-			Mchid:      core.String(p.Config.MchID),
+			Mchid:      core.String(p.WechatPayConfig.MchID),
 		},
 	)
 	if err != nil {
