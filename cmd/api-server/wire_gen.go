@@ -72,7 +72,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 	}
 	payService := &service.PayService{
-		DB: db,
+		DB:     db,
+		Config: cfg,
 	}
 	pay := handler.NewPay(cfg, payService, db)
 	mapDao := dao.NewMapDao()

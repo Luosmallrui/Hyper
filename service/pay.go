@@ -1,14 +1,19 @@
 package service
 
 import (
+	"Hyper/config"
 	"Hyper/models"
 	"Hyper/pkg/log"
+	utilBase "Hyper/pkg/utils"
+	"Hyper/types"
 	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/wechatpay-apiv3/wechatpay-go/core"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -16,14 +21,109 @@ import (
 var _ IPayService = (*PayService)(nil)
 
 type PayService struct {
-	DB *gorm.DB
+	DB     *gorm.DB
+	Config *config.Config
 }
 
 type IPayService interface {
 	ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error
+	PreWeChatPay(ctx context.Context, weChatClient *core.Client, req types.PrepayRequest) (types.PrepayWithRequestPaymentResponse, error)
 }
 
-func (s *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error {
+func (p *PayService) PreWeChatPay(
+	ctx context.Context,
+	weChatClient *core.Client,
+	req types.PrepayRequest,
+) (types.PrepayWithRequestPaymentResponse, error) {
+
+	var respData types.PrepayWithRequestPaymentResponse
+
+	// 0. 参数校验
+	if req.Amount <= 0 {
+		return respData, fmt.Errorf("invalid pay amount")
+	}
+	if req.Openid == "" {
+		return respData, fmt.Errorf("openid is required")
+	}
+
+	wechatCfg := p.Config.WechatPayConfig
+	orderSn := utilBase.GenerateOrderSn(req.UserId)
+
+	// 1. 事务内：创建订单 + 支付流水（只做 DB）
+	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// A. 创建订单
+		order := &models.Order{
+			UserID:      req.UserId,
+			OrderSn:     orderSn,
+			TotalAmount: uint64(req.Amount),
+			Description: req.Description,
+			Status:      10, // 待支付
+		}
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+
+		// B. 创建支付流水
+		payRecord := &models.PayRecord{
+			OrderSn:     orderSn,
+			PayPlatform: 1, // 微信
+			AmountTotal: uint64(req.Amount),
+			PayStatus:   0, // 待支付
+		}
+		if err := tx.Create(payRecord).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return respData, err
+	}
+
+	// 2. 事务外：调用微信 JSAPI 预下单
+	svc := jsapi.JsapiApiService{Client: weChatClient}
+	prepayReq := jsapi.PrepayRequest{
+		Appid:       core.String(wechatCfg.AppID),
+		Mchid:       core.String(wechatCfg.MchID),
+		Description: core.String(req.Description),
+		OutTradeNo:  core.String(orderSn),
+		NotifyUrl:   core.String(wechatCfg.NotifyURL),
+		Amount: &jsapi.Amount{
+			Total: core.Int64(req.Amount),
+		},
+		Payer: &jsapi.Payer{
+			Openid: core.String(req.Openid),
+		},
+	}
+
+	wxResp, _, err := svc.PrepayWithRequestPayment(ctx, prepayReq)
+	if err != nil {
+		return respData, fmt.Errorf("wechat prepay failed: %w", err)
+	}
+
+	// 3. 更新支付流水（写入 prepay_id）
+	if err := p.DB.WithContext(ctx).
+		Model(&models.PayRecord{}).
+		Where("order_sn = ?", orderSn).
+		Update("out_request_no", *wxResp.PrepayId).Error; err != nil {
+		return respData, err
+	}
+
+	// 4. 组装返回给前端的支付参数
+	respData = types.PrepayWithRequestPaymentResponse{
+		Appid:     *wxResp.Appid,
+		TimeStamp: *wxResp.TimeStamp,
+		NonceStr:  *wxResp.NonceStr,
+		Package:   *wxResp.Package,
+		SignType:  *wxResp.SignType,
+		PaySign:   *wxResp.PaySign,
+		PrepayId:  *wxResp.PrepayId,
+	}
+
+	return respData, nil
+}
+
+func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error {
 	// 获取微信的订单号和支付状态
 	orderSn := *notify.OutTradeNo
 	transactionId := *notify.TransactionId
@@ -40,7 +140,7 @@ func (s *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 	}
 
 	// 开启事务
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 幂等检查：查询流水表并锁定行（SELECT FOR UPDATE）
 		var record models.PayRecord
 		err := tx.Set("gorm:query_option", "FOR UPDATE").
