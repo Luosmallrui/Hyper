@@ -27,6 +27,7 @@ type IFollowService interface {
 	GetFollowingList(ctx context.Context, userID uint64, limit int64, offset int) ([]*models.FollowingQueryResult, error)
 	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error)
+	GetFollowList(ctx context.Context, myID uint64, listType string, cursor int64, limit int) ([]*models.FollowingQueryResult, int64, bool, error)
 }
 
 type FollowService struct {
@@ -184,20 +185,19 @@ func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, lim
 }
 
 func (s *FollowService) GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
-	// 1. 获取我关注的人（DAO 层逻辑不变）
+	// 1. 获取我关注的人
 	list, err := s.FollowDAO.GetFollowingFeed(ctx, myID, cursor, limit)
 	if err != nil || len(list) == 0 {
 		return list, err
 	}
 
-	// 2. 提取列表中的用户 ID
+	// 2. 提取目标用户 ID
 	targetIDs := make([]uint64, 0, len(list))
 	for _, item := range list {
 		targetIDs = append(targetIDs, item.UserID)
 	}
 
-	// 3. 只需要查一步：这 20 个人里，谁关注了我？
-	// SQL: SELECT follower_id FROM user_follow WHERE follower_id IN (...) AND followee_id = myID
+	// 3. 批量查询：这些人中谁关注了我？
 	followMeMap := make(map[uint64]bool)
 	var followMeIDs []uint64
 
@@ -214,14 +214,18 @@ func (s *FollowService) GetMyFollowingListWithStatus(ctx context.Context, myID u
 
 	// 4. 填充状态
 	for _, item := range list {
-		// 因为是“我的关注”列表，我肯定关注了他们
+		// 因为是"我的关注"列表，我肯定关注了他们
 		item.IsFollowing = true
 
 		// 如果他们也关注了我，那就是互关
 		if followMeMap[item.UserID] {
 			item.IsMutual = true
 		}
-		item.Signature = "这个人很懒，什么都没有留下.."
+
+		// 设置默认签名
+		if item.Signature == "" {
+			item.Signature = "这个人很懒，什么都没有留下.."
+		}
 	}
 
 	return list, nil
@@ -239,4 +243,85 @@ func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, follo
 	}
 
 	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
+}
+
+// GetFollowList 统一的关注/粉丝列表接口
+func (s *FollowService) GetFollowList(ctx context.Context, myID uint64, listType string, cursor int64, limit int) ([]*models.FollowingQueryResult, int64, bool, error) {
+	var list []*models.FollowingQueryResult
+	var err error
+
+	// 根据 type 决定调用哪个方法
+	switch listType {
+	case "following":
+		// 我关注的人
+		list, err = s.GetMyFollowingListWithStatus(ctx, myID, cursor, limit)
+	case "follower":
+		// 关注我的人
+		list, err = s.GetMyFollowerListWithStatus(ctx, myID, cursor, limit)
+	default:
+		return nil, 0, false, errors.New("invalid type parameter, must be 'following' or 'follower'")
+	}
+
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	var nextCursor int64 = 0
+	hasMore := len(list) == limit
+
+	if hasMore && len(list) > 0 {
+		// 使用最后一条记录的 FollowTime 作为下次的 cursor
+		lastItem := list[len(list)-1]
+		nextCursor = lastItem.FollowTime.Unix() // 转为 Unix 时间戳
+	}
+
+	return list, nextCursor, hasMore, nil
+}
+
+func (s *FollowService) GetMyFollowerListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
+	// 1. 获取关注我的人
+	list, err := s.FollowDAO.GetFollowerFeed(ctx, myID, cursor, limit)
+	if err != nil || len(list) == 0 {
+		return list, err
+	}
+
+	// 2. 提取粉丝的 ID
+	followerIDs := make([]uint64, 0, len(list))
+	for _, item := range list {
+		followerIDs = append(followerIDs, item.UserID)
+	}
+
+	// 3. 批量查询：我关注了这些粉丝中的谁？
+	iFollowMap := make(map[uint64]bool)
+	var iFollowIDs []uint64
+
+	err = s.FollowDAO.Db.WithContext(ctx).
+		Model(&models.UserFollow{}).
+		Where("follower_id = ? AND followee_id IN ? AND status = 1", myID, followerIDs).
+		Pluck("followee_id", &iFollowIDs).Error
+
+	if err == nil {
+		for _, id := range iFollowIDs {
+			iFollowMap[id] = true
+		}
+	}
+
+	// 4. 填充状态
+	for _, item := range list {
+		// 如果我也关注了这个粉丝
+		if iFollowMap[item.UserID] {
+			item.IsFollowing = true
+			item.IsMutual = true // 互相关注
+		} else {
+			item.IsFollowing = false
+			item.IsMutual = false
+		}
+
+		// 设置默认签名
+		if item.Signature == "" {
+			item.Signature = "这个人很懒，什么都没有留下.."
+		}
+	}
+
+	return list, nil
 }

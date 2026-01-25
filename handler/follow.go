@@ -151,25 +151,39 @@ func (f *Follow) GetFollowingCount(c *gin.Context) error {
 	return nil
 }
 
-// GetFollowingList 查询用户已关注的用户列表
+// GetFollowingList 统一的关注/粉丝列表接口
 func (f *Follow) GetFollowingList(c *gin.Context) error {
 	var req types.GetFollowingListRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
 	}
+
+	if req.Type != "following" && req.Type != "follower" {
+		return response.NewError(http.StatusBadRequest, "type 参数必须是 'following' 或 'follower'")
+	}
+
+	// 设置默认分页大小
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
-	follows, err := f.FollowService.GetMyFollowingListWithStatus(c.Request.Context(), uint64(c.GetInt("user_id")), req.Cursor, req.PageSize)
+
+	// ✅ 调用统一的 Service 方法
+	myID := uint64(c.GetInt("user_id"))
+	list, nextCursor, hasMore, err := f.FollowService.GetFollowList(
+		c.Request.Context(),
+		myID,
+		req.Type, // ✅ 传递 type 参数
+		req.Cursor,
+		req.PageSize,
+	)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-	var nextCursor int64 = 0
 
 	response.Success(c, types.GetFollowingFeedResponse{
-		Following:  follows,
-		NextCursor: nextCursor, // 下次请求带上这个值
-		HasMore:    len(follows) == req.PageSize,
+		Following:  list,
+		NextCursor: nextCursor, // ✅ 正确的 next_cursor
+		HasMore:    hasMore,    // ✅ 正确的 has_more
 	})
 	return nil
 }

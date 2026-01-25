@@ -113,11 +113,6 @@ type FollowingUser struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type GetFollowingListRequest struct {
-	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
-	PageSize int   `form:"pageSize"`
-}
-
 type GetFollowingListResponse struct {
 	List  []*FollowingUser `json:"list"`
 	Total int64            `json:"total"`
