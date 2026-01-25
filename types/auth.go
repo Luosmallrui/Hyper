@@ -71,6 +71,7 @@ type UserProfileResp struct {
 	Stats        UserStats     `json:"stats"`
 	AccessToken  string        `json:"access_token,omitempty"`
 	RefreshToken string        `json:"refresh_token,omitempty"`
+	IsFollowing  bool          `json:"is_following"`
 }
 
 type UserToken struct {
@@ -85,12 +86,17 @@ type UserBasicInfo struct {
 	AvatarURL   string `json:"avatar_url"` // 头像
 	VipLevel    string `json:"vip_level"`  // gold / silver / none
 	PhoneNumber string `json:"phone_number"`
+	Signature   string `json:"signature"`
+	Gender      int    `json:"gender"`
+	Location    string `json:"location,omitempty"`
+	IPAddress   string `json:"ip_location,omitempty"`
 }
 
 type UserStats struct {
 	Following int64 `json:"following"` // 23
 	Follower  int64 `json:"follower"`  // 115
 	Likes     int64 `json:"likes"`     // 25
+	Notes     int   `json:"notes"`
 }
 
 type BindPhoneRep struct {
