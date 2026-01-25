@@ -142,14 +142,17 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 		return nil, err
 	}
 	url := "https://cdn.hypercn.cn/" + objectKey
-	//tag := llm.GenNoteTag(url + "?x-oss-process=image/resize,w_100")
-	return &types.UploadImageResp{
+	//tag := llm.GenNoteTag(ctx, url+"?x-oss-process=image/resize,w_100")
+	resp := &types.UploadImageResp{
 		ImageID: imageID,
 		Url:     url,
 		Width:   cfg.Width,
 		Height:  cfg.Height,
-		//Tags:    tag,
-	}, nil
+	}
+	if resp.Tags == nil {
+		resp.Tags = make([]string, 0)
+	}
+	return resp, nil
 }
 
 // ListBuckets 列举当前账号下所有 Bucket

@@ -3,6 +3,7 @@ package llm
 import (
 	"Hyper/pkg/log"
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ func init() {
 		option.WithBaseURL("https://dashscope.aliyuncs.com/compatible-mode/v1"),
 	)
 }
-func GenNoteTag(ossURL string) []string {
+func GenNoteTag(ctx context.Context, ossURL string) []string {
 
 	// 初始化 Client
 	contentParts := []openai.ChatCompletionContentPartUnionParam{
@@ -39,7 +40,6 @@ func GenNoteTag(ossURL string) []string {
 			},
 		},
 	}
-	ctx := context.Background()
 	startTime := time.Now()
 	userMessage := openai.ChatCompletionUserMessageParam{
 		Content: openai.ChatCompletionUserMessageParamContentUnion{
@@ -47,11 +47,10 @@ func GenNoteTag(ossURL string) []string {
 		},
 	}
 	params := openai.ChatCompletionNewParams{
-		Model: "qwen3-vl-flash",
+		Model: "qwen3-vl-plus",
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			{OfUser: &userMessage},
 		},
-		MaxTokens: openai.Int(50),
 	}
 	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
@@ -73,4 +72,60 @@ func ParseTags(input string) []string {
 		tags = append(tags, cleanTag)
 	}
 	return tags
+}
+
+func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs []string) string {
+	channels := []string{
+		"滑板", "骑行", "派对", "纹身", "改装车", "露营",
+		"篮球", "足球", "飞盘", "潮鞋", "电子竞技", "健身", "艺术",
+	}
+	channelList := strings.Join(channels, "、")
+	promptText := fmt.Sprintf(
+		"你是一个内容分类专家。请结合提供的文字和图片，从以下列表中选择一个最贴切的频道返回。\n\n"+
+			"【标题】：%s\n"+
+			"【正文】：%s\n\n"+
+			"候选频道列表：%s\n"+
+			"要求：直接输出频道名称，不要解释，不要带标点。",
+		title, content, channelList,
+	)
+	contentParts := []openai.ChatCompletionContentPartUnionParam{
+		{
+			OfText: &openai.ChatCompletionContentPartTextParam{
+				Text: promptText,
+			},
+		},
+	}
+	for _, url := range ossURLs {
+		url = url + "?x-oss-process=image/resize,w_200"
+		contentParts = append(contentParts, openai.ChatCompletionContentPartUnionParam{
+			OfImageURL: &openai.ChatCompletionContentPartImageParam{
+				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
+					URL: url,
+				},
+			},
+		})
+	}
+	contentParts = append(contentParts, openai.ChatCompletionContentPartUnionParam{
+		OfText: &openai.ChatCompletionContentPartTextParam{},
+	})
+	startTime := time.Now()
+	userMessage := openai.ChatCompletionUserMessageParam{
+		Content: openai.ChatCompletionUserMessageParamContentUnion{
+			OfArrayOfContentParts: contentParts,
+		},
+	}
+	params := openai.ChatCompletionNewParams{
+		Model: "qwen3-vl-plus",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			{OfUser: &userMessage},
+		},
+	}
+	completion, err := client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		log.L.Error("failed to gen tag", zap.Error(err))
+		return ""
+	}
+	Content := completion.Choices[0].Message.Content
+	log.L.Info("gen tag", zap.String("tag", Content), zap.Duration("gen time", time.Since(startTime)))
+	return Content
 }
