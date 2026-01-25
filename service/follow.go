@@ -2,14 +2,16 @@ package service
 
 import (
 	"Hyper/dao"
+	"Hyper/models"
 	"Hyper/types"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"log"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 )
@@ -22,8 +24,9 @@ type IFollowService interface {
 	IsFollowing(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetFollowerCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingCount(ctx context.Context, userID uint64) (int64, error)
-	GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error)
+	GetFollowingList(ctx context.Context, userID uint64, limit int64, offset int) ([]*models.FollowingQueryResult, error)
 	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
+	GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error)
 }
 
 type FollowService struct {
@@ -176,10 +179,53 @@ func (s *FollowService) GetFollowingCount(ctx context.Context, userID uint64) (i
 	return int64(stats.FollowingCount), nil
 }
 
-func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
-	return s.FollowDAO.GetFollowingList(ctx, userID, limit, offset)
+func (s *FollowService) GetFollowingList(ctx context.Context, userID uint64, limit int64, offset int) ([]*models.FollowingQueryResult, error) {
+	return s.FollowDAO.GetFollowingFeed(ctx, userID, limit, offset)
 }
 
+func (s *FollowService) GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
+	// 1. 获取我关注的人（DAO 层逻辑不变）
+	list, err := s.FollowDAO.GetFollowingFeed(ctx, myID, cursor, limit)
+	if err != nil || len(list) == 0 {
+		return list, err
+	}
+
+	// 2. 提取列表中的用户 ID
+	targetIDs := make([]uint64, 0, len(list))
+	for _, item := range list {
+		targetIDs = append(targetIDs, item.UserID)
+	}
+
+	// 3. 只需要查一步：这 20 个人里，谁关注了我？
+	// SQL: SELECT follower_id FROM user_follow WHERE follower_id IN (...) AND followee_id = myID
+	followMeMap := make(map[uint64]bool)
+	var followMeIDs []uint64
+
+	err = s.FollowDAO.Db.WithContext(ctx).
+		Model(&models.UserFollow{}).
+		Where("follower_id IN ? AND followee_id = ? AND status = 1", targetIDs, myID).
+		Pluck("follower_id", &followMeIDs).Error
+
+	if err == nil {
+		for _, id := range followMeIDs {
+			followMeMap[id] = true
+		}
+	}
+
+	// 4. 填充状态
+	for _, item := range list {
+		// 因为是“我的关注”列表，我肯定关注了他们
+		item.IsFollowing = true
+
+		// 如果他们也关注了我，那就是互关
+		if followMeMap[item.UserID] {
+			item.IsMutual = true
+		}
+		item.Signature = "这个人很懒，什么都没有留下.."
+	}
+
+	return list, nil
+}
 func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error) {
 	if followerID == 0 || followerID == followeeID {
 		return false, nil

@@ -83,6 +83,29 @@ func (d *UserFollowDAO) GetFollowingCount(ctx context.Context, userID uint64) (i
 	return count, err
 }
 
+func (d *UserFollowDAO) GetFollowingFeed(ctx context.Context, userID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
+	var follows []*models.FollowingQueryResult
+
+	db := d.Db.WithContext(ctx).
+		Table("user_follow uf").
+		Select("u.id as user_id, u.nickname, u.avatar, uf.created_at as follow_time").
+		Joins("LEFT JOIN users u ON uf.followee_id = u.id").
+		Where("uf.follower_id = ? AND uf.status = 1", userID)
+
+	if cursor > 0 {
+		// 纳秒转 time.Time
+		cursorTime := time.Unix(0, cursor)
+		db = db.Where("uf.created_at < ?", cursorTime)
+	}
+
+	// 执行查询，GORM 会自动根据 tag 映射到结构体
+	err := db.Order("uf.created_at DESC").
+		Limit(limit).
+		Scan(&follows).Error // 注意：Scan 或 Find 都可以，Find 更语义化
+
+	return follows, err
+}
+
 // GetFollowingList 获取用户关注的用户列表（按关注时间倒序）
 func (d *UserFollowDAO) GetFollowingList(ctx context.Context, userID uint64, limit, offset int) ([]map[string]interface{}, int64, error) {
 	var follows []map[string]interface{}

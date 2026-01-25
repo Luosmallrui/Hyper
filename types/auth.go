@@ -114,8 +114,8 @@ type FollowingUser struct {
 }
 
 type GetFollowingListRequest struct {
-	Page     int `form:"page" binding:"omitempty,min=1"`
-	PageSize int `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
+	PageSize int   `form:"pageSize"`
 }
 
 type GetFollowingListResponse struct {

@@ -16,3 +16,13 @@ type UserFollow struct {
 func (UserFollow) TableName() string {
 	return "user_follow"
 }
+
+type FollowingQueryResult struct {
+	UserID      uint64    `gorm:"column:user_id" json:"user_id"`
+	Nickname    string    `gorm:"column:nickname" json:"nickname"`
+	Avatar      string    `gorm:"column:avatar" json:"avatar"`
+	FollowTime  time.Time `gorm:"column:follow_time" json:"follow_time"`
+	IsFollowing bool      `gorm:"-" json:"is_following"` // 我是否关注了他
+	IsMutual    bool      `gorm:"-" json:"is_mutual"`    // 是否互相关注
+	Signature   string    `gorm:"-" json:"signature"`
+}
