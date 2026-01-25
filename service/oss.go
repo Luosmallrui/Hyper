@@ -4,7 +4,6 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/models"
-	"Hyper/pkg/llm"
 	"Hyper/pkg/snowflake"
 	"Hyper/types"
 	"context"
@@ -143,13 +142,13 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 		return nil, err
 	}
 	url := "https://cdn.hypercn.cn/" + objectKey
-	tag := llm.GenNoteTag(url + "?x-oss-process=image/resize,w_100")
+	//tag := llm.GenNoteTag(url + "?x-oss-process=image/resize,w_100")
 	return &types.UploadImageResp{
 		ImageID: imageID,
 		Url:     url,
 		Width:   cfg.Width,
 		Height:  cfg.Height,
-		Tags:    tag,
+		//Tags:    tag,
 	}, nil
 }
 
