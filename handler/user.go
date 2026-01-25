@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -33,16 +34,57 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.POST("/info", context.Wrap(u.UpdateUserInfo))
 	g.POST("/avatar", context.Wrap(u.UploadAvatar))
 	g.GET("/info", context.Wrap(u.GetUserInfo))
+	g.GET("/note", context.Wrap(u.GetUserNote))
 
 }
 
-func (u *User) GetUserInfo(c *gin.Context) error {
-	userID, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(http.StatusUnauthorized, "未登录")
-	}
+type NoteDTO struct {
+	NoteID    string `json:"note_id"`
+	Cover     string `json:"cover"`
+	Title     string `json:"title"`
+	LikeCount int    `json:"like_count"`
+}
 
-	userInfo, err := u.UserService.GetUserInfo(c.Request.Context(), int(userID))
+type NoteListResp struct {
+	List []NoteDTO `json:"list"`
+}
+
+func (u *User) GetUserNote(c *gin.Context) error {
+	resp := NoteListResp{}
+	resp.List = make([]NoteDTO, 0)
+	resp.List = append(resp.List, NoteDTO{
+		NoteID:    "9001",
+		Cover:     "https://cdn.hypercn.cn/" + "note/2026/01/25/2015344441170071552.jpg",
+		Title:     "春日穿搭分享",
+		LikeCount: 5,
+	})
+	resp.List = append(resp.List, NoteDTO{
+		NoteID:    "9001",
+		Cover:     "https://cdn.hypercn.cn/" + "note/2026/01/25/2015344441170071552.jpg",
+		Title:     "成都美食探店",
+		LikeCount: 51,
+	})
+	response.Success(c, resp)
+	return nil
+}
+
+func (u *User) GetUserInfo(c *gin.Context) error {
+	var userID int
+	userIdByQuery := c.Query("user_id")
+	if userIdByQuery != "" {
+		uid, err := strconv.Atoi(userIdByQuery)
+		if err != nil {
+			return response.NewError(http.StatusBadRequest, "user_id 非法")
+		}
+		userID = uid
+	} else {
+		uid, err := context.GetUserID(c)
+		if err != nil {
+			return response.NewError(http.StatusUnauthorized, "未登录")
+		}
+		userID = int(uid)
+	}
+	userInfo, err := u.UserService.GetUserInfo(c.Request.Context(), userID)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "更新失败: "+err.Error())
 	}
@@ -80,6 +122,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 			Follower:  follower,
 			Likes:     totalLikes + totalCollects,
 		},
+		IsFollowing: true,
 	}
 	response.Success(c, rep)
 	return nil

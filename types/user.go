@@ -29,3 +29,7 @@ type UserProfile struct {
 	Avatar   string `json:"avatar"`
 	Nickname string `json:"nickname"`
 }
+
+type GetUserInfoRequest struct {
+	UserID string `json:"user_id"`
+}
