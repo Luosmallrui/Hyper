@@ -12,19 +12,22 @@ import (
 	"go.uber.org/zap"
 )
 
-func GenNoteTag(ossURL string) []string {
+var client openai.Client
 
-	// 初始化 Client
-	client := openai.NewClient(
+func init() {
+	client = openai.NewClient(
 		option.WithAPIKey("sk-798f3a22651446b1b4c441675dea02eb"),
 		option.WithBaseURL("https://dashscope.aliyuncs.com/compatible-mode/v1"),
 	)
+}
+func GenNoteTag(ossURL string) []string {
 
+	// 初始化 Client
 	contentParts := []openai.ChatCompletionContentPartUnionParam{
 		{
 			// 第一个元素：纯文本
 			OfText: &openai.ChatCompletionContentPartTextParam{
-				Text: "作为小红书专家，直接输出5个话题标签，#开头，无解释",
+				Text: "作为小红书专家，只输出5个小红书话题标签，用#开头，用空格分隔，不要任何其他内容",
 			},
 		},
 		{
