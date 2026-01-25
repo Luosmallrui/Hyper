@@ -142,3 +142,29 @@ func (d *UserFollowDAO) CheckExists(ctx context.Context, followerID, followeeID 
 		Count(&count).Error
 	return count > 0, err
 }
+
+func (d *UserFollowDAO) GetFollowerFeed(ctx context.Context, userID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
+	var results []*models.FollowingQueryResult
+
+	query := d.Db.WithContext(ctx).
+		Table("user_follow AS uf").
+		Select(`
+            uf.follower_id AS user_id,
+            u.nickname,
+            u.avatar AS avatar,
+            u.signature,
+            uf.updated_at
+        `).
+		Joins("LEFT JOIN users AS u ON uf.follower_id = u.id").
+		Where("uf.followee_id = ? AND uf.status = 1", userID).
+		Order("uf.updated_at DESC")
+
+	// 如果有 cursor，则从该时间点开始查询
+	if cursor > 0 {
+		cursorTime := time.Unix(cursor, 0)
+		query = query.Where("uf.updated_at < ?", cursorTime)
+	}
+
+	err := query.Limit(limit).Find(&results).Error
+	return results, err
+}
