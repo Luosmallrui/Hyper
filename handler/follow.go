@@ -153,17 +153,14 @@ func (f *Follow) GetFollowingList(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "type 参数必须是 'following' 或 'follower'")
 	}
 
-	// 设置默认分页大小
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
-
-	// ✅ 调用统一的 Service 方法
 	myID := uint64(c.GetInt("user_id"))
 	list, nextCursor, hasMore, err := f.FollowService.GetFollowList(
 		c.Request.Context(),
 		myID,
-		req.Type, // ✅ 传递 type 参数
+		req.Type,
 		req.Cursor,
 		req.PageSize,
 	)
@@ -173,8 +170,8 @@ func (f *Follow) GetFollowingList(c *gin.Context) error {
 
 	response.Success(c, types.GetFollowingFeedResponse{
 		Following:  list,
-		NextCursor: nextCursor, // ✅ 正确的 next_cursor
-		HasMore:    hasMore,    // ✅ 正确的 has_more
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
 	})
 	return nil
 }
