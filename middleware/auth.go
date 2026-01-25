@@ -21,7 +21,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			return
 		}
 		if authHeader == "Bearer debug-mode" {
-			c.Set("user_id", uint64(1))
+			c.Set("user_id", 1)
 			c.Set("openid", "debug_openid")
 			c.Next()
 			return
