@@ -9,6 +9,7 @@ import (
 	"Hyper/types"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/gin-gonic/gin"
@@ -23,8 +24,8 @@ type Follow struct {
 func (f *Follow) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(f.Config.Jwt.Secret))
 	g := r.Group("/v1/follow")
-	g.POST("/:user_id/follow", authorize, context.Wrap(f.FollowUser))
-	g.DELETE("/:user_id/follow", authorize, context.Wrap(f.UnfollowUser))
+	g.POST("/follow", authorize, context.Wrap(f.FollowUser))
+	g.DELETE("/unfollow", authorize, context.Wrap(f.UnfollowUser))
 	g.GET("/:user_id/follow", authorize, context.Wrap(f.GetFollowStatus))
 	g.GET("/:user_id/followers/count", context.Wrap(f.GetFollowerCount))
 	g.GET("/:user_id/following/count", context.Wrap(f.GetFollowingCount))
@@ -33,48 +34,38 @@ func (f *Follow) RegisterRouter(r gin.IRouter) {
 
 // FollowUser 关注用户
 func (f *Follow) FollowUser(c *gin.Context) error {
-	userID, err := context.GetUserID(c)
+
+	var req types.FollowerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	uid, err := strconv.Atoi(req.UserId)
 	if err != nil {
-		return response.NewError(http.StatusUnauthorized, "未登录")
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	targetUserIDParam := c.Param("user_id")
-	if targetUserIDParam == "" {
-		return response.NewError(http.StatusBadRequest, "缺少 user_id")
-	}
-	var targetUserID uint64
-	_, err = fmt.Sscanf(targetUserIDParam, "%d", &targetUserID)
-	if err != nil {
-		return response.NewError(http.StatusBadRequest, "user_id 格式错误")
-	}
-
-	err = f.FollowService.Follow(c.Request.Context(), uint64(userID), targetUserID)
+	selfID := uint64(c.GetInt("user_id"))
+	err = f.FollowService.Follow(c.Request.Context(), selfID, uint64(uid))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
 	response.Success(c, gin.H{"followed": true})
 	return nil
 }
 
 // UnfollowUser 取消关注用户
 func (f *Follow) UnfollowUser(c *gin.Context) error {
-	userID, err := context.GetUserID(c)
+	var req types.FollowerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	uid, err := strconv.Atoi(req.UserId)
 	if err != nil {
-		return response.NewError(http.StatusUnauthorized, "未登录")
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	targetUserIDParam := c.Param("user_id")
-	if targetUserIDParam == "" {
-		return response.NewError(http.StatusBadRequest, "缺少 user_id")
-	}
-	var targetUserID uint64
-	_, err = fmt.Sscanf(targetUserIDParam, "%d", &targetUserID)
-	if err != nil {
-		return response.NewError(http.StatusBadRequest, "user_id 格式错误")
-	}
-
-	err = f.FollowService.Unfollow(c.Request.Context(), uint64(userID), targetUserID)
+	selfID := uint64(c.GetInt("user_id"))
+	err = f.FollowService.Unfollow(c.Request.Context(), selfID, uint64(uid))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
