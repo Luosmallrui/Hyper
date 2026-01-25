@@ -22,7 +22,7 @@ type Follow struct {
 
 func (f *Follow) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(f.Config.Jwt.Secret))
-	g := r.Group("/v1/follwer")
+	g := r.Group("/v1/follow")
 	g.POST("/:user_id/follow", authorize, context.Wrap(f.FollowUser))
 	g.DELETE("/:user_id/follow", authorize, context.Wrap(f.UnfollowUser))
 	g.GET("/:user_id/follow", authorize, context.Wrap(f.GetFollowStatus))
