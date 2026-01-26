@@ -225,27 +225,15 @@ func (u *Auth) UpdatePhone(c *gin.Context) error {
 }
 
 func (u *Auth) UpdateUserProfile(c *gin.Context) error {
-
 	var req types.UpdateUserProfileRequest
-
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
-	//测试用
-	var userID int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userID = 6 // 直接赋值 int 型
-		c.Set("user_id", userID)
-	} else {
-		val, exists := c.Get("user_id")
-		if !exists {
-			return response.NewError(http.StatusUnauthorized, "未登录或登录已过期")
-		}
-		userID, _ = val.(int)
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-
-	err := u.UserService.UpdateUserProfile(c.Request.Context(), userID, &req)
+	err = u.UserService.UpdateUserProfile(c.Request.Context(), int(userId), &req)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
