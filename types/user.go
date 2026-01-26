@@ -29,3 +29,11 @@ type UserProfile struct {
 	Avatar   string `json:"avatar"`
 	Nickname string `json:"nickname"`
 }
+
+type UpdateUserProfileRequest struct {
+	Username *string `json:"username" binding:"omitempty,min=2,max=20"`
+	Avatar   *string `json:"avatar" binding:"omitempty,url"`
+	Motto    *string `json:"motto" binding:"omitempty,max=100"`
+	Email    *string `json:"email" binding:"omitempty,email"`
+	Birthday *string `json:"birthday" binding:"omitempty,datetime=2006-01-02"`
+}
