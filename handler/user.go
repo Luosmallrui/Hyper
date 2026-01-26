@@ -8,6 +8,7 @@ import (
 	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,7 @@ type User struct {
 	FollowService  service.FollowService
 	LikeService    service.LikeService
 	CollectService service.CollectService
+	NoteService    service.INoteService
 }
 
 func (u *User) RegisterRouter(r gin.IRouter) {
@@ -35,6 +37,7 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.POST("/avatar", context.Wrap(u.UploadAvatar))
 	g.GET("/info", context.Wrap(u.GetUserInfo))
 	g.GET("/note", context.Wrap(u.GetUserNote))
+	g.GET("/my-notes", context.Wrap(u.GetMyNotes))
 
 }
 
@@ -188,5 +191,115 @@ func (u *User) UploadAvatar(c *gin.Context) error {
 	}
 	fullUrl := fmt.Sprintf("https://cdn.hypercn.cn/%s", objectKey)
 	response.Success(c, types.UploadAvatarRes{Url: fullUrl})
+	return nil
+}
+
+//// GetMyLikes 获取我赞过的笔记
+//func (u *User) GetMyLikes(c *gin.Context) error {
+//	userID := c.GetUint64("user_id")
+//
+//	var req types.FeedRequest
+//	if err := c.ShouldBindQuery(&req); err != nil {
+//		return response.NewError(http.StatusBadRequest, "参数错误")
+//	}
+//
+//	if req.PageSize == 0 {
+//		req.PageSize = 10
+//	}
+//
+//	notes, nextCursor, hasMore, err := u.LikeService.GetMyLikesFeed(
+//		c.Request.Context(),
+//		userID,
+//		req.Cursor,
+//		req.PageSize,
+//	)
+//	if err != nil {
+//		return response.NewError(http.StatusInternalServerError, err.Error())
+//	}
+//
+//	response.Success(c, types.FeedResponse{
+//		List:       notes,
+//		NextCursor: nextCursor,
+//		HasMore:    hasMore,
+//	})
+//	return nil
+//}
+
+//// GetMyCollections 获取我的收藏
+//func (u *User) GetMyCollections(c *gin.Context) error {
+//	userID := c.GetUint64("user_id")
+//
+//	var req types.FeedRequest
+//	if err := c.ShouldBindQuery(&req); err != nil {
+//		return response.NewError(http.StatusBadRequest, "参数错误")
+//	}
+//
+//	if req.PageSize == 0 {
+//		req.PageSize = 10
+//	}
+//
+//	notes, nextCursor, hasMore, err := u.CollectionService.GetMyCollectionsFeed(
+//		c.Request.Context(),
+//		userID,
+//		req.Cursor,
+//		req.PageSize,
+//	)
+//	if err != nil {
+//		return response.NewError(http.StatusInternalServerError, err.Error())
+//	}
+//
+//	response.Success(c, types.FeedResponse{
+//		List:       notes,
+//		NextCursor: nextCursor,
+//		HasMore:    hasMore,
+//	})
+//	return nil
+//}
+
+// GetMyNotes 获取我的笔记
+func (u *User) GetMyNotes(c *gin.Context) error {
+	userID := c.GetInt("user_id")
+	var req types.FeedRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 10
+	}
+	notes, nextCursor, hasMore, err := u.NoteService.GetMyNotesFeed(
+		c.Request.Context(),
+		userID,
+		req.Cursor,
+		req.PageSize,
+	)
+	respNotes := make([]*types.Note, len(notes))
+	for i, note := range notes {
+		respNotes[i] = &types.Note{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			TopicIDs:    make([]int64, 0),
+			Location:    types.Location{},
+			MediaData:   make([]types.NoteMedia, 0),
+			Type:        note.Type,
+			Status:      note.Status,
+			VisibleConf: note.VisibleConf,
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
+		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &respNotes[i].TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &respNotes[i].Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &respNotes[i].MediaData)
+	}
+
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, types.FeedResponse{
+		List:       respNotes,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	})
 	return nil
 }
