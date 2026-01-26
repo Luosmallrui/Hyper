@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"Hyper/pkg/context"
 	"bytes"
 	"fmt"
 	"math/rand"
 	"runtime"
+	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/speps/go-hashids/v2"
 )
 
@@ -35,4 +38,12 @@ func GenHashID(salt string, id int) string {
 	h, _ := hashids.NewWithData(hd)
 	e, _ := h.Encode([]int{id})
 	return e
+}
+
+func GetQueryOrTokenUserID(c *gin.Context) (int, error) {
+	if v := c.Query("user_id"); v != "" {
+		return strconv.Atoi(v)
+	}
+	uid, err := context.GetUserID(c)
+	return int(uid), err
 }

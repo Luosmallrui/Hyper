@@ -81,15 +81,16 @@ type UserToken struct {
 	RefreshExpire int64  `json:"refresh_expire"`
 }
 type UserBasicInfo struct {
-	UserID      string `json:"user_id"`    // Snowflake ID（对外）
-	Nickname    string `json:"nickname"`   // 邪修的马路路
-	AvatarURL   string `json:"avatar_url"` // 头像
-	VipLevel    string `json:"vip_level"`  // gold / silver / none
-	PhoneNumber string `json:"phone_number"`
-	Signature   string `json:"signature"`
-	Gender      int    `json:"gender"`
-	Location    string `json:"location,omitempty"`
-	IPAddress   string `json:"ip_location,omitempty"`
+	UserID      string    `json:"user_id"`    // Snowflake ID（对外）
+	Nickname    string    `json:"nickname"`   // 邪修的马路路
+	AvatarURL   string    `json:"avatar_url"` // 头像
+	VipLevel    string    `json:"vip_level"`  // gold / silver / none
+	PhoneNumber string    `json:"phone_number"`
+	Signature   string    `json:"signature"`
+	Gender      int       `json:"gender"`
+	Location    string    `json:"location,omitempty"`
+	IPAddress   string    `json:"ip_location,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type UserStats struct {

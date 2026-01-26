@@ -72,45 +72,47 @@ func (u *User) GetUserNote(c *gin.Context) error {
 }
 
 func (u *User) GetUserInfo(c *gin.Context) error {
-	var userID int
-	userIdByQuery := c.Query("user_id")
-	if userIdByQuery != "" {
-		uid, err := strconv.Atoi(userIdByQuery)
+	ctx := c.Request.Context()
+
+	// 1. 获取当前登录用户ID
+	loginUID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "获取用户身份失败")
+	}
+
+	//  确定要查询的用户ID（默认自己）
+	queryID := int(loginUID)
+	isQueryOther := false
+
+	if userIDStr := c.Query("user_id"); userIDStr != "" {
+		parsedID, err := strconv.Atoi(userIDStr)
 		if err != nil {
 			return response.NewError(http.StatusBadRequest, "user_id 非法")
 		}
-		userID = uid
-	} else {
-		uid, err := context.GetUserID(c)
-		if err != nil {
-			return response.NewError(http.StatusUnauthorized, "未登录")
-		}
-		userID = int(uid)
-	}
-	userInfo, err := u.UserService.GetUserInfo(c.Request.Context(), userID)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "更新失败: "+err.Error())
-	}
-	following, err := u.FollowService.GetFollowingCount(c.Request.Context(), uint64(userInfo.Id))
-	if err != nil {
-		following = 0
+		queryID = parsedID
+		isQueryOther = true
 	}
 
-	// 获取粉丝数
-	follower, err := u.FollowService.GetFollowerCount(c.Request.Context(), uint64(userInfo.Id))
+	//  获取用户基础信息
+	userInfo, err := u.UserService.GetUserInfo(ctx, queryID)
 	if err != nil {
-		follower = 0
+		return response.NewError(http.StatusInternalServerError, "获取用户信息失败: "+err.Error())
 	}
 
-	// 获取用户帖子的总点赞数 + 总收藏数
-	totalLikes, err := u.LikeService.GetUserTotalLikes(c.Request.Context(), uint64(userInfo.Id))
-	if err != nil {
-		totalLikes = 0
-	}
+	//  获取统计数据（失败则降级为 0）
+	following, _ := u.FollowService.GetFollowingCount(ctx, uint64(userInfo.Id))
+	follower, _ := u.FollowService.GetFollowerCount(ctx, uint64(userInfo.Id))
+	totalLikes, _ := u.LikeService.GetUserTotalLikes(ctx, uint64(userInfo.Id))
+	totalCollects, _ := u.CollectService.GetUserTotalCollects(ctx, uint64(userInfo.Id))
 
-	totalCollects, err := u.CollectService.GetUserTotalCollects(c.Request.Context(), uint64(userInfo.Id))
-	if err != nil {
-		totalCollects = 0
+	// 是否关注
+	isFollowing := false
+	if isQueryOther {
+		isFollowing, _ = u.FollowService.IsFollowing(
+			ctx,
+			uint64(loginUID),
+			uint64(queryID),
+		)
 	}
 
 	rep := types.UserProfileResp{
@@ -119,17 +121,20 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 			Nickname:    userInfo.Nickname,
 			PhoneNumber: userInfo.Mobile,
 			AvatarURL:   userInfo.Avatar,
+			CreatedAt:   userInfo.CreatedAt,
 		},
 		Stats: types.UserStats{
 			Following: following,
 			Follower:  follower,
 			Likes:     totalLikes + totalCollects,
 		},
-		IsFollowing: true,
+		IsFollowing: isFollowing,
 	}
+
 	response.Success(c, rep)
 	return nil
 }
+
 func (u *User) UpdateUserInfo(c *gin.Context) error {
 	userID, err := context.GetUserID(c) // 这里的 userID 是 int
 	if err != nil {
@@ -193,68 +198,6 @@ func (u *User) UploadAvatar(c *gin.Context) error {
 	response.Success(c, types.UploadAvatarRes{Url: fullUrl})
 	return nil
 }
-
-//// GetMyLikes 获取我赞过的笔记
-//func (u *User) GetMyLikes(c *gin.Context) error {
-//	userID := c.GetUint64("user_id")
-//
-//	var req types.FeedRequest
-//	if err := c.ShouldBindQuery(&req); err != nil {
-//		return response.NewError(http.StatusBadRequest, "参数错误")
-//	}
-//
-//	if req.PageSize == 0 {
-//		req.PageSize = 10
-//	}
-//
-//	notes, nextCursor, hasMore, err := u.LikeService.GetMyLikesFeed(
-//		c.Request.Context(),
-//		userID,
-//		req.Cursor,
-//		req.PageSize,
-//	)
-//	if err != nil {
-//		return response.NewError(http.StatusInternalServerError, err.Error())
-//	}
-//
-//	response.Success(c, types.FeedResponse{
-//		List:       notes,
-//		NextCursor: nextCursor,
-//		HasMore:    hasMore,
-//	})
-//	return nil
-//}
-
-//// GetMyCollections 获取我的收藏
-//func (u *User) GetMyCollections(c *gin.Context) error {
-//	userID := c.GetUint64("user_id")
-//
-//	var req types.FeedRequest
-//	if err := c.ShouldBindQuery(&req); err != nil {
-//		return response.NewError(http.StatusBadRequest, "参数错误")
-//	}
-//
-//	if req.PageSize == 0 {
-//		req.PageSize = 10
-//	}
-//
-//	notes, nextCursor, hasMore, err := u.CollectionService.GetMyCollectionsFeed(
-//		c.Request.Context(),
-//		userID,
-//		req.Cursor,
-//		req.PageSize,
-//	)
-//	if err != nil {
-//		return response.NewError(http.StatusInternalServerError, err.Error())
-//	}
-//
-//	response.Success(c, types.FeedResponse{
-//		List:       notes,
-//		NextCursor: nextCursor,
-//		HasMore:    hasMore,
-//	})
-//	return nil
-//}
 
 // GetMyNotes 获取我的笔记
 func (u *User) GetMyNotes(c *gin.Context) error {
