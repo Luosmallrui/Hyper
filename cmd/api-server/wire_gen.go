@@ -184,15 +184,25 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
+	relation := cache.NewRelation(redisClient)
+	groupMember := dao.NewGroupMember(db, relation)
+	group := dao.NewGroup(db)
 	groupService := &service.GroupService{
-		DB: db,
+		DB:             db,
+		GroupMemberDAO: groupMember,
+		GroupDAO:       group,
+		Relation:       relation,
 	}
 	groupHandler := &handler.GroupHandler{
 		Config:       cfg,
 		GroupService: groupService,
 	}
 	groupMemberService := &service.GroupMemberService{
-		DB: db,
+		DB:              db,
+		Redis:           redisClient,
+		GroupMemberRepo: groupMember,
+		GroupRepo:       group,
+		Relation:        relation,
 	}
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,

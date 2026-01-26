@@ -1,25 +1,31 @@
 package service
 
 import (
+	"Hyper/dao"
+	"Hyper/dao/cache"
 	"Hyper/models"
 	"Hyper/types"
 	"context"
 	"errors"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
+
+var _ IGroupMemberService = (*GroupMemberService)(nil)
 
 type IGroupMemberService interface {
 	InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error)
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
-	GetGroupId(ctx context.Context, GroupID int) (*models.Group, error)
 }
 
 type GroupMemberService struct {
-	DB *gorm.DB
-	//Redis           *redis.Client
-	//GroupMemberRepo *dao.GroupMember
+	DB              *gorm.DB
+	Redis           *redis.Client
+	GroupMemberRepo *dao.GroupMember
+	GroupRepo       *dao.Group
+	Relation        *cache.Relation
 }
 
 func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
@@ -30,152 +36,143 @@ func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
 	}
 }
 
-func (s *GroupMemberService) GetGroupId(ctx context.Context, GroupID int) (*models.Group, error) {
-	var group models.Group
-	if err := s.DB.WithContext(ctx).Where("id = ?", GroupID).First(&group).Error; err != nil {
-		return nil, errors.New("获取群消息失败: " + err.Error())
-	}
-	return &group, nil
-}
-
-// 邀请成员,ctx,群ID,被邀请用户ID列表,邀请者用户ID（默认邀请就进来，不需要审批）（需要改逻辑）
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
-
-	//1、群存在且邀请者在群内且未退出（群成员都可以邀请人）
-	var member models.GroupMember
+	var operator models.GroupMember
 	if err := s.DB.WithContext(ctx).
-		Where("group_id = ? AND user_id = ? AND is_quit = 0", groupId, userId).
-		First(&member).
-		Error; err != nil {
-		return nil, errors.New("邀请者不在群内或已退出")
+		Where("group_id = ? AND user_id = ? AND is_quit = 0 AND role IN (1,2)", groupId, userId).
+		First(&operator).Error; err != nil {
+		return nil, errors.New("操作者不在群内或无权限邀请")
 	}
-	//2、群信息
-	group, err := s.GetGroupId(ctx, groupId)
+
+	_, err := s.GroupRepo.GetGroup(ctx, groupId)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("群不存在")
 	}
-	//3、群是否满了
-	if group.MemberCount+len(InvitedUsersIds) > group.MaxMembers {
-		return nil, errors.New("群成员已满，无法邀请更多成员")
+
+	var existingMembers []models.GroupMember
+	s.DB.WithContext(ctx).
+		Where("group_id = ? AND user_id IN ?", groupId, InvitedUsersIds).
+		Find(&existingMembers)
+
+	memberMap := make(map[int]models.GroupMember)
+	for _, m := range existingMembers {
+		memberMap[m.UserId] = m
 	}
-	//4、邀请成员入群
+
 	resp := &types.InviteMemberResponse{
 		FailedUserIds: []int{},
 	}
-	//去重
-	uniqueUserIds := make(map[int]bool)
-	for _, uid := range InvitedUsersIds {
-		uniqueUserIds[uid] = true
-	}
-	//邀请成员入群
-	for newUserId := range uniqueUserIds {
-		//不能邀请自己
-		if newUserId == userId {
-			resp.FailedCount++
-			resp.FailedUserIds = append(resp.FailedUserIds, newUserId)
-			continue
-		}
+	actualSuccessIds := make([]int, 0)
 
-		var gm models.GroupMember
-		err := s.DB.WithContext(ctx).
-			Where("group_id = ? AND user_id = ?", groupId, newUserId).
-			First(&gm).Error
-
-		if err == nil {
-			// 已存在记录：判断是否退群
-			if gm.IsQuit == 0 {
-				// 未退群：已经是成员
-				resp.FailedCount++
-				resp.FailedUserIds = append(resp.FailedUserIds, newUserId)
+	// 3. 开启事务
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, invUid := range InvitedUsersIds {
+			if invUid == userId {
 				continue
-			}
+			} // 不能邀请自己
 
-			// 已退群：恢复入群
-			if err := s.DB.WithContext(ctx).
-				Model(&models.GroupMember{}).
-				Where("group_id = ? AND user_id = ?", groupId, newUserId).
-				Updates(map[string]interface{}{
-					"is_quit":   0,
-					"is_mute":   0,
-					"join_time": time.Now(),
-				}).Error; err != nil {
-				resp.FailedCount++
-				resp.FailedUserIds = append(resp.FailedUserIds, newUserId)
-				continue
+			if gm, ok := memberMap[invUid]; ok {
+				if gm.IsQuit == 0 {
+					resp.FailedCount++
+					resp.FailedUserIds = append(resp.FailedUserIds, invUid)
+					continue
+				}
+				// 情况 A：已退群，执行恢复
+				if err := tx.Model(&models.GroupMember{}).
+					Where("id = ?", gm.Id).
+					Updates(map[string]interface{}{
+						"is_quit":   0,
+						"is_mute":   0,
+						"join_time": time.Now(),
+					}).Error; err != nil {
+					return err
+				}
+			} else {
+				// 情况 B：全新成员，执行创建
+				newmember := models.GroupMember{
+					GroupId:   groupId,
+					UserId:    invUid,
+					Role:      3,
+					IsQuit:    0,
+					IsMute:    0,
+					JoinTime:  time.Now(),
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				if err := tx.Create(&newmember).Error; err != nil {
+					return err
+				}
 			}
-
 			resp.SuccessCount++
-			continue
+			actualSuccessIds = append(actualSuccessIds, invUid)
 		}
+		if resp.SuccessCount > 0 {
+			result := tx.Model(&models.Group{}).
+				Where("id = ? AND member_count + ? <= max_members", groupId, resp.SuccessCount).
+				Update("member_count", gorm.Expr("member_count + ?", resp.SuccessCount))
 
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("查询群成员失败: " + err.Error())
+			if result.RowsAffected == 0 {
+				return errors.New("群人数已达上限，邀请失败")
+			}
 		}
+		return nil
+	})
 
-		// 不存在记录：创建新成员
-		groupMember := &models.GroupMember{
-			GroupId:   groupId,
-			UserId:    newUserId,
-			Role:      3,
-			IsQuit:    0,
-			IsMute:    0,
-			JoinTime:  time.Now(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		if err := s.DB.WithContext(ctx).Create(groupMember).Error; err != nil {
-			resp.FailedCount++
-			resp.FailedUserIds = append(resp.FailedUserIds, newUserId)
-			continue
-		}
-
-		resp.SuccessCount++
+	if err != nil {
+		return nil, err
 	}
-	if resp.SuccessCount > 0 {
-		if err := s.DB.WithContext(ctx).
-			Model(&models.Group{}).
-			Where("id = ?", groupId).
-			Update("member_count", gorm.Expr("member_count + ?", resp.SuccessCount)).Error; err != nil {
-			return nil, errors.New("更新群成员数量失败: " + err.Error())
-		}
-	}
+
 	return resp, nil
 }
 
 // 踢出成员
-func (s *GroupMemberService) KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error {
-	//1、群存在且操作者在群内且未退出且是管理员或群主
-	var member models.GroupMember
+func (s *GroupMemberService) KickMember(ctx context.Context, GroupId int, KickedUserId int, userId int) error {
+	var members []models.GroupMember
 	if err := s.DB.WithContext(ctx).
-		Where("group_id = ? AND user_id = ? AND is_quit = 0 AND role IN (1,2)", GroupId, userId).
-		First(&member).
-		Error; err != nil {
-		return errors.New("操作者不在群内或无权限")
+		Where("group_id = ? AND user_id IN ?", GroupId, []int{KickedUserId, userId}).
+		Find(&members).Error; err != nil {
+		return errors.New("查询成员失败: " + err.Error())
 	}
 
-	//2、被踢成员在群内且未退出
-	var kickedMember models.GroupMember
-	if err := s.DB.WithContext(ctx).
-		Where("group_id = ? AND user_id = ? AND is_quit = 0", GroupId, KickedUserIds).
-		First(&kickedMember).Error; err != nil {
-		return errors.New("被踢成员不在群内或已退出")
+	var operator, target *models.GroupMember
+	for i := range members {
+		if members[i].UserId == userId {
+			operator = &members[i]
+		}
+		if members[i].UserId == KickedUserId {
+			target = &members[i]
+		}
 	}
 
-	//3、执行踢出操作
-	if err := s.DB.WithContext(ctx).
-		Model(&models.GroupMember{}).
-		Where("group_id = ? AND user_id = ?", GroupId, KickedUserIds).
-		Update("is_quit", 1).Error; err != nil {
-		return errors.New("踢出成员失败: " + err.Error())
+	if operator == nil || operator.IsQuit == 1 || operator.Role > 2 {
+		return errors.New("操作者不在群内或无权限踢出成员")
 	}
-
-	//4、更新群成员数量
-	if err := s.DB.WithContext(ctx).
-		Model(&models.Group{}).
-		Where("id = ?", GroupId).
-		Update("member_count", gorm.Expr("member_count - ?", 1)).Error; err != nil {
-		return errors.New("更新群成员数量失败: " + err.Error())
+	if target == nil || target.IsQuit == 1 {
+		return errors.New("被踢成员不在群内")
+	}
+	//以前逻辑错误
+	if operator.Role >= target.Role {
+		return errors.New("无权限踢出该成员")
+	}
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.GroupMember{}).
+			Where("group_id = ? AND user_id = ?", GroupId, KickedUserId).
+			Update("is_quit", 1)
+		if result.Error != nil {
+			return errors.New("踢出成员失败: " + result.Error.Error())
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("状态已经变更请勿重复操作")
+		}
+		if err := tx.Model(&models.Group{}).
+			Where("id = ? AND member_count - 1 >= 0", GroupId).
+			Update("member_count", gorm.Expr("member_count - 1")).Error; err != nil {
+			return errors.New("更新群成员数失败: " + err.Error())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
