@@ -149,10 +149,10 @@ type Notes struct {
 }
 
 type NoteBrief struct {
-	ID        int64     `json:"id"`      // 雪花算法ID
-	UserID    int64     `json:"user_id"` // 作者ID
-	Title     string    `json:"title"`   // 标题
-	Type      int       `json:"type"`    // 1-图文, 2-视频
+	ID        int64     `json:"id,string"` // 雪花算法ID
+	UserID    int64     `json:"user_id"`   // 作者ID
+	Title     string    `json:"title"`     // 标题
+	Type      int       `json:"type"`      // 1-图文, 2-视频
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	TimeStamp int64     `json:"time_stamp"`
