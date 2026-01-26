@@ -36,9 +36,9 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
 	auth.GET("/token", context.Wrap(u.GetToken))
-
-	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))         //发送验证码
-	auth.POST("/update-phone", authorize, context.Wrap(u.UpdatePhone)) //更新手机号
+	auth.POST("/update-profile", authorize, context.Wrap(u.UpdateUserProfile)) //更新用户信息
+	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))                 //发送验证码
+	auth.POST("/update-phone", authorize, context.Wrap(u.UpdatePhone))         //更新手机号
 	auth.GET("/test1", authorize, context.Wrap(u.test))
 }
 
@@ -221,5 +221,34 @@ func (u *Auth) UpdatePhone(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, "手机号更新成功")
+	return nil
+}
+
+func (u *Auth) UpdateUserProfile(c *gin.Context) error {
+
+	var req types.UpdateUserProfileRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	//测试用
+	var userID int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userID = 6 // 直接赋值 int 型
+		c.Set("user_id", userID)
+	} else {
+		val, exists := c.Get("user_id")
+		if !exists {
+			return response.NewError(http.StatusUnauthorized, "未登录或登录已过期")
+		}
+		userID, _ = val.(int)
+	}
+
+	err := u.UserService.UpdateUserProfile(c.Request.Context(), userID, &req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, req)
 	return nil
 }
