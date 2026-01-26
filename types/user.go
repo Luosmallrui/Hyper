@@ -33,3 +33,15 @@ type UserProfile struct {
 type GetUserInfoRequest struct {
 	UserID string `json:"user_id"`
 }
+
+type FeedRequest struct {
+	Cursor   int64 `form:"cursor"`              // 游标（时间戳）
+	PageSize int   `form:"pageSize,default=10"` // 每页数量
+}
+
+// FeedResponse Feed 流响应
+type FeedResponse struct {
+	List       interface{} `json:"list"`        // 数据列表
+	NextCursor int64       `json:"next_cursor"` // 下次请求的游标
+	HasMore    bool        `json:"has_more"`    // 是否还有更多
+}
