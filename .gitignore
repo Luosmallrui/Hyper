@@ -17,4 +17,4 @@ vendor/
 
 # ===== Local config =====
 configs/config.*.yaml
-
+certs/
