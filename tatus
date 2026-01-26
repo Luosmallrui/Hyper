@@ -1,0 +1,16 @@
+[33mcommit f718fc9079916f87a7aa797d8d7068f0bda5b005[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mKrito[m[33m, [m[1;31morigin/Krito[m[33m)[m
+Author: Krito-Windows <iroandzzy@gmail.com>
+Date:   Mon Jan 26 16:06:16 2026 +0800
+
+    update user's imformation
+
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mindex 36a75bd..0e9fd45 100644[m
+[1m--- a/.gitignore[m
+[1m+++ b/.gitignore[m
+[36m@@ -17,4 +17,4 @@[m [mvendor/[m
+ [m
+ # ===== Local config =====[m
+ configs/config.*.yaml[m
+[31m-[m
+[32m+[m[32mcerts/[m
