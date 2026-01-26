@@ -37,6 +37,7 @@ type GetUserInfoRequest struct {
 type FeedRequest struct {
 	Cursor   int64 `form:"cursor"`              // 游标（时间戳）
 	PageSize int   `form:"pageSize,default=10"` // 每页数量
+	UserId   int   `form:"user_id"`
 }
 
 // FeedResponse Feed 流响应
