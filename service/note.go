@@ -46,12 +46,12 @@ func (s *NoteService) GetMyNotesFeed(ctx context.Context, userID int, cursor int
 
 	query := s.DB.WithContext(ctx).
 		Model(&models.Note{}).
-		Where("user = ? AND status = 0", userID).
-		Order("create_at DESC")
+		Where("user_id = ? AND status = 0", userID).
+		Order("created_at DESC")
 
 	if cursor > 0 {
 		cursorTime := time.Unix(cursor, 0)
-		query = query.Where("create_at < ?", cursorTime)
+		query = query.Where("created_at < ?", cursorTime)
 	}
 
 	// 多查一条，用于判断是否还有更多

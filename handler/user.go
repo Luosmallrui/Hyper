@@ -37,7 +37,7 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.POST("/avatar", context.Wrap(u.UploadAvatar))
 	g.GET("/info", context.Wrap(u.GetUserInfo))
 	g.GET("/note", context.Wrap(u.GetUserNote))
-	g.GET("/my-note", context.Wrap(u.GetMyNotes))
+	g.GET("/my-notes", context.Wrap(u.GetMyNotes))
 
 }
 

@@ -129,6 +129,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		CommentService: commentsService,
 		TopicService:   topicService,
+		DB:             db,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
@@ -168,6 +169,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		FollowService:  serviceFollowService,
 		LikeService:    serviceLikeService,
 		CollectService: serviceCollectService,
+		NoteService:    noteService,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
 	sessionDAO := dao.NewSessionDAO(db)
