@@ -25,6 +25,7 @@ type INoteService interface {
 	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
 	ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error)
 	GetNoteDetail(ctx context.Context, noteID uint64, currentUserID uint64) (*types.NoteDetail, error)
+	GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error)
 }
 type NoteService struct {
 	NoteDAO        *dao.NoteDAO
@@ -37,6 +38,38 @@ type NoteService struct {
 	CollectService ICollectService
 	CommentService ICommentsService
 	TopicService   ITopicService
+	DB             *gorm.DB
+}
+
+func (s *NoteService) GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error) {
+	var notes []*models.Note
+
+	query := s.DB.WithContext(ctx).
+		Model(&models.Note{}).
+		Where("user = ? AND status = 0", userID).
+		Order("create_at DESC")
+
+	if cursor > 0 {
+		cursorTime := time.Unix(cursor, 0)
+		query = query.Where("create_at < ?", cursorTime)
+	}
+
+	// 多查一条，用于判断是否还有更多
+	err := query.Limit(pageSize + 1).Find(&notes).Error
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	var nextCursor int64 = 0
+	hasMore := len(notes) > pageSize
+
+	if hasMore {
+		notes = notes[:pageSize] // 截取前 pageSize 条
+		lastNote := notes[len(notes)-1]
+		nextCursor = lastNote.CreatedAt.Unix()
+	}
+
+	return notes, nextCursor, hasMore, nil
 }
 
 func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error) {

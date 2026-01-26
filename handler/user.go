@@ -8,6 +8,7 @@ import (
 	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,7 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.POST("/avatar", context.Wrap(u.UploadAvatar))
 	g.GET("/info", context.Wrap(u.GetUserInfo))
 	g.GET("/note", context.Wrap(u.GetUserNote))
+	g.GET("/my-note", context.Wrap(u.GetMyNotes))
 
 }
 
@@ -270,12 +272,11 @@ func (u *User) GetMyNotes(c *gin.Context) error {
 		req.Cursor,
 		req.PageSize,
 	)
-
 	respNotes := make([]*types.Note, len(notes))
 	for i, note := range notes {
 		respNotes[i] = &types.Note{
-			ID:          note.ID,
-			UserID:      note.UserID,
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
 			Title:       note.Title,
 			Content:     note.Content,
 			TopicIDs:    make([]int64, 0),
@@ -287,13 +288,16 @@ func (u *User) GetMyNotes(c *gin.Context) error {
 			CreatedAt:   note.CreatedAt,
 			UpdatedAt:   note.UpdatedAt,
 		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &respNotes[i].TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &respNotes[i].Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &respNotes[i].MediaData)
 	}
 
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, types.FeedResponse{
-		List:       notes,
+		List:       respNotes,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
 	})
