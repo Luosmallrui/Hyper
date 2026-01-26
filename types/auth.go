@@ -81,6 +81,7 @@ type UserToken struct {
 	RefreshExpire int64  `json:"refresh_expire"`
 }
 type UserBasicInfo struct {
+	Id          int       `json:"id"`
 	UserID      string    `json:"user_id"`    // Snowflake ID（对外）
 	Nickname    string    `json:"nickname"`   // 邪修的马路路
 	AvatarURL   string    `json:"avatar_url"` // 头像

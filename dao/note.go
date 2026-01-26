@@ -105,3 +105,29 @@ func (d *NoteDAO) GetNotesByTopicID(ctx context.Context, topicID uint64, limit, 
 		Find(&notes).Error
 	return notes, err
 }
+
+func (d *NoteDAO) ListNodeByUser(
+	ctx context.Context,
+	cursor int64,
+	limit int,
+	userId int,
+) (notes []*models.Note, err error) {
+
+	db := d.Db.WithContext(ctx).Model(&models.Note{})
+
+	// 先限定用户
+	db = db.Where("user_id = ?", userId)
+
+	// 如果前端传了游标（大于0），则查询该时间点之前的数据
+	if cursor > 0 {
+		cursorTime := time.Unix(0, cursor)
+		db = db.Where("created_at < ?", cursorTime)
+	}
+
+	err = db.
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&notes).Error
+
+	return notes, err
+}

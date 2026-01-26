@@ -41,33 +41,29 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 
 }
 
-type NoteDTO struct {
-	NoteID    string `json:"note_id"`
-	Cover     string `json:"cover"`
-	Title     string `json:"title"`
-	LikeCount int    `json:"like_count"`
-}
-
-type NoteListResp struct {
-	List []NoteDTO `json:"list"`
-}
-
 func (u *User) GetUserNote(c *gin.Context) error {
-	resp := NoteListResp{}
-	resp.List = make([]NoteDTO, 0)
-	resp.List = append(resp.List, NoteDTO{
-		NoteID:    "9001",
-		Cover:     "https://cdn.hypercn.cn/" + "note/2026/01/25/2015344441170071552.jpg",
-		Title:     "春日穿搭分享",
-		LikeCount: 5,
-	})
-	resp.List = append(resp.List, NoteDTO{
-		NoteID:    "9001",
-		Cover:     "https://cdn.hypercn.cn/" + "note/2026/01/25/2015344441170071552.jpg",
-		Title:     "成都美食探店",
-		LikeCount: 51,
-	})
-	response.Success(c, resp)
+	userId := c.GetInt("user_id")
+	var req types.FeedRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 10
+	}
+	notes, err := u.NoteService.ListNoteByUser(
+		c.Request.Context(),
+		req.Cursor,
+		req.PageSize,
+		userId,
+		req.UserId,
+	)
+	avatar, nickName, err := u.UserService.GetUserAvatar(c.Request.Context(), int64(req.UserId))
+	notes.Avatar = avatar
+	notes.Nickname = nickName
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, notes)
 	return nil
 }
 
@@ -117,6 +113,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
+			Id:          userInfo.Id,
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, userInfo.Id),
 			Nickname:    userInfo.Nickname,
 			PhoneNumber: userInfo.Mobile,
