@@ -30,6 +30,7 @@ type IUserService interface {
 	GetUserInfo(ctx context.Context, uid int) (*models.Users, error)
 	SendVerifyCode(ctx context.Context, mobile string) error
 	UpdateMobileWithSms(ctx context.Context, mobile string, UserId int, inputCode string) error
+	UpdateUserProfile(ctx context.Context, userId int, req *types.UpdateUserProfileRequest) error
 }
 
 type UserService struct {
@@ -281,4 +282,36 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 	}
 	return err
 
+}
+
+func (s *UserService) UpdateUserProfile(ctx context.Context, userId int, req *types.UpdateUserProfileRequest) error {
+
+	updates := make(map[string]interface{})
+
+	if req.Username != nil {
+		updates["nickname"] = *req.Username
+	}
+	if req.Avatar != nil {
+		updates["avatar"] = *req.Avatar
+	}
+	if req.Motto != nil {
+		updates["motto"] = *req.Motto
+	}
+	if req.Email != nil {
+		updates["email"] = *req.Email
+	}
+	if req.Birthday != nil {
+		updates["birthday"] = *req.Birthday
+	}
+	updates["updated_at"] = time.Now()
+
+	err := s.DB.WithContext(ctx).
+		Model(&models.Users{}).
+		Where("id=?", userId).
+		Updates(updates).Error
+
+	if err != nil {
+		return errors.New("更新用户信息失败")
+	}
+	return nil
 }
