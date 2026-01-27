@@ -216,6 +216,17 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:       cfg,
 		TopicService: topicService,
 	}
+	product := dao.NewProduct(db)
+	productService := &service.ProductService{
+		Config:     cfg,
+		DB:         db,
+		Redis:      redisClient,
+		ProductDAO: product,
+	}
+	productHandler := &handler.ProductHandler{
+		Config:         cfg,
+		ProductService: productService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -229,6 +240,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		GroupMember:     groupMemberHandler,
 		CommentsHandler: commentsHandler,
 		TopicHandler:    topicHandler,
+		ProductHandler:  productHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
