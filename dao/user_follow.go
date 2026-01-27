@@ -3,6 +3,7 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ func (d *UserFollowDAO) IsFollowing(ctx context.Context, followerID, followeeID 
 	err := d.Db.WithContext(ctx).
 		Where("follower_id = ? AND followee_id = ? AND status = 1", followerID, followeeID).
 		First(&follow).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
 	if err != nil {

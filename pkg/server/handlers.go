@@ -17,5 +17,5 @@ type Handlers struct {
 	GroupMember     *handler.GroupMemberHandler
 	CommentsHandler *handler.CommentsHandler
 	TopicHandler    *handler.TopicHandler
-	ProductHandler  *handler.ProductHandler
+	Party           *handler.Party
 }
