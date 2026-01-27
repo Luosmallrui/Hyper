@@ -119,15 +119,16 @@ func (PartyLike) TableName() string {
 
 // PartyListItem 派对列表项（前端展示格式）
 type PartyListItem struct {
-	ID       string   `json:"id"`       // 派对ID (int64转string，防止前端精度丢失)
-	Title    string   `json:"title"`    // 标题
-	Type     string   `json:"type"`     // 类型：派对/夜店/复古
-	Location string   `json:"location"` // 对应数据库 location_name
-	Distance string   `json:"distance"` // 计算后的距离描述，如 "1.2km" 或 "500m"
-	Price    string   `json:"price"`    // 格式化后的价格，如 "99.0" 或 "免费"
-	Lat      float64  `json:"lat"`      // 纬度 (用于地图定位)
-	Lng      float64  `json:"lng"`      // 经度
-	Tags     []string `json:"tags"`     // 标签名称数组
+	ID       int64    `json:"id,string"` // 派对ID (int64转string，防止前端精度丢失)
+	Title    string   `json:"title"`     // 标题
+	Type     string   `json:"type"`      // 类型：派对/夜店/复古
+	Location string   `json:"location"`  // 对应数据库 location_name
+	Distance string   `json:"distance"`  // 计算后的距离描述，如 "1.2km" 或 "500m"
+	Price    string   `json:"price"`     // 格式化后的价格，如 "99.0" 或 "免费"
+	Lat      float64  `json:"lat"`       // 纬度 (用于地图定位)
+	Lng      float64  `json:"lng"`       // 经度
+	Tags     []string `json:"tags"`      // 标签名称数组
+	Tag      string   `json:"tag"`
 
 	// 主办方信息
 	User       string `json:"user"`       // 主办方昵称
