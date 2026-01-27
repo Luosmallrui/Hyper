@@ -80,6 +80,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.TopicHandler.RegisterRouter(api)
 	h.Pay.RegisterRouter(api)
 	h.Party.RegisterRouter(api)
+	h.ProductHandler.RegisterRouter(api)
 	return r
 }
 
