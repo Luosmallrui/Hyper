@@ -36,9 +36,9 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
 	auth.GET("/token", context.Wrap(u.GetToken))
-
-	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))         //发送验证码
-	auth.POST("/update-phone", authorize, context.Wrap(u.UpdatePhone)) //更新手机号
+	auth.POST("/update-profile", authorize, context.Wrap(u.UpdateUserProfile)) //更新用户信息
+	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))                 //发送验证码
+	auth.POST("/update-phone", authorize, context.Wrap(u.UpdatePhone))         //更新手机号
 	auth.GET("/test1", authorize, context.Wrap(u.test))
 }
 
@@ -221,5 +221,22 @@ func (u *Auth) UpdatePhone(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, "手机号更新成功")
+	return nil
+}
+
+func (u *Auth) UpdateUserProfile(c *gin.Context) error {
+	var req types.UpdateUserProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	err = u.UserService.UpdateUserProfile(c.Request.Context(), int(userId), &req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, req)
 	return nil
 }

@@ -28,6 +28,7 @@ type PayService struct {
 type IPayService interface {
 	ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error
 	PreWeChatPay(ctx context.Context, weChatClient *core.Client, req types.PrepayRequest) (types.PrepayWithRequestPaymentResponse, error)
+	GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error)
 }
 
 func (p *PayService) PreWeChatPay(
@@ -49,8 +50,12 @@ func (p *PayService) PreWeChatPay(
 	wechatCfg := p.Config.WechatPayConfig
 	orderSn := utilBase.GenerateOrderSn(req.UserId)
 
-	// 1. 事务内：创建订单 + 支付流水（只做 DB）
+	// 1. 事务内：创建订单 + 订单明细 + 支付流水（只做 DB）
 	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var product models.Product
+		if err := tx.Where("id = ? AND status = 1", req.ProductId).First(&product).Error; err != nil {
+			return fmt.Errorf("订单不存在或已下架")
+		}
 		// A. 创建订单
 		order := &models.Order{
 			UserID:      req.UserId,
@@ -62,7 +67,18 @@ func (p *PayService) PreWeChatPay(
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
-
+		orderItem := &models.OrderItem{
+			OrderID:        uint64(order.ID),
+			ProductID:      product.ID,
+			ProductName:    product.ProductName,
+			ProductPrice:   product.Price,
+			Quantity:       req.Quantity,
+			SubtotalAmount: product.Price * req.Quantity,
+			CoverImage:     product.CoverImage,
+		}
+		if err := tx.Create(orderItem).Error; err != nil {
+			return err
+		}
 		// B. 创建支付流水
 		payRecord := &models.PayRecord{
 			OrderSn:     orderSn,
@@ -169,7 +185,10 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		if err := tx.Model(&record).Updates(updateRecord).Error; err != nil {
 			return err
 		}
-
+		var order models.Order
+		if err := tx.Where("order_sn = ? AND status = ?", orderSn, 10).First(&order).Error; err != nil {
+			return fmt.Errorf("获取订单失败: %w", err)
+		}
 		// 3. 更新主订单状态
 		result := tx.Model(&models.Order{}).
 			Where("order_sn = ? AND status = ?", orderSn, 10). // 只有待支付状态才能变更为已支付
@@ -184,7 +203,36 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("更新订单状态失败或订单状态已改变")
 		}
+		var items []models.OrderItem
+		if err := tx.Where("order_id = ?", order.ID).Find(&items).Error; err != nil {
+			return fmt.Errorf("获取订单明细失败: %w", err)
+		}
+		for _, item := range items {
+			res := tx.Model(&models.Product{}).
+				Where("id = ? AND stock >= ?", item.ProductID, item.Quantity).
+				UpdateColumn("stock", gorm.Expr("stock - ?", item.Quantity))
+			if res.Error != nil {
+				return fmt.Errorf("商品 [%s] 扣减库存失败: %w", item.ProductName, res.Error)
+			}
+			if res.RowsAffected == 0 {
+				return fmt.Errorf("商品 [%s] 库存不足，无法完成支付回调业务", item.ProductName)
+			}
+			// B. 增加商品销量
+			if err := tx.Model(&models.Product{}).
+				Where("id = ?", item.ProductID).
+				UpdateColumn("sales_volume", gorm.Expr("sales_volume + ?", item.Quantity)).Error; err != nil {
+				return fmt.Errorf("更新商品销量失败: %w", err)
+			}
 
+			// C. 自动下架检测：如果库存扣减后变为 0，自动将状态设为下架 (0)
+			var prod models.Product
+			if err := tx.Select("stock").First(&prod, item.ProductID).Error; err == nil {
+				if prod.Stock == 0 {
+					tx.Model(&prod).Update("status", 0)
+					log.L.Info("检测到库存为0，商品已自动下架", zap.Uint64("product_id", item.ProductID))
+				}
+			}
+		}
 		// 4. 【关键】执行后续业务逻辑
 		// 例如：给用户账户加钱、增加积分、如果是商品则通知仓库发货
 		// if err := s.AccountService.AddBalance(record.UserID, record.AmountTotal); err != nil {
@@ -193,4 +241,44 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 
 		return nil
 	})
+}
+
+func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error) {
+	var order models.Order
+	var payRecord models.PayRecord
+	var items []models.OrderItem
+	//1.获取订单信息
+	if err := p.DB.WithContext(ctx).
+		Model(&models.Order{}).Where("order_sn = ? AND user_id = ?", orderSn, userId).First(&order).Error; err != nil {
+		return nil, fmt.Errorf("获取订单失败: %w", err)
+	}
+	//2、获取支付流水信息
+	p.DB.WithContext(ctx).Where("order_sn = ?", orderSn).First(&payRecord)
+	//3、获取订单明细
+	if err := p.DB.WithContext(ctx).Where("order_id", order.ID).Find(&items).Error; err != nil {
+		return nil, fmt.Errorf("获取订单明细失败: %w", err)
+	}
+	//4、组装响应体
+	resp := &types.OrderReceiptResponse{
+		OrderSn:       order.OrderSn,
+		TransactionId: payRecord.TransactionId,
+		Status:        order.Status,
+		StatusText:    "支付成功", // 可根据 order.Status 进一步判断
+		PayTime:       "",
+		TotalAmount:   float64(order.TotalAmount) / 100.0,
+	}
+
+	if order.PaidAt != nil {
+		resp.PayTime = order.PaidAt.Format("2006-01-02 15:04:05")
+	}
+	for _, item := range items {
+		resp.Items = append(resp.Items, types.ReceiptItem{
+			ProductName:  item.ProductName,
+			ProductPrice: float64(item.ProductPrice) / 100.0,
+			Quantity:     item.Quantity,
+			Subtotal:     float64(item.SubtotalAmount) / 100.0,
+			CoverImage:   item.CoverImage,
+		})
+	}
+	return resp, nil
 }

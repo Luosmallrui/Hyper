@@ -10,8 +10,10 @@ type Group struct {
 	Description string    `gorm:"column:description" json:"description"`          // 群组描述
 	MemberCount int       `gorm:"column:member_count;" json:"member_count"`       // 群成员数量
 	MaxMembers  int       `gorm:"column:max_members;" json:"max_members"`         // 最大成员数量
-	CreatedAt   time.Time `gorm:"column:created_at;" json:"created_at"`           // 创建时间
-	UpdatedAt   time.Time `gorm:"column:updated_at;" json:"updated_at"`           // 更新时间
+	IsDismiss   int       `gorm:"column:is_dismiss;default:0"`                    // 新增：0正常，1解散
+	IsAllMute   int       `gorm:"column:is_all_mute;default:0" json:"is_all_mute"`
+	CreatedAt   time.Time `gorm:"column:created_at;" json:"created_at"` // 创建时间
+	UpdatedAt   time.Time `gorm:"column:updated_at;" json:"updated_at"` // 更新时间
 }
 
 func (Group) TableName() string {

@@ -13,7 +13,7 @@ var ProviderSet = wire.NewSet(
 	NewNoteDAO,
 	NewMessageDAO,
 	NewSessionDAO,
-	//NewGroupDAO,
+	NewGroup,
 	NewMessageReadDAO,
 	NewGroupMember,
 	NewImage,
@@ -25,4 +25,5 @@ var ProviderSet = wire.NewSet(
 	NewComment,
 	NewCommentLike,
 	NewTopic,
+	NewProduct,
 )
