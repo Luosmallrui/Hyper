@@ -270,6 +270,11 @@ func (pc *Party) GetPartyList(c *gin.Context) error {
 	for _, party := range parties {
 		item := convertToPartyListItem(party, userLat, userLng)
 		item.DynamicCount = 55
+		if item.ID%2 == 1 {
+			item.Tag = "场地"
+		} else {
+			item.Tag = "派对"
+		}
 
 		// 设置是否已点赞
 		item.IsLiked = utils.Contains(likedPartyIDs, party.ID)
@@ -569,7 +574,7 @@ func convertToPartyListItem(party models.Party, userLat, userLng float64) models
 	}
 
 	return models.PartyListItem{
-		ID:         strconv.FormatInt(party.ID, 10),
+		ID:         party.ID,
 		Title:      party.Title,
 		Type:       party.Type,
 		Location:   party.LocationName, // 修正字段名：Location -> LocationName
