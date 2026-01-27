@@ -32,3 +32,21 @@ type GetDetailProductResponse struct {
 	Stock         uint32 `json:"stock"`          // 当前库存
 	Status        int8   `json:"status"`         // 状态
 }
+
+type OrderReceiptResponse struct {
+	OrderSn       string        `json:"order_sn"`       // 订单号
+	TransactionId string        `json:"transaction_id"` // 微信支付流水号
+	Status        int8          `json:"status"`         // 状态
+	StatusText    string        `json:"status_text"`    // 状态描述（如：支付成功）
+	PayTime       string        `json:"pay_time"`       // 支付时间
+	TotalAmount   float64       `json:"total_amount"`   // 总金额（元）
+	Items         []ReceiptItem `json:"items"`          // 商品快照列表
+}
+
+type ReceiptItem struct {
+	ProductName  string  `json:"product_name"`  // 下单时的商品名
+	ProductPrice float64 `json:"product_price"` // 下单时的单价
+	Quantity     uint32  `json:"quantity"`      // 数量
+	Subtotal     float64 `json:"subtotal"`      // 小计
+	CoverImage   string  `json:"cover_image"`   // 下单时的封面图
+}
