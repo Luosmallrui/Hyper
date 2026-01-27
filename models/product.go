@@ -6,18 +6,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// Product 对应数据库中的 products 表
 type Product struct {
-	ID          uint64         `gorm:"primaryKey;autoIncrement;column:id" json:"id"`                                  // ID: 自增主键
-	ProductName string         `gorm:"uniqueIndex:idx_product_name;not null;column:product_name" json:"product_name"` // ProductName: 商品名称
-	Price       uint32         `gorm:"not null;column:price" json:"price"`                                            // Price: 价格（单位：分）
-	Stock       uint32         `gorm:"default:0;not null;column:stock" json:"stock"`                                  // Stock: 库存数量
-	Description string         `gorm:"type:text;column:description" json:"description"`                               // Description: 商品详细描述
-	CoverImage  string         `gorm:"size:512;default:'';column:cover_image" json:"cover_image"`                     // CoverImage: 封面图 URL
-	Status      int8           `gorm:"default:1;not null;index:idx_status;column:status" json:"status"`               // Status: 状态 (0-下架, 1-上架)
-	CreatedAt   time.Time      `gorm:"column:created_at;autoCreateTime" json:"created_at"`                            // CreatedAt: 创建时间
-	UpdatedAt   time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`                            // UpdatedAt: 更新时间
-	DeletedAt   gorm.DeletedAt `gorm:"index:idx_products_deleted_at;column:deleted_at" json:"-"`                      // DeletedAt: 软删除标记
+	ID            uint64 `gorm:"primaryKey;autoIncrement;column:id" json:"id,string"`
+	PartyId       uint64 `gorm:"column:party_id;uniqueIndex:uk_party_product;not null" json:"party_id"` // 所属商家
+	ParentId      uint64 `gorm:"column:parent_id;default:0;index" json:"parent_id"`                     // 0:独立商品/主套餐, >0:子商品
+	ProductName   string `gorm:"column:product_name;uniqueIndex:uk_party_product;size:255;not null" json:"product_name"`
+	Price         uint32 `gorm:"column:price;not null" json:"price"`                    // 售卖价(分)
+	OriginalPrice uint32 `gorm:"column:original_price;default:0" json:"original_price"` // 划线价/原价(分)
+	Stock         uint32 `gorm:"column:stock;not null;default:0" json:"stock"`          // 库存
+	Description   string `gorm:"column:description;type:text" json:"description"`
+	CoverImage    string `gorm:"column:cover_image;size:512" json:"cover_image"`
+	Status        int8   `gorm:"column:status;type:tinyint;not null;default:1;index:idx_status" json:"status"` // 0-下架, 1-上架
+	SalesVolume   uint32 `gorm:"column:sales_volume;default:0;index:idx_sales" json:"sales_volume"`            // 销量：用于排序
+	// 关联字段：用于一次性查出套餐下的所有单品
+	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index" json:"-"`
 }
 
 func (Product) TableName() string {
