@@ -26,6 +26,7 @@ type INoteService interface {
 	ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error)
 	GetNoteDetail(ctx context.Context, noteID uint64, currentUserID uint64) (*types.NoteDetail, error)
 	GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error)
+	ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, TargetUser int) (types.ListNotesBriefRep, error)
 }
 type NoteService struct {
 	NoteDAO        *dao.NoteDAO
@@ -543,4 +544,108 @@ func (s *NoteService) incrementViewCount(ctx context.Context, noteID uint64) err
 	// 定期批量刷新到数据库(或者用消息队列)
 	// 这里简化为直接更新
 	return s.StatsDAO.IncrementViewCount(ctx, noteID, 1)
+}
+
+func (s *NoteService) ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, TargetUser int) (types.ListNotesBriefRep, error) {
+	limit := pageSize + 1
+	nodes, err := s.NoteDAO.ListNodeByUser(ctx, cursor, limit, TargetUser)
+	if err != nil {
+		return types.ListNotesBriefRep{}, err
+	}
+
+	rep := types.ListNotesBriefRep{
+		Notes:   make([]*types.NoteBrief, 0, len(nodes)),
+		HasMore: false,
+	}
+
+	if len(nodes) == 0 {
+		return rep, nil
+	}
+
+	displayCount := len(nodes)
+	if displayCount > pageSize {
+		rep.HasMore = true
+		displayCount = pageSize
+	}
+
+	noteIds := make([]uint64, 0, displayCount)
+	for i := 0; i < displayCount; i++ {
+		noteIds = append(noteIds, nodes[i].ID)
+	}
+
+	var (
+		statsMap      map[uint64]*types.NoteStats
+		likeStatusMap map[uint64]bool
+		wg            sync.WaitGroup
+		mu            sync.Mutex
+	)
+
+	wg.Add(2)
+
+	// 获取统计数据
+	go func() {
+		defer wg.Done()
+		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
+		mu.Lock()
+		statsMap = stats
+		mu.Unlock()
+		if err != nil {
+			log.Error("批量获取统计数据失败", "error", err)
+		}
+	}()
+
+	// 获取点赞状态
+	go func() {
+		defer wg.Done()
+		if userID > 0 {
+			status, err := s.LikeService.BatchCheckLikeStatus(ctx, uint64(userID), noteIds)
+			mu.Lock()
+			likeStatusMap = status
+			mu.Unlock()
+			if err != nil {
+				log.Error("批量获取点赞状态失败", "error", err)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// 组装数据
+	for i := 0; i < displayCount; i++ {
+		note := nodes[i]
+		stats := statsMap[note.ID]
+		if stats == nil {
+			stats = &types.NoteStats{} // 默认值
+		}
+
+		dto := &types.NoteBrief{
+			ID:           int64(note.ID),
+			UserID:       int64(note.UserID),
+			Title:        note.Title,
+			Type:         note.Type,
+			LikeCount:    stats.LikeCount,
+			CollCount:    stats.CollCount,
+			ShareCount:   stats.ShareCount,
+			CommentCount: stats.CommentCount,
+			ViewCount:    stats.ViewCount,
+			IsLiked:      likeStatusMap[note.ID],
+			CreatedAt:    note.CreatedAt,
+			UpdatedAt:    note.UpdatedAt,
+		}
+
+		var noteMedia []types.NoteMedia
+		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
+			dto.MediaData = noteMedia[0]
+		} else {
+			dto.MediaData = types.NoteMedia{}
+		}
+
+		rep.Notes = append(rep.Notes, dto)
+	}
+
+	if displayCount > 0 {
+		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
+	}
+
+	return rep, nil
 }

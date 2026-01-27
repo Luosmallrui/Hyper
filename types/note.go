@@ -148,6 +148,28 @@ type Notes struct {
 	IsFollowed  bool `json:"is_followed"`  // 当前用户是否关注作者
 }
 
+type NoteBrief struct {
+	ID        int64     `json:"id,string"` // 雪花算法ID
+	UserID    int64     `json:"user_id"`   // 作者ID
+	Title     string    `json:"title"`     // 标题
+	Type      int       `json:"type"`      // 1-图文, 2-视频
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	TimeStamp int64     `json:"time_stamp"`
+	MediaData NoteMedia `json:"media_data"`
+	// 统计数据
+	LikeCount    int64 `json:"like_count"`
+	CollCount    int64 `json:"coll_count"`
+	ShareCount   int64 `json:"share_count"`
+	CommentCount int64 `json:"comment_count"`
+	ViewCount    int64 `json:"view_count,omitempty"`
+
+	// 用户相关状态
+	IsLiked     bool `json:"is_liked"`     // 当前用户是否点赞
+	IsCollected bool `json:"is_collected"` // 当前用户是否收藏
+	IsFollowed  bool `json:"is_followed"`  // 当前用户是否关注作者
+}
+
 type ListNotesReq struct {
 	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
 	PageSize int   `form:"pageSize"`
@@ -201,4 +223,12 @@ type NoteDetail struct {
 type CommentPreview struct {
 	TotalCount int64              `json:"total_count"` // 评论总数
 	Comments   []*CommentResponse `json:"comments"`    // 前3条评论
+}
+
+type ListNotesBriefRep struct {
+	Notes      []*NoteBrief `json:"notes"`
+	Nickname   string       `json:"nickname"`
+	Avatar     string       `json:"avatar"`
+	NextCursor int64        `json:"next_cursor"` // 返回给前端，下次请求带上
+	HasMore    bool         `json:"has_more"`    // 告诉前端是否还有更多
 }
