@@ -6,11 +6,13 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
+	utilBase "Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
 	base "context"
 	"crypto/rsa"
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
@@ -41,8 +43,10 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 	pay := r.Group("/v1/pay")
 	{
 		pay.POST("/prepay", authorize, context.Wrap(p.Prepay))
-		pay.POST("/notify", context.Wrap(p.PayNotify))              // 支付回调
-		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder)) // 查询订单
+		pay.POST("/notify", context.Wrap(p.PayNotify)) // 支付回调
+
+		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))     // 查询订单
+		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt)) // 获取订单电子回执
 	}
 }
 
@@ -98,9 +102,13 @@ func (p *Pay) Prepay(c *gin.Context) error {
 	ctx := c.Request.Context()
 	var req types.PrepayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(400, "参数错误: "+err.Error())
+		//return response.NewError(400, "参数错误: "+err.Error())
 	}
+
 	userId := c.GetInt("user_id")
+	if req.OutTradeNo == "" {
+		req.OutTradeNo = utilBase.GenerateOrderSn(userId)
+	}
 	openId := c.GetString("openid")
 	req.UserId = userId
 	req.Openid = openId
@@ -131,6 +139,18 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
+	// --- ✅ 临时方案：直接解析 JSON 模拟 transaction 对象 ---
+	//transaction := new(payments.Transaction)
+	//if err := c.ShouldBindJSON(transaction); err != nil {
+	//	log.L.Error("模拟回调解析 JSON 失败", zap.Error(err))
+	//	return response.NewError(400, "参数格式错误")
+	//}
+	//
+	//// 记录模拟数据日志
+	//log.L.Info("收到模拟支付回调信号",
+	//	zap.String("order_sn", *transaction.OutTradeNo),
+	//	zap.String("tran_id", *transaction.TransactionId),
+	//)
 
 	err = p.PayService.ProcessOrderPaySuccess(ctx, transaction)
 	if err != nil {
@@ -139,6 +159,7 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	}
 
 	response.Success(c, notifyReq)
+	//response.Success(c, gin.H{"status": "SUCCESS", "message": "模拟核销成功"})
 	return nil
 }
 
@@ -166,5 +187,28 @@ func (p *Pay) QueryOrder(c *gin.Context) error {
 		zap.String("out_trade_no", outTradeNo),
 		zap.Int("status", result.Response.StatusCode))
 	response.Success(c, resp)
+	return nil
+}
+
+// 在 RegisterRouter 中增加
+// prod.GET("/receipt", auth, context.Wrap(p.GetOrderReceipt))
+
+func (p *Pay) GetOrderReceipt(c *gin.Context) error {
+	orderSn := c.Query("order_sn")
+	if orderSn == "" {
+		return response.NewError(http.StatusBadRequest, "订单号不能为空")
+	}
+
+	// 从中间件获取当前登录用户的 ID
+	userId := c.GetInt("userID")
+	//c.Set("user_id", 1)
+	//// 这里会读取到你上面 Set 的 6
+	//userId := c.GetInt("user_id")
+	res, err := p.PayService.GetOrderReceipt(c.Request.Context(), orderSn, userId)
+	if err != nil {
+		return response.NewError(http.StatusNotFound, err.Error())
+	}
+
+	response.Success(c, res)
 	return nil
 }
