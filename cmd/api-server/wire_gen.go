@@ -230,6 +230,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	party := &handler.Party{
 		DB: db,
 	}
+	point := &handler.Point{}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -245,6 +246,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TopicHandler:    topicHandler,
 		ProductHandler:  productHandler,
 		Party:           party,
+		Points:          point,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
