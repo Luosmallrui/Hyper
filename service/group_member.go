@@ -35,7 +35,6 @@ type GroupMemberService struct {
 	GroupMemberDAO *dao.GroupMember
 	SessionDAO     *dao.SessionDAO
 	UnreadStorage  *cache.UnreadStorage
-	GroupDAO       *dao.GroupDAO
 }
 
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
@@ -356,7 +355,7 @@ func (s *GroupMemberService) SetMuteAll(ctx context.Context, gid int, operatorId
 	if mute {
 		val = 1
 	}
-	if err := s.GroupDAO.SetMuteAll(ctx, gid, val); err != nil {
+	if err := s.GroupRepo.SetMuteAll(ctx, gid, val); err != nil {
 		return nil, err
 	}
 	return &types.MuteAllResponse{IsMuteAll: mute}, nil
@@ -418,7 +417,7 @@ func (s *GroupMemberService) TransferOwner(
 
 	// 3) 事务：三步必须原子
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		groupDAO := s.GroupDAO.WithDB(tx)
+		groupDAO := s.GroupRepo
 		gmDAO := s.GroupMemberDAO.WithDB(tx)
 
 		// 3.1 更新群主字段

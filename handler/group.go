@@ -17,13 +17,6 @@ type GroupHandler struct {
 	GroupService service.IGroupService
 }
 
-func NewGroupHandler(config *config.Config, groupService service.IGroupService) *GroupHandler {
-	return &GroupHandler{
-		GroupService: groupService,
-		Config:       config,
-	}
-}
-
 func (h *GroupHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	group := r.Group("/v1/group")
