@@ -18,32 +18,17 @@ type GroupMemberHandler struct {
 	GroupMemberService service.IGroupMemberService
 }
 
-func NewGroupMemberHandler(config *config.Config, groupMemberService service.IGroupMemberService) *GroupMemberHandler {
-	return &GroupMemberHandler{
-		GroupMemberService: groupMemberService,
-		Config:             config,
-	}
-}
-
-func (hm *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
-	authorize := middleware.Auth([]byte(hm.Config.Jwt.Secret))
-	group := r.Group("/groupmember")
-	group.POST("/invite", authorize, context.Wrap(hm.InviteMember)) //邀请成员
-	group.POST("/kick", authorize, context.Wrap(hm.KickMember))
-	group.GET("/list", authorize, context.Wrap(hm.ListMembers))
-	group.POST("/quit", authorize, context.Wrap(hm.QuitGroup))
-	group.POST("/mute", authorize, context.Wrap(hm.MuteMember))
-	group.POST("/mute-all", authorize, context.Wrap(hm.MuteAll))
-	group.POST("/admin", authorize, context.Wrap(hm.SetAdmin))
-	group.POST("/transfer-owner", authorize, context.Wrap(hm.TransferOwner))
-
 func (h *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
-	group := r.Group("/v1/groupmember")
+	group := r.Group("/groupmember")
 	group.POST("/invite", authorize, context.Wrap(h.InviteMember)) //邀请成员
 	group.POST("/kick", authorize, context.Wrap(h.KickMember))
 	group.GET("/list", authorize, context.Wrap(h.ListMembers))
-
+	group.POST("/quit", authorize, context.Wrap(h.QuitGroup))
+	group.POST("/mute", authorize, context.Wrap(h.MuteMember))
+	group.POST("/mute-all", authorize, context.Wrap(h.MuteAll))
+	group.POST("/admin", authorize, context.Wrap(h.SetAdmin))
+	group.POST("/transfer-owner", authorize, context.Wrap(h.TransferOwner))
 }
 
 func (h *GroupMemberHandler) InviteMember(c *gin.Context) error {
@@ -76,15 +61,6 @@ func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 	err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
-		return response.NewError(http.StatusUnauthorized, "未登录")
-	}
-	UserId := int(uid)
-
-	if err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, UserId); err != nil {
-		if err.Error() == "无权限操作" {
-			return response.NewError(http.StatusForbidden, err.Error())
-		}
-		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	response.Success(c, gin.H{"success": true})
 	return nil

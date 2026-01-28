@@ -15,8 +15,6 @@ type Group struct {
 	IsMuteAll   int       `gorm:"column:is_mute_all" json:"is_mute_all"`          //是否全员禁言[0否;1是]
 	IsDismiss   int       `gorm:"column:is_dismiss;default:0"`                    // 新增：0正常，1解散
 	IsAllMute   int       `gorm:"column:is_all_mute;default:0" json:"is_all_mute"`
-	CreatedAt   time.Time `gorm:"column:created_at;" json:"created_at"` // 创建时间
-	UpdatedAt   time.Time `gorm:"column:updated_at;" json:"updated_at"` // 更新时间
 }
 
 func (Group) TableName() string {

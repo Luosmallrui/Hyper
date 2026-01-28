@@ -10,6 +10,7 @@ import (
 
 type GroupDAO struct {
 	db *gorm.DB
+}
 type Group struct {
 	Repo[models.Group]
 }
@@ -20,6 +21,7 @@ func (d *GroupDAO) FindByID(ctx context.Context, gid int) (*models.Group, error)
 	var g models.Group
 	err := d.db.WithContext(ctx).Where("id = ?", gid).First(&g).Error
 	return &g, err
+}
 func NewGroup(db *gorm.DB) *Group {
 	return &Group{Repo: NewRepo[models.Group](db)}
 }
@@ -28,6 +30,7 @@ func (d *GroupDAO) SetMuteAll(ctx context.Context, gid int, mute int) error {
 	return d.db.WithContext(ctx).Model(&models.Group{}).
 		Where("id = ?", gid).
 		Update("is_mute_all", mute).Error
+}
 func (g *Group) GetGroup(ctx context.Context, groupId int) (*models.Group, error) {
 	var group models.Group
 	if err := g.Db.WithContext(ctx).Where("id = ?", groupId).First(&group).Error; err != nil {
