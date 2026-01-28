@@ -33,6 +33,11 @@ type ISessionService interface {
 	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
+	GetUnreadNum(ctx context.Context, userId int) (int64, error)
+}
+
+func (s *SessionService) GetUnreadNum(ctx context.Context, userId int) (int64, error) {
+	return s.SessionDAO.GetUnreadNum(ctx, userId)
 }
 
 func (s *SessionService) UpdateSingleSession(

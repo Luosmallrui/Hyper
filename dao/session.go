@@ -101,3 +101,19 @@ func (d *SessionDAO) DeleteSessionsByPeer(ctx context.Context, sessionType int, 
 		Where("session_type = ? AND peer_id = ?", sessionType, peerID).
 		Delete(&models.Session{}).Error
 }
+
+func (d *SessionDAO) GetUnreadNum(ctx context.Context, userID int) (int64, error) {
+	var total int64
+
+	err := d.db.WithContext(ctx).
+		Model(&models.Session{}).
+		Where("user_id = ?", userID).
+		Select("COALESCE(SUM(unread_count), 0)").
+		Scan(&total).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}

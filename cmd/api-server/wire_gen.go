@@ -98,11 +98,22 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:             db,
 	}
 	unreadStorage := cache.NewUnreadStorage(redisClient)
+	messageStorage := cache.NewMessageStorage(redisClient)
+	sessionDAO := dao.NewSessionDAO(db)
+	sessionService := &service.SessionService{
+		DB:             db,
+		MessageStorage: messageStorage,
+		UnreadStorage:  unreadStorage,
+		UserService:    userService,
+		SessionDAO:     sessionDAO,
+	}
 	message := &handler.Message{
 		MessageService: messageService,
+		FollowService:  followService,
 		UnreadStorage:  unreadStorage,
 		UserService:    userService,
 		Config:         cfg,
+		SessionService: sessionService,
 	}
 	comment := dao.NewComment(db)
 	commentLike := dao.NewCommentLike(db)
@@ -175,15 +186,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeService:    serviceLikeService,
 		CollectService: serviceCollectService,
 		NoteService:    noteService,
-	}
-	messageStorage := cache.NewMessageStorage(redisClient)
-	sessionDAO := dao.NewSessionDAO(db)
-	sessionService := &service.SessionService{
-		DB:             db,
-		MessageStorage: messageStorage,
-		UnreadStorage:  unreadStorage,
-		UserService:    userService,
-		SessionDAO:     sessionDAO,
 	}
 	session := &handler.Session{
 		SessionService: sessionService,

@@ -20,7 +20,7 @@ func (s *Session) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
 	session := r.Group("/v1/session/")
 	session.Use(authorize)
-	session.GET("list", context.Wrap(s.ListSessions))
+	session.GET("/", context.Wrap(s.ListSessions))
 	session.POST("setting", context.Wrap(s.SessionSetting))
 	session.POST("clear-unread", context.Wrap(s.ClearUnread)) //清除会话未读数
 }

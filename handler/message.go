@@ -15,9 +15,11 @@ import (
 
 type Message struct {
 	MessageService service.IMessageService
+	FollowService  service.IFollowService
 	UnreadStorage  *cache.UnreadStorage
 	UserService    service.IUserService
 	Config         *config.Config
+	SessionService service.ISessionService
 }
 
 func (m *Message) RegisterRouter(r gin.IRouter) {
@@ -27,20 +29,6 @@ func (m *Message) RegisterRouter(r gin.IRouter) {
 	message.POST("/send", context.Wrap(m.SendMessage))
 	message.GET("/list", context.Wrap(m.ListMessages))
 }
-
-//func (m *Message) ClearUnreadMessage(c *gin.Context) error {
-//	userId, err := context.GetUserID(c)
-//	if err != nil {
-//		return response.NewError(401, "未登录")
-//	}
-//	in := &types.TalkSessionClearUnreadNumRequest{}
-//	if err := c.ShouldBind(in); err != nil {
-//		return response.NewError(500, err.Error())
-//	}
-//	m.UnreadStorage.Reset(c.Request.Context(), int(userId), int(in.SessionType), int(in.PeerId))
-//	response.Success(c, "ok")
-//	return nil
-//}
 
 func (m *Message) SendMessage(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -60,24 +48,8 @@ func (m *Message) SendMessage(c *gin.Context) error {
 	return nil
 }
 
-//func (m *Message) GetRecentMessages(c *gin.Context) error {
-//	targetID := c.Query("target_id")
-//	limitStr := c.DefaultQuery("limit", "20")
-//	limit, _ := strconv.Atoi(limitStr)
-//
-//	msgs, err := m.MessageService.GetRecentMessages(targetID, limit)
-//	if err != nil {
-//		return response.NewError(500, err.Error())
-//	}
-//	response.Success(c, msgs)
-//	return nil
-//}
-
 func (m *Message) ListMessages(c *gin.Context) error {
-	userId, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(401, "未登录")
-	}
+	userId := c.GetInt("userId")
 
 	peerId, _ := strconv.ParseUint(c.Query("peer_id"), 10, 64)
 	sessionType, _ := strconv.Atoi(c.DefaultQuery("session_type", "1"))
@@ -98,6 +70,8 @@ func (m *Message) ListMessages(c *gin.Context) error {
 	}
 	selfInfo := m.UserService.BatchGetUserInfo(c.Request.Context(), []uint64{uint64(userId)})
 
+	follow, _ := m.FollowService.CheckFollowStatus(c.Request.Context(), uint64(userId), peerId)
+	unreadNum, _ := m.SessionService.GetUnreadNum(c.Request.Context(), userId)
 	resp := gin.H{
 		"avatar":      "",
 		"nickname":    "",
@@ -109,6 +83,8 @@ func (m *Message) ListMessages(c *gin.Context) error {
 			}
 			return 0
 		}(),
+		"unread_total": unreadNum,
+		"is_followed":  follow,
 	}
 
 	if sessionType == types.SessionTypeSingle {
