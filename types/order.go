@@ -20,3 +20,9 @@ type Seller struct {
 	Id   int    `gorm:"column:id" json:"id"`
 	Name string `gorm:"column:title" json:"name"`
 }
+
+type ListOrderReq struct {
+	Orders     []*Order `json:"list"`
+	HasMore    bool     `json:"has_more"`
+	NextCursor int64    `json:"next_cursor,string"`
+}

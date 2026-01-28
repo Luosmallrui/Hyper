@@ -17,39 +17,59 @@ type OrderService struct {
 var _ IOrderService = (*OrderService)(nil)
 
 type IOrderService interface {
-	GetOrderList(ctx context.Context, UserId int) ([]*types.Order, error)
+	GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error)
 }
 
-func (f *OrderService) GetOrderList(ctx context.Context, UserId int) ([]*types.Order, error) {
-	var orders []*models.Order
-	// 1. 获取订单主表
-	err := f.DB.WithContext(ctx).Where("user_id = ?", UserId).Order("id desc").Find(&orders).Error
-	if err != nil {
-		return nil, err
-	}
-	if len(orders) == 0 {
-		return make([]*types.Order, 0), nil
+func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error) {
+	if pageSize <= 0 {
+		pageSize = 10 // 默认每页10条
 	}
 
+	var orders []*models.Order
+	query := f.DB.WithContext(ctx).Where("user_id = ?", UserId)
+
+	// 1. Cursor 分页核心逻辑
+	if cursor > 0 {
+		// 假设按 ID 倒序排列，下一页的数据 ID 必须小于当前的游标
+		query = query.Where("id < ?", cursor)
+	}
+
+	// 多查一条（pageSize + 1）用来判断是否还有下一页
+	err := query.Order("id desc").Limit(pageSize + 1).Find(&orders).Error
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	// 2. 判断 hasMore
+	hasMore := false
+	if len(orders) > pageSize {
+		hasMore = true
+		orders = orders[:pageSize] // 截掉最后一条多查的
+	}
+
+	if len(orders) == 0 {
+		return make([]*types.Order, 0), 0, false, nil
+	}
+
+	nextCursor := orders[len(orders)-1].CreatedAt.UnixNano()
+
+	// --- 下面是之前的详情填充逻辑 ---
 	resp := make([]*types.Order, len(orders))
 	orderIds := make([]int, len(orders))
 	for i, order := range orders {
 		resp[i] = &types.Order{
 			Id:      order.ID,
 			Created: order.CreatedAt,
-			PaidAt:  order.UpdatedAt,
 			Status:  order.Status,
 			Price:   int(order.TotalAmount),
-			UserId:  order.UserID,
 		}
 		orderIds[i] = order.ID
 	}
-
 	// 2. 获取订单详情 (OrderItem)
 	var orderItems []*models.OrderItem
 	err = f.DB.WithContext(ctx).Where("order_id IN ?", orderIds).Find(&orderItems).Error
 	if err != nil {
-		return resp, err
+		return resp, nextCursor, hasMore, err
 	}
 
 	// 使用 Map 存储详情，并使用 set 思想收集去重后的 SellerID
@@ -103,5 +123,5 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int) ([]*types.O
 		}
 	}
 
-	return resp, nil
+	return resp, nextCursor, hasMore, err
 }

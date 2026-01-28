@@ -6,6 +6,8 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
+	"Hyper/types"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,10 +26,20 @@ func (o *Order) RegisterRouter(r gin.IRouter) {
 }
 
 func (o *Order) GetOrder(c *gin.Context) error {
+	var req types.FeedRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
 	userId := c.GetInt("user_id")
-	resp, err := o.OrderService.GetOrderList(c, userId)
+	orders, nextCursor, hasMore, err := o.OrderService.GetOrderList(c, userId, req.Cursor, req.PageSize)
 	if err != nil {
 		return response.NewError(500, err.Error())
+	}
+
+	resp := types.ListOrderReq{
+		Orders:     orders,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
 	}
 	response.Success(c, resp)
 	return nil
