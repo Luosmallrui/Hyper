@@ -11,16 +11,18 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strconv"
-	"sync"
-	"time"
-
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/cloudwego/kitex/client"
+	mysqlerr "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 type MessageSubscribe struct {
@@ -114,28 +116,35 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			UpdatedAt: time.Now(),
 		}
 
-		// 1. 同步持久化
+		// 2) 入库：重复插入视为成功（幂等）
 		if err := m.MessageService.SaveMessage(immsg); err != nil {
-			log.L.Error("[MQ] 消息入库失败", zap.Error(err))
-			return err // 让上层不 Ack，MQ 自动重试
-			// 数据库挂了建议让 MQ 重试
+			if !isDupKeyErr(err) {
+				log.L.Error("[MQ] 消息入库失败", zap.Error(err))
+				return err
+			}
+			// duplicate => 说明之前已成功入库，继续补后续步骤
+			log.L.Warn("[MQ] 消息重复入库(幂等)", zap.Int64("msg_id", imMsg.Id))
 		}
-		// 入库成功：标记已完成（24h），并释放锁
-		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
-		_ = m.Redis.Del(ctx, lockKey).Err()
-
+		// 2) DB 会话更新：必须成功，否则 return err 让 MQ 重试
 		if err := m.SessionService.UpdateSingleSession(ctx, &imMsg); err != nil {
-			log.L.Error("update session error", zap.Error(err))
+			log.L.Error("[MQ] update session error", zap.Error(err), zap.Int64("msg_id", imMsg.Id))
+			return err
+		}
+		// 3) Redis cache：推荐尽力而为（失败不阻塞 MQ）
+		if err := m.updateUserCache(ctx, &imMsg); err != nil {
+			log.L.Warn("[MQ] update cache failed (degraded)", zap.Error(err), zap.Int64("msg_id", imMsg.Id))
 		}
 
-		// 2. 异步分发推送
+		// 4) doneKey：放在关键路径之后
+		if err := m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err(); err != nil {
+			return err
+		}
+		// 5) 推送：doneKey 后异步尽力而为
 		// 注意：闭包一定要传参，防止 imMsg 在循环/协程中被污染
 		go func(msg types.Message) {
 			// 推送前可以使用新的 background ctx，防止父 context 取消导致推送中断
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-
-			m.updateUserCache(bgCtx, &msg)
 
 			// 给接收者推（dispatchMessage 的逻辑）
 			m.doBatchPush(bgCtx, int(msg.SenderID), &msg, int(msg.TargetID))
@@ -168,16 +177,16 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			Ext:       string(extBytes),
 			UpdatedAt: time.Now(),
 		}
+		// 1) 入库：重复插入视为成功
 		if err := m.MessageService.SaveGroupMessage(gdb); err != nil {
-			log.L.Error("[MQ] 群聊消息入库失败: %v", zap.Error(err))
-			return err
+			if !isDupKeyErr(err) {
+				log.L.Error("[MQ] 群聊消息入库失败", zap.Error(err))
+				return err
+			}
+			log.L.Warn("[MQ] 群聊消息重复入库(幂等)", zap.Int64("msg_id", imMsg.Id))
 		}
 
-		// 入库成功：标记已完成（24h），并释放锁
-		_ = m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err()
-		_ = m.Redis.Del(ctx, lockKey).Err()
-
-		// 3) 查群成员：使用 group_member DAO（真实成员表）
+		// 2) 查群成员：必须成功（否则无法更新会话未读）
 		memberIDs, err := m.GroupMemberDAO.GetMemberIds(ctx, int(imMsg.TargetID))
 		if err != nil {
 			log.L.Error("[MQ] query group members failed",
@@ -186,32 +195,33 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 			)
 			return err
 		}
-
-		log.L.Info("[DEBUG] group members",
-			zap.Int64("group_id", imMsg.TargetID),
-			zap.Ints("memberIDs", memberIDs),
-		)
-
+		// 群无成员：通常认为无需后续会话/推送，直接 done
 		if len(memberIDs) == 0 {
-			log.L.Warn("[MQ] group has no members in db",
-				zap.Int64("group_id", imMsg.TargetID),
-			)
+			if err := m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err(); err != nil {
+				return err
+			}
 			return nil
 		}
 
-		// 群聊会话落库（im_session）：Redis 丢失时 DB 兜底会话列表不失真
+		// 3) DB 会话更新（含 unread_count）：必须成功
 		if err := m.SessionService.UpsertGroupSessions(ctx, &imMsg, memberIDs); err != nil {
 			log.L.Error("[MQ] upsert group sessions error", zap.Error(err), zap.Int64("group_id", imMsg.TargetID))
-			// 不 return：会话落库失败不影响消息入库 & 推送（降级策略）
+			return err
 		}
-		// 转成 []string（因为后面的函数签名是 []string）
+		// 4) Redis cache：尽力而为
 		memberUIDs := make([]string, 0, len(memberIDs))
 		for _, id := range memberIDs {
 			memberUIDs = append(memberUIDs, strconv.Itoa(id))
 		}
-
+		if err := m.updateCacheGroup(ctx, &imMsg, memberUIDs); err != nil {
+			log.L.Warn("[MQ] update group cache failed (degraded)", zap.Error(err), zap.Int64("group_id", imMsg.TargetID))
+		}
+		// 5) doneKey 放在关键路径之后
+		if err := m.Redis.Set(ctx, doneKey, 1, 24*time.Hour).Err(); err != nil {
+			return err
+		}
+		// 6) 推送异步
 		go func(copyMsg types.Message, members []string) {
-			m.updateCacheGroup(ctx, &copyMsg, members)
 			m.dispatchToGroup(ctx, &copyMsg, members)
 		}(imMsg, memberUIDs)
 
@@ -343,47 +353,31 @@ func (m *MessageSubscribe) pushToUser(ctx context.Context, uid int, msg *types.M
 	}
 }
 
-func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Message) {
+func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Message) error {
 	// 1. 确定接收者 ID
-	// 这里的逻辑要小心：如果是单聊，接收者是 TargetID；
-	// 如果是自己发给自己的同步消息，则不需要增加未读数
+	// 自己发给自己：不需要未读，也不必写两份摘要
 	if msg.SenderID == msg.TargetID {
-		return
+		return nil
 	}
-
 	receiverID := int(msg.TargetID)
 	senderID := int(msg.SenderID)
-
-	// 2. 开启管道
-	pipe := m.Redis.Pipeline()
-
-	// Key 设计: unread:{user_id} -> Hash { "1_single_1001": 5 }
-	// 表示：用户 receiverID 收到来自 1001 的单聊消息，未读数为 5
-	m.UnreadStorage.PipeIncr(ctx, pipe, receiverID, types.SessionTypeSingle, senderID)
-
-	// 无论是发送方还是接收方，会话列表展示的最后一条消息必须是最新的
 
 	summary := &cache.LastCacheMessage{
 		Content:   truncateContent(msg.Content, 50), // 截断内容防止浪费内存
 		Timestamp: msg.Timestamp,
 	}
 
-	log.L.Info("update summary", zap.Any("summary", summary))
+	// 只维护“最后一条消息摘要”
+	if err := m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary); err != nil {
+		log.L.Error("set last message (receiver) error", zap.Error(err))
+		return err
+	}
+	if err := m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary); err != nil {
+		log.L.Error("set last message (sender) error", zap.Error(err))
+		return err
+	}
 
-	err := m.MessageStorage.Set(ctx, types.SessionTypeSingle, receiverID, senderID, summary)
-	if err != nil {
-		log.L.Error("set message error", zap.Error(err))
-	}
-	log.L.Info("update user cache")
-	err = m.MessageStorage.Set(ctx, types.SessionTypeSingle, senderID, receiverID, summary)
-	if err != nil {
-		log.L.Error("set message error", zap.Error(err))
-	}
-	// 3. 执行管道
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		log.L.Error("pipe exec error", zap.Error(err))
-	}
+	return nil
 }
 
 func truncateContent(content string, maxLen int) string {
@@ -443,95 +437,39 @@ func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Messa
 	wg.Wait()
 }
 
-//已弃用，推送改为用doBatchPush，群聊推送也调用doBatchPush
-//// 私聊推送
-//func (m *MessageSubscribe) dispatchToUser(ctx context.Context, uid int, msg *types.Message) {
-//	key := RouterKey{}
-//	msg.Status = types.MsgStatusSuccess
-//
-//	// 1) 取出用户在哪些 sid 上在线
-//	sids, err := m.Redis.HKeys(ctx, key.UserLocation(uid)).Result()
-//	if err != nil || len(sids) == 0 {
-//		log.L.Error(fmt.Sprintf("[Router] uid=%d offline or no route (no sids), err=%v", uid, err))
-//		return
-//	}
-//
-//	payload, _ := json.Marshal(msg)
-//
-//	for _, sid := range sids {
-//
-//		userKey := key.UserClients(sid, msg.Channel, uid)
-//
-//		// 2) 这里做“短暂重试”，避免刚连接时 set 还没写完
-//		var cids []string
-//		for attempt := 0; attempt < 3; attempt++ {
-//			cids, err = m.Redis.SMembers(ctx, userKey).Result()
-//			if err == nil && len(cids) > 0 {
-//				break
-//			}
-//			// 10ms, 30ms, 50ms（总共 < 100ms）
-//			time.Sleep(time.Duration(10+attempt*20) * time.Millisecond)
-//		}
-//
-//		if err != nil {
-//			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s read cids err=%v", uid, sid, err))
-//			continue
-//		}
-//
-//		// 关键：不要因为 cids 空就删除 location
-//		if len(cids) == 0 {
-//			log.L.Error(fmt.Sprintf("[Router] uid=%d sid=%s has route but empty cids (skip, no delete)", uid, sid))
-//			continue
-//		}
-//
-//		// 3) RPC 推送
-//		cli, err := m.getRpcClient(sid)
-//		if err != nil {
-//			log.L.Error(fmt.Sprintf("[RPC] get client fail sid=%s err=%v", sid, err))
-//			continue
-//		}
-//
-//		for _, cidStr := range cids {
-//			cid, _ := strconv.ParseInt(cidStr, 10, 64)
-//			_, err := cli.PushToClient(ctx, &push.PushRequest{
-//				Cid:     cid,
-//				Uid:     int32(uid),
-//				Payload: string(payload),
-//				Event:   "chat",
-//			})
-//			if err != nil {
-//				// 只有 RPC 明确不可达，才清理 sid（这个清理是合理的）
-//				log.L.Error(fmt.Sprintf("[RPC] push fail uid=%d sid=%s cid=%d err=%v, cleanup route", uid, sid, cid, err))
-//				m.Redis.HDel(ctx, key.UserLocation(uid), sid)
-//				clientCache.Delete(sid)
-//				break
-//			}
-//		}
-//	}
-//}
-
-func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) {
+func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) error {
 	groupID := int(msg.TargetID)
-	senderID := int(msg.SenderID)
-	pipe := m.Redis.Pipeline()
+
 	summary := &cache.LastCacheMessage{
 		Content:   truncateContent(msg.Content, 50),
 		Timestamp: msg.Timestamp,
 	}
+	// 群聊摘要：所有成员都更新一份 last_message（包括 sender）
 	for _, uidStr := range members {
 		uid, err := strconv.Atoi(uidStr)
-		if err != nil {
+		if err != nil || uid == 0 {
 			continue
 		}
-		// sender 不加未读，其他人加未读
-		if uid != senderID {
-			m.UnreadStorage.PipeIncr(ctx, pipe, uid, types.GroupChatSessionTypeGroup, groupID)
+
+		if err := m.MessageStorage.Set(ctx, types.GroupChatSessionTypeGroup, uid, groupID, summary); err != nil {
+			log.L.Error("[Cache] set group last message error",
+				zap.Error(err),
+				zap.Int("group_id", groupID),
+				zap.Int("uid", uid),
+			)
+			return err
 		}
-		// 所有人（含 sender）更新会话列表摘要：peerId 用 groupID
-		m.MessageStorage.Set(ctx, types.GroupChatSessionTypeGroup, uid, groupID, summary)
 	}
 
-	if _, err := pipe.Exec(ctx); err != nil {
-		log.L.Error(fmt.Sprintf("[Cache] group 更新失败 group=%d err=%v", groupID, err))
+	return nil
+}
+
+func isDupKeyErr(err error) bool {
+	// MySQL duplicate key = 1062
+	var me *mysqlerr.MySQLError
+	if errors.As(err, &me) {
+		return me.Number == 1062
 	}
+	// 兜底（有些场景 gorm 包装后不方便 As）
+	return strings.Contains(err.Error(), "Duplicate entry")
 }

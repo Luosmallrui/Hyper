@@ -36,12 +36,18 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	relation := cache.NewRelation(redisClient)
 	groupMember := dao.NewGroupMember(db, relation)
 	group := dao.NewGroup(db)
+	sessionDAO := dao.NewSessionDAO(db)
+	unreadStorage := cache.NewUnreadStorage(redisClient)
+	groupDAO := dao.NewGroupDAO(db)
 	groupMemberService := &service.GroupMemberService{
-		DB:              db,
-		Redis:           redisClient,
-		GroupMemberRepo: groupMember,
-		GroupRepo:       group,
-		Relation:        relation,
+		Redis:          redisClient,
+		GroupRepo:      group,
+		Relation:       relation,
+		DB:             db,
+		GroupMemberDAO: groupMember,
+		SessionDAO:     sessionDAO,
+		UnreadStorage:  unreadStorage,
+		GroupDAO:       groupDAO,
 	}
 	chatHandler := &chat.Handler{
 		Redis: redisClient,
@@ -69,20 +75,20 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
 	producer := rocketmq.InitProducer(rocketMQConfig)
 	messageService := &service.MessageService{
-		MessageDao: messageDAO,
-		MqProducer: producer,
-		Redis:      redisClient,
-		DB:         db,
+		MessageDao:     messageDAO,
+		GroupMemberDAO: groupMember,
+		GroupDAO:       groupDAO,
+		MqProducer:     producer,
+		Redis:          redisClient,
+		DB:             db,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
-	unreadStorage := cache.NewUnreadStorage(redisClient)
 	users := dao.NewUsers(db)
 	userService := &service.UserService{
 		UsersRepo: users,
 		Redis:     redisClient,
 		DB:        db,
 	}
-	sessionDAO := dao.NewSessionDAO(db)
 	sessionService := &service.SessionService{
 		DB:             db,
 		MessageStorage: messageStorage,

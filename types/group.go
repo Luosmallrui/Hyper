@@ -23,9 +23,6 @@ type DismissGroupRequest struct {
 }
 
 // 开启全员禁言请求
-type MuteAllRequest struct {
-	GroupId int `json:"group_id" binding:"required"` // 群ID，必填
-}
 type UnMuteAllRequest struct {
 	GroupId int `json:"group_id" binding:"required"` // 群ID，必填
 }

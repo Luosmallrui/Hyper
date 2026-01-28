@@ -86,11 +86,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:      redisClient,
 	}
 	messageDAO := dao.NewMessageDAO(db)
+	relation := cache.NewRelation(redisClient)
+	groupMember := dao.NewGroupMember(db, relation)
+	groupDAO := dao.NewGroupDAO(db)
 	messageService := &service.MessageService{
-		MessageDao: messageDAO,
-		MqProducer: producer,
-		Redis:      redisClient,
-		DB:         db,
+		MessageDao:     messageDAO,
+		GroupMemberDAO: groupMember,
+		GroupDAO:       groupDAO,
+		MqProducer:     producer,
+		Redis:          redisClient,
+		DB:             db,
 	}
 	unreadStorage := cache.NewUnreadStorage(redisClient)
 	message := &handler.Message{
@@ -184,8 +189,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
-	relation := cache.NewRelation(redisClient)
-	groupMember := dao.NewGroupMember(db, relation)
 	group := dao.NewGroup(db)
 	groupService := &service.GroupService{
 		DB:             db,
@@ -198,11 +201,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		GroupService: groupService,
 	}
 	groupMemberService := &service.GroupMemberService{
-		DB:              db,
-		Redis:           redisClient,
-		GroupMemberRepo: groupMember,
-		GroupRepo:       group,
-		Relation:        relation,
+		Redis:          redisClient,
+		GroupRepo:      group,
+		Relation:       relation,
+		DB:             db,
+		GroupMemberDAO: groupMember,
+		SessionDAO:     sessionDAO,
+		UnreadStorage:  unreadStorage,
+		GroupDAO:       groupDAO,
 	}
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,
