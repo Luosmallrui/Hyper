@@ -20,4 +20,5 @@ type Handlers struct {
 	ProductHandler  *handler.ProductHandler
 	Party           *handler.Party
 	Points          *handler.Point
+	Order           *handler.Order
 }

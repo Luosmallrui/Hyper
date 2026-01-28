@@ -51,5 +51,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(PayService), "*"),
 	wire.Bind(new(IPayService), new(*PayService)),
 
+	wire.Struct(new(OrderService), "*"),
+	wire.Bind(new(IOrderService), new(*OrderService)),
+
 	NewOssService,
 )
