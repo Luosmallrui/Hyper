@@ -231,6 +231,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB: db,
 	}
 	point := &handler.Point{}
+	orderService := &service.OrderService{
+		Redis: redisClient,
+		DB:    db,
+	}
+	order := &handler.Order{
+		Config:       cfg,
+		OrderService: orderService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -247,6 +255,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		ProductHandler:  productHandler,
 		Party:           party,
 		Points:          point,
+		Order:           order,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
