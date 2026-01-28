@@ -38,7 +38,6 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	group := dao.NewGroup(db)
 	sessionDAO := dao.NewSessionDAO(db)
 	unreadStorage := cache.NewUnreadStorage(redisClient)
-	groupDAO := dao.NewGroupDAO(db)
 	groupMemberService := &service.GroupMemberService{
 		Redis:          redisClient,
 		GroupRepo:      group,
@@ -47,7 +46,6 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		GroupMemberDAO: groupMember,
 		SessionDAO:     sessionDAO,
 		UnreadStorage:  unreadStorage,
-		GroupDAO:       groupDAO,
 	}
 	chatHandler := &chat.Handler{
 		Redis: redisClient,
@@ -77,7 +75,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,
 		GroupMemberDAO: groupMember,
-		GroupDAO:       groupDAO,
+		GroupDAO:       group,
 		MqProducer:     producer,
 		Redis:          redisClient,
 		DB:             db,
