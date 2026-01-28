@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -234,13 +233,13 @@ func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, follo
 	if followerID == 0 || followerID == followeeID {
 		return false, nil
 	}
-
-	// 类似的逻辑
-	key := fmt.Sprintf("user:following:%d", followerID)
-	exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
-	if err == nil {
-		return exists, nil
-	}
+	//
+	//// 类似的逻辑
+	//key := fmt.Sprintf("user:following:%d", followerID)
+	//exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
+	//if err == nil {
+	//	return exists, nil
+	//}
 
 	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }
