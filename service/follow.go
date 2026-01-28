@@ -154,7 +154,7 @@ func (s *FollowService) Unfollow(ctx context.Context, followerID, followeeID uin
 }
 
 func (s *FollowService) IsFollowing(ctx context.Context, followerID, followeeID uint64) (bool, error) {
-	return s.FollowDAO.IsFollowing(ctx, followerID, followeeID)
+	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }
 
 func (s *FollowService) GetFollowerCount(ctx context.Context, userID uint64) (int64, error) {
