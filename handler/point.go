@@ -51,11 +51,9 @@ func (p *Point) GetRecords(c *gin.Context) error {
 		Status:      1,
 	})
 	resp := types.ListPointsRecord{
-		Records:  l,
-		Total:    10,
-		Page:     1,
-		PageSize: 5,
-		HasMore:  false,
+		Records:    l,
+		NextCursor: 0,
+		HasMore:    false,
 	}
 	response.Success(c, resp)
 	return nil
