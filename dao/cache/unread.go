@@ -80,14 +80,14 @@ func (u *UnreadStorage) BatchGet(
 	ctx context.Context,
 	userId uint64,
 	convs []models.Session,
-) map[uint64]uint32 {
+) map[string]uint32 {
 
-	resMap := make(map[uint64]uint32)
+	resMap := make(map[string]uint32)
 	pipe := u.redis.Pipeline()
 
 	type item struct {
-		peerId uint64
-		cmd    *redis.StringCmd
+		key string
+		cmd *redis.StringCmd
 	}
 
 	items := make([]item, 0, len(convs))
@@ -99,10 +99,8 @@ func (u *UnreadStorage) BatchGet(
 			int(c.PeerId),
 		)
 		cmd := pipe.Get(ctx, key)
-		items = append(items, item{
-			peerId: c.PeerId,
-			cmd:    cmd,
-		})
+		k := fmt.Sprintf("%d:%d", c.SessionType, c.PeerId)
+		items = append(items, item{key: k, cmd: cmd})
 	}
 
 	_, err := pipe.Exec(ctx)
@@ -113,7 +111,7 @@ func (u *UnreadStorage) BatchGet(
 	for _, it := range items {
 		val, err := it.cmd.Int()
 		if err == nil {
-			resMap[it.peerId] = uint32(val)
+			resMap[it.key] = uint32(val)
 		}
 		// redis.Nil => 未读为 0，忽略
 	}

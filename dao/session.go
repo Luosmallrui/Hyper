@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"time"
 
 	"Hyper/models"
 
@@ -40,4 +41,63 @@ func (d *SessionDAO) BatchUpsert(ctx context.Context, rows []models.Session) err
 			"updated_at":   gorm.Expr("VALUES(updated_at)"),
 		}),
 	}).Create(&rows).Error
+}
+func (d *SessionDAO) UpsertSessionSettings(
+	ctx context.Context,
+	userID uint64,
+	sessionType int,
+	peerID uint64,
+	isTop int,
+	isMute int,
+) error {
+	now := time.Now()
+
+	// 如果会话不存在(即刚加上或者刚建群还没开始聊天)，也能插入一条“最小合法记录”
+	// im_session 表 last_msg_* 都是 NOT NULL，所以要给默认值
+	row := models.Session{
+		UserId:      userID,
+		SessionType: sessionType,
+		PeerId:      peerID,
+
+		LastMsgId:      0,
+		LastMsgType:    0,
+		LastMsgContent: "",
+		LastMsgTime:    0,
+
+		UnreadCount: 0,
+		IsTop:       isTop,
+		IsMute:      isMute,
+
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	return d.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "user_id"},
+				{Name: "session_type"},
+				{Name: "peer_id"},
+			},
+			DoUpdates: clause.Assignments(map[string]interface{}{
+				"is_top":     isTop,
+				"is_mute":    isMute,
+				"updated_at": now,
+			}),
+		}).
+		Create(&row).Error
+}
+
+// DeleteSession 删除某个用户的某个会话
+func (d *SessionDAO) DeleteSession(ctx context.Context, userID uint64, sessionType int, peerID uint64) error {
+	return d.db.WithContext(ctx).
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", userID, sessionType, peerID).
+		Delete(&models.Session{}).Error
+}
+
+// DeleteSessionsByPeer 删除某个群/对端的所有会话（解散群用）
+func (d *SessionDAO) DeleteSessionsByPeer(ctx context.Context, sessionType int, peerID uint64) error {
+	return d.db.WithContext(ctx).
+		Where("session_type = ? AND peer_id = ?", sessionType, peerID).
+		Delete(&models.Session{}).Error
 }

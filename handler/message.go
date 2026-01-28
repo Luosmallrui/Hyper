@@ -26,21 +26,21 @@ func (m *Message) RegisterRouter(r gin.IRouter) {
 	message.Use(authorize)
 	message.POST("/send", context.Wrap(m.SendMessage))
 	message.GET("/list", context.Wrap(m.ListMessages))
-	message.POST("/clear-unread", context.Wrap(m.ClearUnreadMessage)) // 清除会话未读数
 }
-func (m *Message) ClearUnreadMessage(c *gin.Context) error {
-	userId, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(401, "未登录")
-	}
-	in := &types.TalkSessionClearUnreadNumRequest{}
-	if err := c.ShouldBind(in); err != nil {
-		return response.NewError(500, err.Error())
-	}
-	m.UnreadStorage.Reset(c.Request.Context(), int(userId), int(in.SessionType), int(in.PeerId))
-	response.Success(c, "ok")
-	return nil
-}
+
+//func (m *Message) ClearUnreadMessage(c *gin.Context) error {
+//	userId, err := context.GetUserID(c)
+//	if err != nil {
+//		return response.NewError(401, "未登录")
+//	}
+//	in := &types.TalkSessionClearUnreadNumRequest{}
+//	if err := c.ShouldBind(in); err != nil {
+//		return response.NewError(500, err.Error())
+//	}
+//	m.UnreadStorage.Reset(c.Request.Context(), int(userId), int(in.SessionType), int(in.PeerId))
+//	response.Success(c, "ok")
+//	return nil
+//}
 
 func (m *Message) SendMessage(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -60,18 +60,18 @@ func (m *Message) SendMessage(c *gin.Context) error {
 	return nil
 }
 
-func (m *Message) GetRecentMessages(c *gin.Context) error {
-	targetID := c.Query("target_id")
-	limitStr := c.DefaultQuery("limit", "20")
-	limit, _ := strconv.Atoi(limitStr)
-
-	msgs, err := m.MessageService.GetRecentMessages(targetID, limit)
-	if err != nil {
-		return response.NewError(500, err.Error())
-	}
-	response.Success(c, msgs)
-	return nil
-}
+//func (m *Message) GetRecentMessages(c *gin.Context) error {
+//	targetID := c.Query("target_id")
+//	limitStr := c.DefaultQuery("limit", "20")
+//	limit, _ := strconv.Atoi(limitStr)
+//
+//	msgs, err := m.MessageService.GetRecentMessages(targetID, limit)
+//	if err != nil {
+//		return response.NewError(500, err.Error())
+//	}
+//	response.Success(c, msgs)
+//	return nil
+//}
 
 func (m *Message) ListMessages(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
