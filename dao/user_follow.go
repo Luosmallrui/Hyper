@@ -136,12 +136,17 @@ func (d *UserFollowDAO) GetFollowingList(ctx context.Context, userID uint64, lim
 }
 
 func (d *UserFollowDAO) CheckExists(ctx context.Context, followerID, followeeID uint64) (bool, error) {
-	var count int64
+	var uf models.UserFollow
+
 	err := d.Db.WithContext(ctx).
-		Model(&models.UserFollow{}).
-		Where("follower_id = ? AND followee_id = ?", followerID, followeeID).
-		Count(&count).Error
-	return count > 0, err
+		Where("follower_id = ? AND followee_id = ? AND status = 1", followerID, followeeID).
+		Limit(1).
+		Find(&uf).Error
+
+	if err != nil {
+		return false, err
+	}
+	return uf.ID != 0, nil
 }
 
 func (d *UserFollowDAO) GetFollowerFeed(ctx context.Context, userID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error) {
