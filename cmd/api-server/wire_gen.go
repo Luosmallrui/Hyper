@@ -88,11 +88,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	messageDAO := dao.NewMessageDAO(db)
 	relation := cache.NewRelation(redisClient)
 	groupMember := dao.NewGroupMember(db, relation)
-	groupDAO := dao.NewGroupDAO(db)
+	group := dao.NewGroup(db)
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,
 		GroupMemberDAO: groupMember,
-		GroupDAO:       groupDAO,
+		GroupDAO:       group,
 		MqProducer:     producer,
 		Redis:          redisClient,
 		DB:             db,
@@ -189,7 +189,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 		Config:         cfg,
 	}
-	group := dao.NewGroup(db)
 	groupService := &service.GroupService{
 		DB:             db,
 		GroupMemberDAO: groupMember,
@@ -208,7 +207,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		GroupMemberDAO: groupMember,
 		SessionDAO:     sessionDAO,
 		UnreadStorage:  unreadStorage,
-		GroupDAO:       groupDAO,
 	}
 	groupMemberHandler := &handler.GroupMemberHandler{
 		Config:             cfg,

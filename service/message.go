@@ -19,7 +19,7 @@ import (
 type MessageService struct {
 	MessageDao     *dao.MessageDAO
 	GroupMemberDAO *dao.GroupMember
-	GroupDAO       *dao.GroupDAO
+	GroupDAO       *dao.Group
 	MqProducer     rmq_client.Producer
 	Redis          *redis.Client
 	DB             *gorm.DB
