@@ -49,7 +49,7 @@ func (m *Message) SendMessage(c *gin.Context) error {
 }
 
 func (m *Message) ListMessages(c *gin.Context) error {
-	userId := c.GetInt("userId")
+	userId := c.GetInt("user_id")
 
 	peerId, _ := strconv.ParseUint(c.Query("peer_id"), 10, 64)
 	sessionType, _ := strconv.Atoi(c.DefaultQuery("session_type", "1"))
