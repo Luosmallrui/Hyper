@@ -230,7 +230,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	party := &handler.Party{
 		DB: db,
 	}
-	point := &handler.Point{}
 	orderService := &service.OrderService{
 		Redis: redisClient,
 		DB:    db,
@@ -238,6 +237,17 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	order := &handler.Order{
 		Config:       cfg,
 		OrderService: orderService,
+	}
+	point := dao.NewPoint(db)
+	pointService := &service.PointService{
+		Config:   cfg,
+		DB:       db,
+		Redis:    redisClient,
+		PointDAO: point,
+	}
+	pointHandler := &handler.PointHandler{
+		Config:       cfg,
+		PointService: pointService,
 	}
 	handlers := &server.Handlers{
 		Auth:            auth,
@@ -254,8 +264,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TopicHandler:    topicHandler,
 		ProductHandler:  productHandler,
 		Party:           party,
-		Points:          point,
 		Order:           order,
+		Points:          pointHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
