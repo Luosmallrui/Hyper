@@ -38,6 +38,9 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(TopicService), "*"),
 	wire.Bind(new(ITopicService), new(*TopicService)),
 
+	wire.Struct(new(PointService), "*"),
+	wire.Bind(new(IPointService), new(*PointService)),
+
 	wire.Struct(new(LikeService), "*"),
 	wire.Bind(new(ILikeService), new(*LikeService)),
 	wire.Struct(new(CollectService), "*"),

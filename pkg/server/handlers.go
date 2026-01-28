@@ -19,5 +19,5 @@ type Handlers struct {
 	TopicHandler    *handler.TopicHandler
 	ProductHandler  *handler.ProductHandler
 	Party           *handler.Party
-	Points          *handler.Point
+	Points          *handler.PointHandler
 }
