@@ -28,27 +28,14 @@ type IGroupMemberService interface {
 }
 
 type GroupMemberService struct {
-	GroupMemberDAO  *dao.GroupMember
-	DB              *gorm.DB
-	Redis           *redis.Client
-	GroupMemberRepo *dao.GroupMember
-	GroupRepo       *dao.Group
-	Relation        *cache.Relation
+	Redis          *redis.Client
+	GroupRepo      *dao.Group
+	Relation       *cache.Relation
 	DB             *gorm.DB
 	GroupMemberDAO *dao.GroupMember
 	SessionDAO     *dao.SessionDAO
 	UnreadStorage  *cache.UnreadStorage
 	GroupDAO       *dao.GroupDAO
-	//Redis           *redis.Client
-	//GroupMemberRepo *dao.GroupMember
-}
-
-func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
-	return &GroupMemberService{
-		DB: db,
-		//Redis:           redisClient,
-		//GroupMemberRepo: dao.NewGroupMemberDao(db),
-	}
 }
 
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
