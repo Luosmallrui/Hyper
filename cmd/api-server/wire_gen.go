@@ -256,6 +256,15 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:       cfg,
 		PointService: pointService,
 	}
+	searchService := service.SearchService{
+		Config: cfg,
+		DB:     db,
+		Redis:  redisClient,
+	}
+	searchHandler := &handler.SearchHandler{
+		Config: cfg,
+		Serch:  searchService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -273,6 +282,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Party:           party,
 		Order:           order,
 		Points:          pointHandler,
+		Serch:           searchHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
