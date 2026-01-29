@@ -174,3 +174,14 @@ func (d *UserFollowDAO) GetFollowerFeed(ctx context.Context, userID uint64, curs
 	err := query.Limit(limit).Find(&results).Error
 	return results, err
 }
+
+func (d *UserFollowDAO) GetFollowingIDs(ctx context.Context, userID int) ([]int, error) {
+	followingIds := make([]int, 0)
+	err := d.Db.WithContext(ctx).Model(&models.UserFollow{}).
+		Where("user_id = ?", userID).
+		Pluck("following_id", &followingIds).Error
+	if err != nil {
+		return followingIds, err
+	}
+	return followingIds, nil
+}

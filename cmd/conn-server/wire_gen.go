@@ -93,6 +93,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		UnreadStorage:  unreadStorage,
 		UserService:    userService,
 		SessionDAO:     sessionDAO,
+		GroupDAO:       group,
 	}
 	messageSubscribe := &process.MessageSubscribe{
 		Redis:          redisClient,

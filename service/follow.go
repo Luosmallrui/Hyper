@@ -27,6 +27,7 @@ type IFollowService interface {
 	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error)
 	GetFollowList(ctx context.Context, myID uint64, listType string, cursor int64, limit int) ([]*models.FollowingQueryResult, int64, bool, error)
+	GetFollowingIDs(ctx context.Context, userID int) ([]int, error)
 }
 
 type FollowService struct {
@@ -35,6 +36,10 @@ type FollowService struct {
 	UserDAO   *dao.Users
 	Producer  rmq_client.Producer
 	Redis     *redis.Client
+}
+
+func (s *FollowService) GetFollowingIDs(ctx context.Context, userID int) ([]int, error) {
+	return s.FollowDAO.GetFollowingIDs(ctx, userID)
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
