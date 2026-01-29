@@ -25,8 +25,8 @@ func (f *Follow) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(f.Config.Jwt.Secret))
 	g := r.Group("/v1/follow")
 	g.POST("/follow", authorize, context.Wrap(f.FollowUser))
-	g.DELETE("/unfollow", authorize, context.Wrap(f.UnfollowUser))
-	g.GET("/:user_id/follow", authorize, context.Wrap(f.GetFollowStatus))
+	g.POST("/unfollow", authorize, context.Wrap(f.UnfollowUser))
+	g.GET("/:user_id", authorize, context.Wrap(f.GetFollowStatus))
 	g.GET("/:user_id/followers/count", context.Wrap(f.GetFollowerCount))
 	g.GET("/:user_id/following/count", context.Wrap(f.GetFollowingCount))
 	g.GET("/list", authorize, context.Wrap(f.GetFollowingList))
@@ -96,7 +96,7 @@ func (f *Follow) GetFollowStatus(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
-	response.Success(c, gin.H{"is_following": isFollowing})
+	response.Success(c, gin.H{"is_followed": isFollowing})
 	return nil
 }
 

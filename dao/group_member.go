@@ -13,6 +13,12 @@ type GroupMember struct {
 	relation *cache.Relation
 }
 
+func (g *GroupMember) WithDB(db *gorm.DB) *GroupMember {
+	ng := *g // 浅拷贝：relation 指针会保留
+	ng.Repo = NewRepo[models.GroupMember](db)
+	return &ng
+}
+
 func NewGroupMember(db *gorm.DB, relation *cache.Relation) *GroupMember {
 	return &GroupMember{Repo: NewRepo[models.GroupMember](db), relation: relation}
 }
@@ -97,7 +103,7 @@ func (g *GroupMember) GetMemberRemark(ctx context.Context, groupId int, userId i
 func (g *GroupMember) GetMembers(ctx context.Context, groupId int) []*models.MemberItem {
 	fields := []string{
 		"group_member.id",
-		"group_member.role as leader",
+		"group_member.role",
 		"group_member.user_card",
 		"group_member.user_id",
 		"group_member.is_mute",
@@ -143,4 +149,20 @@ func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
 	}
 
 	return items, nil
+}
+
+func (g *GroupMember) ClearGroupRelation(ctx context.Context, uid int, gid int) {
+	g.relation.DelGroupRelation(ctx, uid, gid)
+}
+func (g *GroupMember) SetMemberMute(ctx context.Context, gid int, uid int, mute int) error {
+	return g.Repo.Model(ctx).
+		Where("group_id = ? AND user_id = ? AND is_quit = 0", gid, uid).
+		Update("is_mute", mute).Error
+}
+
+// UpdateRole 更新群成员角色（只允许更新未退群成员）
+func (g *GroupMember) UpdateRole(ctx context.Context, gid int, uid int, role int) error {
+	return g.Repo.Model(ctx).
+		Where("group_id = ? AND user_id = ? AND is_quit = 0", gid, uid).
+		Update("role", role).Error
 }
