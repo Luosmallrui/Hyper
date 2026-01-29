@@ -21,4 +21,5 @@ type Handlers struct {
 	Party           *handler.Party
 	Order           *handler.Order
 	Points          *handler.PointHandler
+	Serch           *handler.SearchHandler
 }

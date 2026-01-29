@@ -83,6 +83,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.ProductHandler.RegisterRouter(api)
 	h.Points.RegisterRouter(api)
 	h.Order.RegisterRouter(api)
+	h.Serch.RegisterRouter(api)
 	return r
 }
 
