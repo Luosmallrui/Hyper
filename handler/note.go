@@ -36,6 +36,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
 	g.GET("/list", authorize, context.Wrap(n.ListNote))
+	g.GET("/followed", authorize, context.Wrap(n.ListFollowedNotes))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
 	g.DELETE("/:note_id/like", authorize, context.Wrap(n.Unlike))
@@ -104,6 +105,26 @@ func (n *Note) ListNote(c *gin.Context) error {
 
 	// 调用 Service
 	rep, err := n.NoteService.ListNote(c.Request.Context(), req.Cursor, req.PageSize, uint64(userID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+	}
+
+	response.Success(c, rep)
+	return nil
+}
+
+func (n *Note) ListFollowedNotes(c *gin.Context) error {
+	userID := c.GetInt("user_id")
+	var req types.ListNotesReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+
+	if req.PageSize == 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+
+	rep, err := n.NoteService.GetFollowedPosts(c.Request.Context(), userID, req.Cursor, req.PageSize)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
 	}

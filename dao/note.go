@@ -131,3 +131,14 @@ func (d *NoteDAO) ListNodeByUser(
 
 	return notes, err
 }
+
+func (d *NoteDAO) ListNodeByUserIDs(ctx context.Context, userIDs []int, cursor int64, limit int) ([]models.Note, error) {
+	var nodes []models.Note
+	query := d.Db.WithContext(ctx).Where("user_id IN ?", userIDs)
+
+	if cursor > 0 {
+		query = query.Where("id < ?", cursor)
+	}
+	err := query.Order("id DESC").Limit(limit).Find(&nodes).Error
+	return nodes, err
+}

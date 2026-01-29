@@ -106,6 +106,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UnreadStorage:  unreadStorage,
 		UserService:    userService,
 		SessionDAO:     sessionDAO,
+		GroupDAO:       group,
 	}
 	message := &handler.Message{
 		MessageService: messageService,
