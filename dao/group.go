@@ -42,3 +42,22 @@ func (g *Group) UpdateOwnerId(ctx context.Context, groupId int, newOwnerId int) 
 		Where("id = ?", groupId).
 		Update("owner_id", newOwnerId).Error
 }
+
+func (g *Group) BatchGetByIDs(ctx context.Context, gids []uint64) (map[uint64]*models.Group, error) {
+	res := make(map[uint64]*models.Group)
+	if len(gids) == 0 {
+		return res, nil
+	}
+
+	var rows []models.Group
+	if err := g.Db.WithContext(ctx).Where("id IN ?", gids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		gg := rows[i] // 注意取地址的写法，避免指针复用坑
+		res[uint64(gg.Id)] = &gg
+	}
+
+	return res, nil
+}
