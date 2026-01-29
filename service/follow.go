@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -28,6 +27,7 @@ type IFollowService interface {
 	CheckFollowStatus(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetMyFollowingListWithStatus(ctx context.Context, myID uint64, cursor int64, limit int) ([]*models.FollowingQueryResult, error)
 	GetFollowList(ctx context.Context, myID uint64, listType string, cursor int64, limit int) ([]*models.FollowingQueryResult, int64, bool, error)
+	GetFollowingIDs(ctx context.Context, userID int) ([]int, error)
 }
 
 type FollowService struct {
@@ -36,6 +36,10 @@ type FollowService struct {
 	UserDAO   *dao.Users
 	Producer  rmq_client.Producer
 	Redis     *redis.Client
+}
+
+func (s *FollowService) GetFollowingIDs(ctx context.Context, userID int) ([]int, error) {
+	return s.FollowDAO.GetFollowingIDs(ctx, userID)
 }
 
 func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint64) error {
@@ -155,7 +159,7 @@ func (s *FollowService) Unfollow(ctx context.Context, followerID, followeeID uin
 }
 
 func (s *FollowService) IsFollowing(ctx context.Context, followerID, followeeID uint64) (bool, error) {
-	return s.FollowDAO.IsFollowing(ctx, followerID, followeeID)
+	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }
 
 func (s *FollowService) GetFollowerCount(ctx context.Context, userID uint64) (int64, error) {
@@ -234,13 +238,13 @@ func (s *FollowService) CheckFollowStatus(ctx context.Context, followerID, follo
 	if followerID == 0 || followerID == followeeID {
 		return false, nil
 	}
-
-	// 类似的逻辑
-	key := fmt.Sprintf("user:following:%d", followerID)
-	exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
-	if err == nil {
-		return exists, nil
-	}
+	//
+	//// 类似的逻辑
+	//key := fmt.Sprintf("user:following:%d", followerID)
+	//exists, err := s.Redis.SIsMember(ctx, key, followeeID).Result()
+	//if err == nil {
+	//	return exists, nil
+	//}
 
 	return s.FollowDAO.CheckExists(ctx, followerID, followeeID)
 }

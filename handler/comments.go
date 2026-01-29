@@ -18,13 +18,6 @@ type CommentsHandler struct {
 	CommentsService service.ICommentsService
 }
 
-func NewCommentsHandler(config *config.Config, commentsService service.ICommentsService) *CommentsHandler {
-	return &CommentsHandler{
-		CommentsService: commentsService,
-		Config:          config,
-	}
-}
-
 func (ch *CommentsHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(ch.Config.Jwt.Secret))
 	comments := r.Group("/v1/comments")

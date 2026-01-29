@@ -29,10 +29,6 @@ type GroupService struct {
 	Relation       *cache.Relation
 }
 
-func NewGroupService(db *gorm.DB) *GroupService {
-	return &GroupService{DB: db}
-}
-
 // 创建群
 func (s *GroupService) CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*models.Group, error) {
 	group := &models.Group{

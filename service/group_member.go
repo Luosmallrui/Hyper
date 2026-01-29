@@ -4,6 +4,7 @@ import (
 	"Hyper/dao"
 	"Hyper/dao/cache"
 	"Hyper/models"
+	"Hyper/pkg/response"
 	"Hyper/types"
 	"context"
 	"errors"
@@ -18,22 +19,22 @@ var _ IGroupMemberService = (*GroupMemberService)(nil)
 type IGroupMemberService interface {
 	InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error)
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
+	ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error)
+	QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error)
+	MuteMember(ctx context.Context, groupId int, operatorId int, targetUserId int, mute bool) error
+	SetMuteAll(ctx context.Context, groupId int, operatorId int, mute bool) (*types.MuteAllResponse, error)
+	SetAdmin(ctx context.Context, groupId int, operatorId int, targetUserId int, admin bool) error
+	TransferOwner(ctx context.Context, groupId int, operatorId int, newOwnerId int) (*types.TransferOwnerResponse, error)
 }
 
 type GroupMemberService struct {
-	DB              *gorm.DB
-	Redis           *redis.Client
-	GroupMemberRepo *dao.GroupMember
-	GroupRepo       *dao.Group
-	Relation        *cache.Relation
-}
-
-func NewGroupMemberService(db *gorm.DB) *GroupMemberService {
-	return &GroupMemberService{
-		DB: db,
-		//Redis:           redisClient,
-		//GroupMemberRepo: dao.NewGroupMemberDao(db),
-	}
+	Redis          *redis.Client
+	GroupRepo      *dao.Group
+	Relation       *cache.Relation
+	DB             *gorm.DB
+	GroupMemberDAO *dao.GroupMember
+	SessionDAO     *dao.SessionDAO
+	UnreadStorage  *cache.UnreadStorage
 }
 
 func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error) {
@@ -175,4 +176,267 @@ func (s *GroupMemberService) KickMember(ctx context.Context, GroupId int, Kicked
 		return err
 	}
 	return nil
+}
+
+func (s *GroupMemberService) ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error) {
+	// 1) 权限：必须是群成员
+	if !s.GroupMemberDAO.IsMember(ctx, groupId, userId, true) {
+		return nil, response.NewError(403, "你不在群内或已退出")
+	}
+
+	// 2) DAO 拿到 models.MemberItem 列表
+	items := s.GroupMemberDAO.GetMembers(ctx, groupId)
+
+	// 3) 映射成 DTO
+	dtos := make([]types.GroupMemberItemDTO, 0, len(items))
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		dtos = append(dtos, types.GroupMemberItemDTO{
+			Role:     it.Role,
+			UserCard: it.UserCard,
+			UserId:   it.UserId,
+			IsMute:   it.IsMute,
+			Avatar:   it.Avatar,
+			Nickname: it.Nickname,
+			Gender:   it.Gender,
+			Motto:    it.Motto,
+		})
+	}
+	return dtos, nil
+}
+func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error) {
+	// 1) 先查成员记录，判断是否在群里
+	member, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, userId)
+	if err != nil {
+		return nil, errors.New("你不在该群，无法退群")
+	}
+	if member.IsQuit == 1 {
+		return nil, errors.New("你已经退过该群了")
+	}
+
+	// 2) 开事务处理：退群/解散 + 清会话 + 清未读
+	resp := &types.QuitGroupResponse{Disbanded: false}
+
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+
+		// 群主退群 => 解散群
+		if member.Role == models.GroupMemberLeaderOwner {
+			resp.Disbanded = true
+
+			// 2.1 先拿到所有未退群成员（用于清未读/删会话）
+			memberIDs, err := s.GroupMemberDAO.GetMemberIds(ctx, groupId)
+			if err != nil {
+				return err
+			}
+
+			// 2.2 全员标记退群
+			if err := tx.Table("group_member").
+				Where("group_id = ? AND is_quit = 0", groupId).
+				Updates(map[string]any{
+					"is_quit":    1,
+					"updated_at": time.Now(),
+				}).Error; err != nil {
+				return err
+			}
+
+			// 2.3 删除群（表结构没软删字段，这里用硬删）
+			if err := tx.Table("groups").Where("id = ?", groupId).Delete(nil).Error; err != nil {
+				return err
+			}
+
+			// 2.4 删除所有人的群会话
+			if err := s.SessionDAO.DeleteSessionsByPeer(ctx, 2, uint64(groupId)); err != nil {
+				return err
+			}
+
+			// 2.5 清所有人该群的未读（Redis）
+			for _, uid := range memberIDs {
+				if s.UnreadStorage != nil {
+					s.UnreadStorage.Reset(ctx, uid, 2, groupId)
+				} //实际上现在已经改为以DB为未读权威了
+				// 同时建议删关系缓存（否则 IsMember cache 命中会误判）
+				s.GroupMemberDAO.ClearGroupRelation(ctx, uid, groupId)
+			}
+
+			return nil
+		}
+
+		// 普通成员退群
+		if err := tx.Table("group_member").
+			Where("group_id = ? AND user_id = ? AND is_quit = 0", groupId, userId).
+			Updates(map[string]any{
+				"is_quit":    1,
+				"updated_at": time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+
+		// member_count - 1
+		if err := tx.Table("groups").
+			Where("id = ? AND member_count > 0", groupId).
+			UpdateColumn("member_count", gorm.Expr("member_count - 1")).Error; err != nil {
+			return err
+		}
+
+		// 删除该用户的群会话
+		if err := s.SessionDAO.DeleteSession(ctx, uint64(userId), 2, uint64(groupId)); err != nil {
+			return err
+		}
+
+		// 清该用户该群未读
+		// DB 权威未读：会话行已删除，因此 DB 未读自动消失
+		// Redis unread 仅用于清理历史残留 key（兼容旧逻辑/防鬼未读）
+		if s.UnreadStorage != nil {
+			s.UnreadStorage.Reset(ctx, userId, 2, groupId)
+		}
+
+		// 删关系缓存，避免缓存命中仍被当成员
+		s.GroupMemberDAO.ClearGroupRelation(ctx, userId, groupId)
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+// 个人禁言
+func (s *GroupMemberService) MuteMember(ctx context.Context, gid int, operatorId int, targetId int, mute bool) error {
+	// 1) 操作者必须在群里且未退群
+	op, err := s.GroupMemberDAO.FindByUserId(ctx, gid, operatorId)
+	if err != nil || op.IsQuit == 1 {
+		return errors.New("你不在群内或已退群")
+	}
+
+	// 2) 目标必须在群里且未退群
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, gid, targetId)
+	if err != nil || target.IsQuit == 1 {
+		return errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 权限判断（只允许群主/管理员操作）
+	if op.Role != 1 && op.Role != 2 {
+		return errors.New("无权限操作")
+	}
+
+	// 4) 不能禁言群主
+	if target.Role == 1 {
+		return errors.New("不能禁言群主")
+	}
+
+	// 5) 管理员不能禁言管理员
+	if op.Role == 2 && target.Role == 2 {
+		return errors.New("管理员不能禁言其他管理员")
+	}
+
+	val := 0
+	if mute {
+		val = 1
+	}
+
+	return s.GroupMemberDAO.SetMemberMute(ctx, gid, targetId, val)
+}
+
+// 群禁言开关
+func (s *GroupMemberService) SetMuteAll(ctx context.Context, gid int, operatorId int, mute bool) (*types.MuteAllResponse, error) {
+	op, err := s.GroupMemberDAO.FindByUserId(ctx, gid, operatorId)
+	if err != nil || op.IsQuit == 1 {
+		return nil, errors.New("你不在群内或已退群")
+	}
+	if op.Role != 1 && op.Role != 2 {
+		return nil, errors.New("无权限操作")
+	}
+
+	val := 0
+	if mute {
+		val = 1
+	}
+	if err := s.GroupRepo.SetMuteAll(ctx, gid, val); err != nil {
+		return nil, err
+	}
+	return &types.MuteAllResponse{IsMuteAll: mute}, nil
+}
+func (s *GroupMemberService) SetAdmin(ctx context.Context, groupId int, operatorId int, targetUserId int, admin bool) error {
+	// 1) 只有群主可操作
+	if !s.GroupMemberDAO.IsMaster(ctx, groupId, operatorId) {
+		return errors.New("无权限操作")
+	}
+
+	// 2) 查目标成员是否在群内（未退群）
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, targetUserId)
+	if err != nil || target.IsQuit == 1 {
+		return errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 不能操作群主
+	if target.Role == models.GroupMemberLeaderOwner {
+		return errors.New("不能操作群主")
+	}
+
+	// 4) 计算目标角色
+	newRole := models.GroupMemberLeaderOrdinary // 3 普通成员
+	if admin {
+		newRole = models.GroupMemberLeaderAdmin // 2 管理员
+	} //admin=true → role=2;admin=false → role=3
+
+	// 5) 幂等：已经是该角色就直接成功
+	if int(target.Role) == newRole {
+		return nil
+	}
+
+	// 6) 更新角色
+	return s.GroupMemberDAO.UpdateRole(ctx, groupId, targetUserId, newRole)
+}
+
+func (s *GroupMemberService) TransferOwner(
+	ctx context.Context,
+	groupId int,
+	operatorId int,
+	newOwnerId int,
+) (*types.TransferOwnerResponse, error) {
+
+	if groupId <= 0 || operatorId <= 0 || newOwnerId <= 0 {
+		return nil, errors.New("参数错误")
+	}
+	// 1) 只有群主能转让
+	if !s.GroupMemberDAO.IsMaster(ctx, groupId, operatorId) {
+		return nil, errors.New("无权限操作")
+	}
+	if operatorId == newOwnerId {
+		return nil, errors.New("不能转让给自己")
+	}
+	// 2) 新群主必须在群且未退群
+	target, err := s.GroupMemberDAO.FindByUserId(ctx, groupId, newOwnerId)
+	if err != nil || target.IsQuit == 1 {
+		return nil, errors.New("对方不在群内或已退群")
+	}
+
+	// 3) 事务：三步必须原子
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		groupDAO := s.GroupRepo
+		gmDAO := s.GroupMemberDAO.WithDB(tx)
+
+		// 3.1 更新群主字段
+		if err := groupDAO.UpdateOwnerId(ctx, groupId, newOwnerId); err != nil {
+			return err
+		}
+		// 3.2 旧群主降级为普通成员(3)
+		if err := gmDAO.UpdateRole(ctx, groupId, operatorId, 3); err != nil {
+			return err
+		}
+		// 3.3 新群主升为群主(1)
+		if err := gmDAO.UpdateRole(ctx, groupId, newOwnerId, 1); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.TransferOwnerResponse{Success: true}, nil
 }

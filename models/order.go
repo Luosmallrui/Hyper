@@ -4,21 +4,20 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
-	"gorm.io/gorm"
 )
 
 // Order 订单主表
 type Order struct {
-	ID          int            `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID      int            `gorm:"column:user_id;not null;index:idx_user_id" json:"user_id"`
-	OrderSn     string         `gorm:"column:order_sn;type:varchar(32);not null;uniqueIndex:idx_order_sn" json:"order_sn"`
-	TotalAmount uint64         `gorm:"column:total_amount;not null" json:"total_amount"` // 单位：分
-	Description string         `gorm:"column:description;type:varchar(255)" json:"description"`
-	Status      int8           `gorm:"column:status;not null;default:10" json:"status"` // 10:待支付, 20:已支付...
-	PaidAt      *time.Time     `gorm:"column:paid_at" json:"paid_at"`
-	CreatedAt   time.Time      `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"` // 如果需要软删除
+	ID          int        `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID      int        `gorm:"column:user_id;not null;index:idx_user_id" json:"user_id"`
+	OrderSn     string     `gorm:"column:order_sn;type:varchar(32);not null;uniqueIndex:idx_order_sn" json:"order_sn"`
+	TotalAmount uint64     `gorm:"column:total_amount;not null" json:"total_amount"` // 单位：分
+	Description string     `gorm:"column:description;type:varchar(255)" json:"description"`
+	Status      int8       `gorm:"column:status;not null;default:10" json:"status"` // 10:待支付, 20:已支付...
+	PaidAt      *time.Time `gorm:"column:paid_at" json:"paid_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	//DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"` // 如果需要软删除
 }
 
 func (Order) TableName() string {

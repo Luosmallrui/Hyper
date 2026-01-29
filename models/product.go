@@ -39,6 +39,8 @@ type OrderItem struct {
 	CoverImage     string    `gorm:"size:512;default:'';column:cover_image" json:"cover_image"`         // CoverImage: 冗余商品封面图，防止原图失效
 	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`                // CreatedAt: 明细创建时间
 	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`                // UpdatedAt: 最后更新时间
+	ConsumeType    string    `gorm:"column:consume_type" json:"consume_type"`                           // ConsumeType: 消费类型 票or商品
+	SellerID       int       `gorm:"column:seller_id" json:"seller_id"`                                 // SellerID 商家ID
 }
 
 func (OrderItem) TableName() string {

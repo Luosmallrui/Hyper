@@ -39,6 +39,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.GroupMemberHandler), "*"),
 		wire.Struct(new(handler.Party), "*"),
 		wire.Struct(new(handler.PointHandler), "*"),
+		wire.Struct(new(handler.Order), "*"),
 
 		wire.Struct(new(handler.ProductHandler), "*"),
 

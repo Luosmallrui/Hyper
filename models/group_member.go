@@ -28,13 +28,13 @@ func (GroupMember) TableName() string {
 }
 
 type MemberItem struct {
-	Id       string `json:"id"`
+	Id       int    `json:"id"`
 	UserId   int    `json:"user_id"`
 	Avatar   string `json:"avatar"`
 	Nickname string `json:"nickname"`
 	Gender   int    `json:"gender"`
 	Motto    string `json:"motto"`
-	Leader   int    `json:"leader"`
+	Role     int    `json:"role"`
 	IsMute   int    `json:"is_mute"`
 	UserCard string `json:"user_card"`
 }
