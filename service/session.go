@@ -21,6 +21,7 @@ type SessionService struct {
 	UnreadStorage  *cache.UnreadStorage
 	UserService    IUserService
 	SessionDAO     *dao.SessionDAO
+	GroupDAO       *dao.Group
 }
 
 func SessionMapKey(sessionType int, peerId uint64) string {
@@ -211,18 +212,28 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 		return []*types.SessionDTO{}, nil
 	}
 
-	// 2. 只收集私聊需要查的 user_id（群聊 peer_id 是 group_id，不能拿去查用户）
+	// 2. 收集id
 	peerIds := make([]uint64, 0, len(convs))
+	groupIds := make([]uint64, 0, len(convs))
+
 	for _, c := range convs {
 		if c.SessionType == types.SessionTypeSingle {
 			peerIds = append(peerIds, c.PeerId)
+		} else if c.SessionType == types.GroupChatSessionTypeGroup {
+			groupIds = append(groupIds, c.PeerId) // peer_id 就是 group_id
 		}
 	}
 
 	// 3. 批量获取用户信息 (从 Redis + DB 回源)
 	// 建议封装成我们之前讨论的 BatchGetUserInfo
 	userInfoMap := s.UserService.BatchGetUserInfo(ctx, peerIds)
-
+	groupInfoMap := map[uint64]*models.Group{}
+	if s.GroupDAO != nil {
+		m, err := s.GroupDAO.BatchGetByIDs(ctx, groupIds)
+		if err == nil {
+			groupInfoMap = m
+		}
+	}
 	// 4. 批量获取 Redis 中的最后一条消息
 	// 注意：这里推荐在 MessageService 内部实现一个 Pipeline 批量获取方法
 	//DB作为权威未读
@@ -246,24 +257,34 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 				dto.PeerAvatar = info.Avatar
 			}
 		} else {
-			// B) 群聊：peer_id 是 group_id，先兜底显示，避免串到用户
-			dto.PeerName = fmt.Sprintf("群聊(%d)", c.PeerId)
-			dto.PeerAvatar = ""
+			if g, ok := groupInfoMap[c.PeerId]; ok {
+				dto.PeerName = g.Name
+				dto.PeerAvatar = g.Avatar
+			} else {
+				dto.PeerName = fmt.Sprintf("群聊(%d)", c.PeerId)
+				dto.PeerAvatar = ""
+			}
 		}
 
-		// 优先使用 Redis 中的实时数据，如果不存在再用数据库里的兜底
+		// 优先使用 Redis 中的实时数据，但必须保证不被旧值覆盖 DB
 		k := SessionMapKey(c.SessionType, c.PeerId)
 
 		if last, ok := lastMsgMap[k]; ok {
-			dto.LastMsg = last.Content
-			dto.LastMsgTime = last.Timestamp
+			// 只有当 Redis 的时间 >= DB 才采用 Redis，避免 Redis 陈旧覆盖 DB
+			if last.Timestamp >= c.LastMsgTime {
+				dto.LastMsg = last.Content
+				dto.LastMsgTime = last.Timestamp
+			} else {
+				dto.LastMsg = c.LastMsgContent
+				dto.LastMsgTime = c.LastMsgTime
+			}
 		} else {
 			dto.LastMsg = c.LastMsgContent
 			dto.LastMsgTime = c.LastMsgTime
 		}
+
 		result = append(result, dto)
 	}
-
 	return result, nil
 }
 func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error {

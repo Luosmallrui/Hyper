@@ -372,26 +372,26 @@ Authorization: Bearer <token>
   "data": {
     "list": [
       {
+        "session_type": 2,
+        "peer_id": 8,
+        "last_msg": "群禁言，管我群主什么事",
+        "last_msg_time": 1768831351992,
+        "unread": 3,
+        "is_top": 0,
+        "is_mute": 0,
+        "peer_avatar": "https://example.com/group/avatar.png",
+        "peer_name": "啊对对对"
+      },
+      {
         "session_type": 1,
         "peer_id": 9,
-        "last_msg": "你是谁",
-        "last_msg_time": 1767884209419,
-        "unread": 7,
+        "last_msg": "哇咔咔",
+        "last_msg_time": 1768643686703,
+        "unread": 1,
         "is_top": 0,
         "is_mute": 0,
         "peer_avatar": "https://mmbiz.qpic.cn/mmbiz/icTdbqWNOwNRna42FI242Lcia07jQodd2FJGIYQfG0LAJGFxM4FbnQP6yfMxBgJ0F3YRqJCJ1aPAK2dQagdusBZg/0",
         "peer_name": "泥嚎"
-      },
-      {
-        "session_type": 2,
-        "peer_id": 5,
-        "last_msg": "拉回后测试：10应该收到",
-        "last_msg_time": 1768579935905,
-        "unread": 0,
-        "is_top": 0,
-        "is_mute": 0,
-        "peer_avatar": "https://cdn.hypercn.cn/avatars/05/5/876d0321.jpg",
-        "peer_name": "鸟鸟"
       }
     ]
   }
