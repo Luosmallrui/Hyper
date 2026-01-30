@@ -28,19 +28,16 @@ func (ch *Channel) RegisterRouter(r gin.IRouter) {
 }
 
 func (ch *Channel) UploadIcon(c *gin.Context) error {
-	userID, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
-	}
 	header, err := c.FormFile("image")
 	if err != nil {
 		return response.NewError(400, "missing image")
 	}
-	img, err := ch.OssService.UploadImage(c.Request.Context(), int(userID), header)
+	img, err := ch.OssService.UploadIcon(c.Request.Context(), header)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, img)
+	return nil
 }
 
 func (ch *Channel) GetChannelsList(c *gin.Context) error {
