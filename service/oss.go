@@ -49,6 +49,94 @@ type IOssService interface {
 
 	ListBuckets(ctx context.Context) ([]string, error)
 	UploadImage(ctx context.Context, userID int, header *multipart.FileHeader) (*types.UploadImageResp, error)
+	UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error)
+}
+
+func (s *OssService) UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error) {
+
+	const maxSize int64 = 10 << 20 // 10MB
+
+	if header == nil {
+		return nil, fmt.Errorf("missing image")
+	}
+	// header.Size 不可信，但可做第一道拦截
+	if header.Size <= 0 || header.Size > maxSize {
+		return nil, fmt.Errorf("image size invalid")
+	}
+
+	f, err := header.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// 要能 Seek，否则无法在“读头校验/取尺寸”后再上传同一份流
+	seeker, ok := f.(io.ReadSeeker)
+	if !ok {
+		return nil, fmt.Errorf("uploaded file is not seekable")
+	}
+
+	// 1) MIME 校验（读取前 512 bytes）
+	head := make([]byte, 512)
+	n, _ := seeker.Read(head)
+	contentType := http.DetectContentType(head[:n])
+	allowedMime := map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/webp": true,
+	}
+	if !allowedMime[contentType] {
+		return nil, fmt.Errorf("unsupported image type: %s", contentType)
+	}
+	_, _ = seeker.Seek(0, io.SeekStart)
+
+	// 2) 读取尺寸 + 格式（不解码全图）
+	cfg, format, err := image.DecodeConfig(seeker)
+	if err != nil {
+		return nil, fmt.Errorf("invalid image: %w", err)
+	}
+	format = strings.ToLower(format)
+	allowedFmt := map[string]bool{"jpeg": true, "png": true, "webp": true}
+	if !allowedFmt[format] {
+		return nil, fmt.Errorf("unsupported image format: %s", format)
+	}
+	_, _ = seeker.Seek(0, io.SeekStart)
+
+	// 3) 生成 ID / objectKey
+	imageID := snowflake.GenID()
+	ext := "." + format
+	if format == "jpeg" {
+		ext = ".jpg"
+	}
+	objectKey := fmt.Sprintf("icon/%s/%d%s",
+		time.Now().Format("2006/01/02"),
+		imageID,
+		ext,
+	)
+
+	// 4) 上传 OSS（强制限制读取）
+	limited := io.LimitReader(seeker, maxSize+1)
+
+	// 只保留一种：PutObject（示例，按你 OSS SDK 调整）
+	if _, err := s.Client.PutObject(ctx, &oss.PutObjectRequest{
+		Bucket: oss.Ptr(s.BucketName),
+		Key:    oss.Ptr(objectKey),
+		Body:   limited,
+	}); err != nil {
+		return nil, err
+	}
+
+	url := "https://cdn.hypercn.cn/" + objectKey
+	resp := &types.UploadImageResp{
+		ImageID: imageID,
+		Url:     url,
+		Width:   cfg.Width,
+		Height:  cfg.Height,
+	}
+	if resp.Tags == nil {
+		resp.Tags = make([]string, 0)
+	}
+	return resp, nil
 }
 
 func (s *OssService) UploadImage(ctx context.Context, userID int, header *multipart.FileHeader) (*types.UploadImageResp, error) {

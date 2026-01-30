@@ -243,6 +243,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	channel := &handler.Channel{
 		Config:     cfg,
 		ChannelSrv: channelService,
+		OssService: iOssService,
 	}
 	orderService := &service.OrderService{
 		Redis: redisClient,
