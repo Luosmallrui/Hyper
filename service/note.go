@@ -28,6 +28,8 @@ type INoteService interface {
 	GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error)
 	ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, TargetUser int) (types.ListNotesBriefRep, error)
 	GetFollowedPosts(ctx context.Context, userId int, cursor int64, pageSize int) (types.ListNotesRep, error)
+	GetALlNote(ctx context.Context) ([]*models.Note, error)
+	GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error)
 }
 type NoteService struct {
 	NoteDAO        *dao.NoteDAO
@@ -43,6 +45,141 @@ type NoteService struct {
 	DB             *gorm.DB
 }
 
+func (s *NoteService) GetALlNote(ctx context.Context) ([]*models.Note, error) {
+
+	return s.NoteDAO.ListAllNote(ctx)
+}
+
+func (s *NoteService) GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error) {
+	limit := pageSize + 1
+	nodes, err := s.NoteDAO.ListNodeByChannel(ctx, cursor, limit, channelId)
+	if err != nil {
+		return types.ListNotesRep{}, err
+	}
+
+	rep := types.ListNotesRep{
+		Notes:   make([]*types.Notes, 0),
+		HasMore: false,
+	}
+
+	if len(nodes) == 0 {
+		return rep, nil
+	}
+
+	displayCount := len(nodes)
+	if displayCount > pageSize {
+		rep.HasMore = true
+		displayCount = pageSize
+	}
+
+	// 收集ID
+	userIds := make([]uint64, 0, displayCount)
+	noteIds := make([]uint64, 0, displayCount)
+	for i := 0; i < displayCount; i++ {
+		userIds = append(userIds, nodes[i].UserID)
+		noteIds = append(noteIds, nodes[i].ID)
+	}
+
+	// 并发获取关联数据
+	var (
+		userMap       map[uint64]types.UserProfile
+		statsMap      map[uint64]*types.NoteStats
+		likeStatusMap map[uint64]bool
+		wg            sync.WaitGroup
+		mu            sync.Mutex
+	)
+
+	wg.Add(3)
+
+	// 获取用户信息
+	go func() {
+		defer wg.Done()
+		userMap = s.UserService.BatchGetUserInfo(ctx, userIds)
+	}()
+
+	// 获取统计数据
+	go func() {
+		defer wg.Done()
+		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
+		mu.Lock()
+		statsMap = stats
+		mu.Unlock()
+		if err != nil {
+			log.Error("批量获取统计数据失败", "error", err)
+		}
+	}()
+
+	// 获取点赞状态
+	go func() {
+		defer wg.Done()
+		if userId > 0 {
+			status, err := s.LikeService.BatchCheckLikeStatus(ctx, uint64(userId), noteIds)
+			mu.Lock()
+			likeStatusMap = status
+			mu.Unlock()
+			if err != nil {
+				log.Error("批量获取点赞状态失败", "error", err)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// 组装数据
+	for i := 0; i < displayCount; i++ {
+		note := nodes[i]
+		stats := statsMap[note.ID]
+		if stats == nil {
+			stats = &types.NoteStats{} // 默认值
+		}
+
+		dto := &types.Notes{
+			ID:           int64(note.ID),
+			UserID:       int64(note.UserID),
+			Title:        note.Title,
+			Content:      note.Content,
+			Type:         note.Type,
+			Status:       note.Status,
+			VisibleConf:  note.VisibleConf,
+			LikeCount:    stats.LikeCount,
+			CollCount:    stats.CollCount,
+			ShareCount:   stats.ShareCount,
+			CommentCount: stats.CommentCount,
+			ViewCount:    stats.ViewCount,
+			IsLiked:      likeStatusMap[note.ID],
+			CreatedAt:    note.CreatedAt,
+			UpdatedAt:    note.UpdatedAt,
+		}
+
+		if user, ok := userMap[note.UserID]; ok {
+			dto.Avatar = user.Avatar
+			dto.Nickname = user.Nickname
+		}
+
+		// 处理其他字段
+		if err := json.Unmarshal([]byte(note.TopicIDs), &dto.TopicIDs); err != nil {
+			dto.TopicIDs = make([]int64, 0)
+		}
+		if err := json.Unmarshal([]byte(note.Location), &dto.Location); err != nil {
+			dto.Location = types.Location{}
+		}
+
+		var noteMedia []types.NoteMedia
+		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
+			dto.MediaData = noteMedia[0]
+		} else {
+			dto.MediaData = types.NoteMedia{}
+		}
+
+		rep.Notes = append(rep.Notes, dto)
+	}
+
+	if displayCount > 0 {
+		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
+	}
+
+	return rep, nil
+}
 func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor int64, pageSize int) (types.ListNotesRep, error) {
 	followingIDs, err := s.FollowService.GetFollowingIDs(ctx, userId)
 	if err != nil {
@@ -170,6 +307,9 @@ func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor i
 		}
 
 		rep.Notes = append(rep.Notes, dto)
+	}
+	if displayCount > 0 {
+		rep.NextCursor = notes[displayCount-1].CreatedAt.UnixNano()
 	}
 
 	return rep, nil

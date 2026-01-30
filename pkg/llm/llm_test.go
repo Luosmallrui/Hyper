@@ -18,7 +18,7 @@ func TestClassifyMultiImageNote(t *testing.T) {
 
 	// 3. 执行测试
 	ctx := context.Background()
-	channel := ClassifyMultiImageNote(ctx, testTitle, testContent, testImages)
+	channel := ClassifyMultiImageNote(ctx, testTitle, testContent, testImages, testImages)
 
 	// 4. 验证结果
 	if channel == "" {

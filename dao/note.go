@@ -51,6 +51,29 @@ func (d *NoteDAO) ListNode(ctx context.Context, cursor int64, limit int) (notes 
 	return notes, err
 }
 
+func (d *NoteDAO) ListNodeByChannel(ctx context.Context, cursor int64, limit int, ChannelId int) (notes []*models.Note, err error) {
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).Where("channel_id = ?", ChannelId)
+
+	// 如果前端传了游标（大于0），则查询该时间点之前的数据
+	if cursor > 0 {
+		// 将纳秒时间戳转回 time.Time 对象
+		cursorTime := time.Unix(0, cursor)
+		db = db.Where("created_at < ?", cursorTime)
+	}
+	// 必须按时间倒序排，最新的在前
+	err = db.Order("created_at DESC").
+		Limit(limit).
+		Find(&notes).Error
+
+	return notes, err
+}
+
+func (d *NoteDAO) ListAllNote(ctx context.Context) (notes []*models.Note, err error) {
+	db := d.Db.WithContext(ctx).Model(&models.Note{})
+	err = db.Order("created_at DESC").Find(&notes).Error
+	return notes, err
+}
+
 // UpdateStatus 更新笔记状态
 func (d *NoteDAO) UpdateStatus(ctx context.Context, noteID uint64, status int) error {
 	return d.Db.WithContext(ctx).
