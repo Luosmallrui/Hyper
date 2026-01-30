@@ -40,6 +40,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Party), "*"),
 		wire.Struct(new(handler.PointHandler), "*"),
 		wire.Struct(new(handler.Order), "*"),
+		wire.Struct(new(handler.Channel), "*"),
 		wire.Struct(new(handler.SearchHandler), "*"),
 		wire.Struct(new(handler.ProductHandler), "*"),
 

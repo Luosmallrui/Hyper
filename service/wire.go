@@ -60,5 +60,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(OrderService), "*"),
 	wire.Bind(new(IOrderService), new(*OrderService)),
 
+	wire.Struct(new(ChannelService), "*"),
+	wire.Bind(new(IChannelService), new(*ChannelService)),
+
 	NewOssService,
 )

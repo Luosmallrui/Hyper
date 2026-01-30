@@ -237,6 +237,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	party := &handler.Party{
 		DB: db,
 	}
+	channelService := &service.ChannelService{
+		Db: db,
+	}
+	channel := &handler.Channel{
+		Config:     cfg,
+		ChannelSrv: channelService,
+	}
 	orderService := &service.OrderService{
 		Redis: redisClient,
 		DB:    db,
@@ -280,6 +287,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TopicHandler:    topicHandler,
 		ProductHandler:  productHandler,
 		Party:           party,
+		Channel:         channel,
 		Order:           order,
 		Points:          pointHandler,
 		Serch:           searchHandler,
