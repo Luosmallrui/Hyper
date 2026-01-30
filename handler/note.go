@@ -3,20 +3,25 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/middleware"
+	"Hyper/models"
 	"Hyper/pkg/context"
+	"Hyper/pkg/llm"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	base "context"
 	"encoding/json"
 	"fmt"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	_ "golang.org/x/image/webp"
+	"gorm.io/gorm"
 )
 
 type Note struct {
@@ -25,11 +30,15 @@ type Note struct {
 	LikeService    service.ILikeService
 	CollectService service.ICollectService
 	Config         *config.Config
+	Channel        service.IChannelService
+	Db             *gorm.DB
 }
 
 func (n *Note) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
+
+	g.GET("/gen", authorize, context.Wrap(n.Gen))
 	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
@@ -50,6 +59,55 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
 }
 
+func (n *Note) Gen(c *gin.Context) error {
+	// 1. 预先获取频道映射，避免在循环里调接口
+	tags, err := n.Channel.ListChannels(c.Request.Context(), &types.ListChannelsReq{})
+	if err != nil {
+		return err
+	}
+	tagsSlice := make([]string, 0)
+	tagsMap := make(map[string]int) // ID 建议用 uint32，与数据库对应
+	for _, v := range tags.Channels {
+		tagsSlice = append(tagsSlice, v.Name)
+		tagsMap[v.Name] = v.Id
+	}
+
+	// 2. 异步处理，不阻塞接口返回
+	go func() {
+		// 使用一个独立的 Context，不要用 Gin 的 c.Request.Context()，因为请求结束它会 cancel
+		ctx := base.Background()
+
+		// 3. 分批处理（例如每次取 100 条），只取未分类的 (channel_id = 0)
+		var notes []models.Note
+		n.Db.WithContext(ctx).Where("channel_id = ?", 0).FindInBatches(&notes, 100, func(tx *gorm.DB, batch int) error {
+			for _, v := range notes {
+				// 4. 解析媒体数据
+				var noteMedia []types.NoteMedia
+				_ = json.Unmarshal([]byte(v.MediaData), &noteMedia)
+				urlImages := make([]string, 0)
+				for _, m := range noteMedia {
+					urlImages = append(urlImages, m.URL)
+				}
+
+				// 5. 调用大模型
+				label := llm.ClassifyMultiImageNote(ctx, v.Title, v.Content, urlImages, tagsSlice)
+
+				// 6. 安全匹配 ID
+				if labelId, ok := tagsMap[label]; ok {
+					err := n.Db.Model(&models.Note{}).Where("id = ?", v.ID).Update("channel_id", labelId).Error
+					if err != nil {
+						log.Printf("更新笔记 %d 失败: %v", v.ID, err)
+					}
+				}
+			}
+			return nil
+		})
+	}()
+
+	// 接口立即返回
+	c.JSON(200, gin.H{"msg": "已开始异步分类任务"})
+	return nil
+}
 func (n *Note) GetNoteDetail(c *gin.Context) error {
 	// 获取笔记ID
 	noteIDStr := c.Param("note_id")
@@ -89,10 +147,7 @@ func (n *Note) UploadImage(c *gin.Context) error {
 }
 
 func (n *Note) ListNote(c *gin.Context) error {
-	userID, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
-	}
+	userId := c.GetInt("user_id")
 
 	var req types.ListNotesReq
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -102,14 +157,30 @@ func (n *Note) ListNote(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
-
-	// 调用 Service
-	rep, err := n.NoteService.ListNote(c.Request.Context(), req.Cursor, req.PageSize, uint64(userID))
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+	var resp types.ListNotesRep
+	var err error
+	if req.SearchType == "follow" {
+		resp, err = n.NoteService.GetFollowedPosts(c.Request.Context(), userId, req.Cursor, req.PageSize)
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+		}
+		response.Success(c, resp)
+		return nil
 	}
 
-	response.Success(c, rep)
+	if req.ChannelID > 0 {
+		resp, err = n.NoteService.GetNoteByChannelID(c.Request.Context(), userId, req.Cursor, req.PageSize, int(req.ChannelID))
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+		}
+	} else {
+		resp, err = n.NoteService.ListNote(c.Request.Context(), req.Cursor, req.PageSize, uint64(userId))
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, "获取笔记失败: "+err.Error())
+		}
+	}
+
+	response.Success(c, resp)
 	return nil
 }
 

@@ -74,11 +74,7 @@ func ParseTags(input string) []string {
 	return tags
 }
 
-func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs []string) string {
-	channels := []string{
-		"滑板", "骑行", "派对", "纹身", "改装车", "露营",
-		"篮球", "足球", "飞盘", "潮鞋", "电子竞技", "健身", "艺术",
-	}
+func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs []string, channels []string) string {
 	channelList := strings.Join(channels, "、")
 	promptText := fmt.Sprintf(
 		"你是一个内容分类专家。请结合提供的文字和图片，从以下列表中选择一个最贴切的频道返回。\n\n"+

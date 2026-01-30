@@ -171,8 +171,10 @@ type NoteBrief struct {
 }
 
 type ListNotesReq struct {
-	Cursor   int64 `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
-	PageSize int   `form:"pageSize"`
+	Cursor     int64  `form:"cursor"` // 传入上次最后一条记录的时间戳（纳秒或秒）
+	PageSize   int    `form:"pageSize"`
+	SearchType string `form:"search_type"`
+	ChannelID  int64  `form:"channel_id"`
 }
 type ListNotesRep struct {
 	Notes      []*Notes `json:"notes"`

@@ -148,12 +148,17 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TopicService:   topicService,
 		DB:             db,
 	}
+	channelService := &service.ChannelService{
+		Db: db,
+	}
 	note := &handler.Note{
 		OssService:     iOssService,
 		NoteService:    noteService,
 		LikeService:    likeService,
 		CollectService: collectService,
 		Config:         cfg,
+		Channel:        channelService,
+		Db:             db,
 	}
 	follow := &handler.Follow{
 		Config:        cfg,
@@ -236,9 +241,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	party := &handler.Party{
 		DB: db,
-	}
-	channelService := &service.ChannelService{
-		Db: db,
 	}
 	channel := &handler.Channel{
 		Config:     cfg,
