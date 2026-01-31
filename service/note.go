@@ -209,12 +209,28 @@ func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor i
 		displayCount = pageSize
 	}
 
-	// 收集ID用于后续批量获取
 	userIds := make([]uint64, 0, displayCount)
 	noteIds := make([]uint64, 0, displayCount)
+
+	// 定义临时 Map 用于去重
+	userMapT := make(map[uint64]struct{})
+	noteMap := make(map[uint64]struct{})
+
 	for i := 0; i < displayCount; i++ {
-		userIds = append(userIds, notes[i].UserID)
-		noteIds = append(noteIds, notes[i].ID)
+		uID := notes[i].UserID
+		nID := notes[i].ID
+
+		// 检查 UserID 是否已存在
+		if _, exists := userMapT[uID]; !exists {
+			userMapT[uID] = struct{}{}
+			userIds = append(userIds, uID)
+		}
+
+		// 检查 NoteID 是否已存在
+		if _, exists := noteMap[nID]; !exists {
+			noteMap[nID] = struct{}{}
+			noteIds = append(noteIds, nID)
+		}
 	}
 	var (
 		userMap       map[uint64]types.UserProfile
