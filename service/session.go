@@ -35,6 +35,7 @@ type ISessionService interface {
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
 	GetUnreadNum(ctx context.Context, userId int) (int64, error)
+	CreateSession(ctx context.Context, userId int, groupId uint64) error
 }
 
 func (s *SessionService) GetUnreadNum(ctx context.Context, userId int) (int64, error) {
@@ -338,6 +339,28 @@ func (s *SessionService) ClearUnread(ctx context.Context, userId uint64, session
 	// DB 权威未读：Redis unread 仅用于清理历史残留 key（兼容旧逻辑/防鬼未读）
 	if s.UnreadStorage != nil {
 		s.UnreadStorage.Reset(ctx, int(userId), sessionType, int(peerId))
+	}
+	return nil
+}
+
+func (s *SessionService) CreateSession(ctx context.Context, userId int, groupId uint64) error {
+	now := time.Now()
+	session := &models.Session{
+		UserId:         uint64(userId),
+		SessionType:    2,       // 2 表示群聊（1 表示单聊）
+		PeerId:         groupId, // 群ID
+		LastMsgId:      0,
+		LastMsgType:    1,
+		LastMsgContent: "创建了群聊",
+		LastMsgTime:    now.Unix(),
+		UnreadCount:    0,
+		IsTop:          0,
+		IsMute:         0,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.DB.Create(session).Error; err != nil {
+		return errors.New("创建会话失败")
 	}
 	return nil
 }
