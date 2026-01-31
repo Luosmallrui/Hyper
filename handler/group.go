@@ -36,18 +36,9 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
-
-	//userId, err := context.GetUserID(c)
-	//if err != nil {
-	//	return response.NewError(http.StatusInternalServerError, err.Error())
-	//}
-	var userId int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userId = 6 // Debug模式下，强制使用用户ID 1
-	}
+	userId := c.GetInt("user_id")
 	//调用服务层创建群
-	group, err := h.GroupService.CreateGroup(c, &req, int(userId))
+	group, err := h.GroupService.CreateGroup(c, &req, userId)
 
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())

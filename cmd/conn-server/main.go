@@ -14,8 +14,10 @@ import (
 	"github.com/cloudwego/kitex/pkg/registry"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/server"
+	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -31,7 +33,7 @@ func main() {
 		Name: "conn-server",
 		Action: func(ctx *cli.Context) error {
 			rpcPort := cfg.Server.Rpc
-			go startKitexRPC(rpcPort, cfg.Nacos)
+			go startKitexRPC(rpcPort, cfg.Nacos, conn.Db, conn.Redis)
 			return s.Run(ctx, conn)
 		},
 		Commands: []*cli.Command{
@@ -48,8 +50,8 @@ func main() {
 		log.L.Fatal("failed to start server", zap.Error(err))
 	}
 }
-func startKitexRPC(rpcPort int, cfg *config.NacosConfig) {
-	h := &handler.PushServiceImpl{}
+func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *redis.Client) {
+	h := &handler.PushServiceImpl{Db: Db, Redis: redis}
 	nacosRegistry := nacos.NewRegistry(cfg)
 
 	listenAddr := &net.TCPAddr{IP: net.IPv4zero, Port: rpcPort}

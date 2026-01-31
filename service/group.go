@@ -104,7 +104,7 @@ func (s *GroupService) MuteAllMembers(ctx context.Context, userId int, groupId i
 	if err != nil {
 		return errors.New("群组不存在")
 	}
-	if group.IsAllMute == 1 {
+	if group.IsMuteAll == 1 {
 		return errors.New("群已处于全员禁言状态")
 	}
 	if group.OwnerId != userId {
@@ -134,7 +134,7 @@ func (s *GroupService) UnMuteAllMembers(ctx context.Context, groupId int, userId
 	if err != nil {
 		return errors.New("群组不存在")
 	}
-	if group.IsAllMute == 0 {
+	if group.IsMuteAll == 0 {
 		return errors.New("群未处于全员禁言状态")
 	}
 
