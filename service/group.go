@@ -27,39 +27,58 @@ type GroupService struct {
 	GroupMemberDAO *dao.GroupMember
 	GroupDAO       *dao.Group
 	Relation       *cache.Relation
+	SessionService ISessionService
 }
 
 // 创建群
 func (s *GroupService) CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*models.Group, error) {
-	group := &models.Group{
-		Name:        req.Name,
-		Avatar:      req.Avatar,
-		Description: req.Description,
-		OwnerId:     userId, //设置群主为创建者
-		MemberCount: 1,      //初始成员数量为1
-		IsDismiss:   0,
-		MaxMembers:  200,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	if err := s.DB.WithContext(ctx).Create(group).Error; err != nil {
-		return nil, errors.New("创建群失败: " + err.Error())
+	var group models.Group
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		group = models.Group{
+			Name:        req.Name,
+			Avatar:      req.Avatar,
+			Description: req.Description,
+			OwnerId:     userId,
+			MemberCount: 1,
+			IsDismiss:   0,
+			MaxMembers:  200,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+
+		// 1. 创建群组记录
+		if err := tx.Create(&group).Error; err != nil {
+			return err // 发生错误时会自动回滚
+		}
+
+		groupMember := &models.GroupMember{
+			GroupId:   group.Id, // 这里依赖上一步生成的自增 ID
+			UserId:    userId,
+			Role:      1, // 假设 1 是群主
+			IsQuit:    0,
+			IsMute:    0,
+			JoinTime:  time.Now(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		// 2. 添加群主到成员表
+		if err := tx.Create(groupMember).Error; err != nil {
+			return err
+		}
+		err := s.SessionService.CreateSession(ctx, userId, uint64(group.Id))
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, errors.New("创建群聊失败: " + err.Error())
 	}
 
-	groupMember := &models.GroupMember{
-		GroupId:   group.Id,
-		UserId:    userId,
-		Role:      1,
-		IsQuit:    0,
-		IsMute:    0,
-		JoinTime:  time.Now(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-	if err := s.DB.WithContext(ctx).Create(groupMember).Error; err != nil {
-		return nil, errors.New("添加群成员失败: " + err.Error())
-	}
-	return group, nil
+	return &group, nil
 }
 
 func (s *GroupService) DismissGroup(ctx context.Context, groupId int, userId int) error {
