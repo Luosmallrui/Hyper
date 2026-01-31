@@ -1,5 +1,7 @@
 package types
 
+import "Hyper/models"
+
 // 创建群请求
 type CreateGroupRequest struct {
 	Name        string `json:"name" binding:"required,min=1,max=100"`
@@ -15,6 +17,7 @@ type CreateGroupResponse struct {
 	OwnerId     int    `json:"owner_id"`
 	MemberCount int    `json:"member_count"`
 	CreatedAt   string `json:"created_at"`
+	SessionId   int    `json:"session_id,string"`
 }
 
 // 解散群请求
@@ -38,4 +41,9 @@ type UpdateGroupAvatarRequest struct {
 type UpdateGroupDescriptionRequest struct {
 	GroupId     int    `json:"group_id" binding:"required"` // 群ID，必填
 	Description string `json:"description" binding:"required,max=100"`
+}
+
+type Group struct {
+	models.Group
+	SessionId int `json:"session_id"`
 }

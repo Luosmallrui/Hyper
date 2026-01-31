@@ -13,7 +13,7 @@ import (
 )
 
 type IGroupService interface {
-	CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*models.Group, error)
+	CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*types.Group, error)
 	DismissGroup(ctx context.Context, groupId int, userId int) error
 	UnMuteAllMembers(ctx context.Context, groupId int, userId int) error
 	MuteAllMembers(ctx context.Context, userId int, groupId int) error
@@ -31,10 +31,10 @@ type GroupService struct {
 }
 
 // 创建群
-func (s *GroupService) CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*models.Group, error) {
-	var group models.Group
+func (s *GroupService) CreateGroup(ctx context.Context, req *types.CreateGroupRequest, userId int) (*types.Group, error) {
+	var group types.Group
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		group = models.Group{
+		group.Group = models.Group{
 			Name:        req.Name,
 			Avatar:      req.Avatar,
 			Description: req.Description,
@@ -66,10 +66,11 @@ func (s *GroupService) CreateGroup(ctx context.Context, req *types.CreateGroupRe
 		if err := tx.Create(groupMember).Error; err != nil {
 			return err
 		}
-		err := s.SessionService.CreateSession(ctx, userId, uint64(group.Id))
+		sessionid, err := s.SessionService.CreateSession(ctx, userId, uint64(group.Id))
 		if err != nil {
 			return err
 		}
+		group.SessionId = int(sessionid)
 
 		return nil
 	})

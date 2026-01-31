@@ -52,6 +52,7 @@ func (h *GroupHandler) CreateGroup(c *gin.Context) error {
 		OwnerId:     group.OwnerId,
 		MemberCount: group.MemberCount,
 		CreatedAt:   group.CreatedAt.Format("2006-01-02 15:04:05"),
+		SessionId:   group.SessionId,
 	}
 	response.Success(c, &resp)
 	return nil
