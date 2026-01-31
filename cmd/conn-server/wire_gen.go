@@ -121,6 +121,8 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		Engine:    engine,
 		Coroutine: server,
 		Handler:   handlerHandler,
+		Db:        db,
+		Redis:     redisClient,
 	}
 	return appProvider
 }

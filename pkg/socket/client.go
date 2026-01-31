@@ -56,12 +56,14 @@ type ClientOption struct {
 }
 
 type ClientResponse struct {
-	IsAck   bool   `json:"-"`                 // 是否需要 ack 回调
-	Ackid   string `json:"ackid,omitempty"`   // ACK ID
-	Event   string `json:"event"`             // 事件名
-	Content any    `json:"payload,omitempty"` // 事件内容
-	Retry   int    `json:"-"`                 // 重试次数（0 默认不重试）
-	IsSelf  bool   `json:"is_self"`
+	IsAck    bool   `json:"-"`                 // 是否需要 ack 回调
+	Ackid    string `json:"ackid,omitempty"`   // ACK ID
+	Event    string `json:"event"`             // 事件名
+	Content  any    `json:"payload,omitempty"` // 事件内容
+	Retry    int    `json:"-"`                 // 重试次数（0 默认不重试）
+	IsSelf   bool   `json:"is_self"`
+	NickName string `json:"nickname"`
+	Avatar   string `json:"avatar"`
 }
 
 // NewClient 初始化客户端信息

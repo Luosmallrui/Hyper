@@ -19,9 +19,11 @@ import (
 	"Hyper/socket/handler"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 )
 
 var ErrServerClosed = errors.New("shutting down server")
@@ -31,6 +33,8 @@ type AppProvider struct {
 	Engine    *gin.Engine
 	Coroutine *process.Server
 	Handler   *handler.Handler
+	Db        *gorm.DB
+	Redis     *redis.Client
 	//Providers *client.Providers
 }
 
