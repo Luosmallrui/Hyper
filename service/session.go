@@ -35,7 +35,7 @@ type ISessionService interface {
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
 	GetUnreadNum(ctx context.Context, userId int) (int64, error)
-	CreateSession(ctx context.Context, userId int, groupId uint64) error
+	CreateSession(ctx context.Context, userId int, groupId uint64) (uint64, error)
 }
 
 func (s *SessionService) GetUnreadNum(ctx context.Context, userId int) (int64, error) {
@@ -343,7 +343,7 @@ func (s *SessionService) ClearUnread(ctx context.Context, userId uint64, session
 	return nil
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, userId int, groupId uint64) error {
+func (s *SessionService) CreateSession(ctx context.Context, userId int, groupId uint64) (uint64, error) {
 	now := time.Now()
 	session := &models.Session{
 		UserId:         uint64(userId),
@@ -360,7 +360,7 @@ func (s *SessionService) CreateSession(ctx context.Context, userId int, groupId 
 		UpdatedAt:      now,
 	}
 	if err := s.DB.Create(session).Error; err != nil {
-		return errors.New("创建会话失败")
+		return 0, errors.New("创建会话失败")
 	}
-	return nil
+	return session.Id, nil
 }
