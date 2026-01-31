@@ -18,6 +18,7 @@ import (
 
 type MessageService struct {
 	MessageDao     *dao.MessageDAO
+	UserService    IUserService
 	GroupMemberDAO *dao.GroupMember
 	GroupDAO       *dao.Group
 	MqProducer     rmq_client.Producer
@@ -124,6 +125,18 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		}
 
 		result := make([]types.ListMessageReq, 0, len(msgs))
+
+		userIds := make([]uint64, 0, len(msgs))
+		userMapT := make(map[int64]struct{})
+
+		for i := 0; i < len(msgs); i++ {
+			uID := msgs[i].SenderId
+			if _, exists := userMapT[uID]; !exists {
+				userMapT[uID] = struct{}{}
+				userIds = append(userIds, uint64(uID))
+			}
+		}
+		userInfo := s.UserService.BatchGetUserInfo(ctx, userIds)
 		for _, m := range msgs {
 			ext := map[string]interface{}{}
 			if m.Ext != "" {
@@ -131,6 +144,8 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 			}
 			result = append(result, types.ListMessageReq{
 				Id:       uint64(m.Id),
+				Nickname: userInfo[uint64(m.SenderId)].Nickname,
+				Avatar:   userInfo[uint64(m.SenderId)].Avatar,
 				SenderId: uint64(m.SenderId),
 				Content:  m.Content,
 				MsgType:  m.MsgType,

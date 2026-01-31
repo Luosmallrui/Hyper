@@ -70,10 +70,17 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	engine := router.NewRouter(cfg, handlerHandler)
 	healthSubscribe := process.NewHealthSubscribe(serverStorage)
 	messageDAO := dao.NewMessageDAO(db)
+	users := dao.NewUsers(db)
+	userService := &service.UserService{
+		UsersRepo: users,
+		Redis:     redisClient,
+		DB:        db,
+	}
 	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
 	producer := rocketmq.InitProducer(rocketMQConfig)
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,
+		UserService:    userService,
 		GroupMemberDAO: groupMember,
 		GroupDAO:       group,
 		MqProducer:     producer,
@@ -81,12 +88,6 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		DB:             db,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
-	users := dao.NewUsers(db)
-	userService := &service.UserService{
-		UsersRepo: users,
-		Redis:     redisClient,
-		DB:        db,
-	}
 	sessionService := &service.SessionService{
 		DB:             db,
 		MessageStorage: messageStorage,

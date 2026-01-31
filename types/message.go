@@ -81,4 +81,18 @@ type ListMessageReq struct {
 	Ext      map[string]interface{} `json:"ext"`
 	Time     int64                  `json:"time"`
 	IsSelf   bool                   `json:"is_self"`
+	Nickname string                 `json:"nickname"`
+	Avatar   string                 `json:"avatar"`
+}
+
+type ListGroupMessageReq struct {
+	Id       uint64 `json:"id"`
+	Nickname string `json:"nickname"`
+
+	SenderId uint64                 `json:"sender_id"`
+	Content  string                 `json:"content"`
+	MsgType  int                    `json:"msg_type"`
+	Ext      map[string]interface{} `json:"ext"`
+	Time     int64                  `json:"time"`
+	IsSelf   bool                   `json:"is_self"`
 }
