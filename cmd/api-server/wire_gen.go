@@ -91,6 +91,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	group := dao.NewGroup(db)
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,
+		UserService:    userService,
 		GroupMemberDAO: groupMember,
 		GroupDAO:       group,
 		MqProducer:     producer,
