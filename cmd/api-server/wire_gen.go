@@ -203,7 +203,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		GroupMemberDAO: groupMember,
 		GroupDAO:       group,
 		Relation:       relation,
-		SessionService: sessionService,
+		SessionDAO:     sessionDAO,
+		UnreadStorage:  unreadStorage,
 	}
 	groupHandler := &handler.GroupHandler{
 		Config:       cfg,

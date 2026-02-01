@@ -20,7 +20,7 @@ type GroupMemberHandler struct {
 
 func (h *GroupMemberHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(h.Config.Jwt.Secret))
-	group := r.Group("/groupmember")
+	group := r.Group("/v1/groupmember")
 	group.POST("/invite", authorize, context.Wrap(h.InviteMember)) //邀请成员
 	group.POST("/kick", authorize, context.Wrap(h.KickMember))
 	group.GET("/list", authorize, context.Wrap(h.ListMembers))
@@ -36,11 +36,13 @@ func (h *GroupMemberHandler) InviteMember(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
-	userId := c.GetInt("user_id")
-
-	resp, err := h.GroupMemberService.InviteMembers(c, req.GroupId, req.InvitedUserIds, userId)
+	uid64, err := context.GetUserID(c)
 	if err != nil {
 		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	resp, err := h.GroupMemberService.InviteMembers(c, req.GroupId, req.InvitedUserIds, int(uid64))
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
 	response.Success(c, resp)
@@ -53,15 +55,21 @@ func (h *GroupMemberHandler) KickMember(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	userId := c.GetInt("user_id")
+	uid64, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	userId := int(uid64)
 
 	if userId == req.KickedUserId {
 		return response.NewError(http.StatusBadRequest, "不能踢出自己")
 	}
-	err := h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
+
+	err = h.GroupMemberService.KickMember(c, req.GroupId, req.KickedUserId, userId)
 	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
+
 	response.Success(c, gin.H{"success": true})
 	return nil
 }
@@ -94,7 +102,6 @@ func (h *GroupMemberHandler) ListMembers(c *gin.Context) error {
 	response.Success(c, types.GroupMemberListResponse{
 		Members: members,
 	})
-	response.Success(c, "踢出成功")
 	return nil
 }
 func (h *GroupMemberHandler) QuitGroup(c *gin.Context) error {

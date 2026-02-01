@@ -32,40 +32,40 @@ POST /v1/session/setting（需要认证）
 说明：更新当前用户某个会话的设置项（如置顶/免打扰）
 
 6) 创建群聊（建群）
-POST /group/create（需要认证）
+POST /v1/group/create（需要认证）
 说明：创建一个群聊，并自动把创建者加入群成员（创建者为群主）
 
 7) 邀请成员入群（拉人）
-POST /groupmember/invite（需要认证）
+POST /v1/groupmember/invite（需要认证）
 说明：邀请多个用户加入指定群聊（当前实现为“直接入群”，无需审批）
 
 8) 踢出群成员（踢人）
-POST /groupmember/kick（需要认证）
+POST /v1/groupmember/kick（需要认证）
 说明：将指定成员踢出群聊（服务端实现为把该成员标记为退群 is_quit=1，并扣减群成员数
 
 9) 获取群成员列表
-GET /groupmember/list（需要认证）
+GET /v1/groupmember/list（需要认证）
 说明：获取指定群聊的成员列表（仅返回未退群成员）
 
 10) 退出群聊（退群/群主解散群聊）
-POST /groupmember/quit（需要认证）
+POST /v1/groupmember/quit（需要认证）
 说明：普通成员/管理员退出群聊；若群主退群则自动解散群聊
 
 11) 个人禁言/解除禁言
-POST /groupmember/mute（需要认证）
+POST /v1/groupmember/mute（需要认证）
 说明：群主/管理员对单个成员进行禁言或解除禁言
 
 12) 群全员禁言开关
-POST /groupmember/mute-all（需要认证）
+POST /v1/groupmember/mute-all（需要认证）
 说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
 
 13) 设置/撤销管理员
-POST /groupmember/admin（需要认证）
+POST /v1/groupmember/admin（需要认证）
 说明:仅群主可使用。用于将某个群成员设置为管理员或撤销管理员身份
 不允许对群主本身进行该操作
 
 14) 转让群主
-POST /groupmember/transfer-owner（需要认证）
+POST /v1/groupmember/transfer-owner（需要认证）
 说明：群主将群聊所有权转让给群内其他成员。
 
 ) 建立 WebSocket 连接（IM）(未完成)
@@ -496,7 +496,7 @@ Content-Type: application/json
 
 ## 6) 创建群聊（建群）
 ```
-POST /group/create（需要认证）
+POST /v1/group/create（需要认证）
 说明：创建一个群聊，并自动把创建者加入群成员（创建者为群主）
 ```
 
@@ -572,7 +572,7 @@ data 字段
 
 ## 7) 邀请成员入群（拉人）
 ```
-POST /groupmember/invite（需要认证）
+POST /v1/groupmember/invite（需要认证）
 说明：邀请多个用户加入指定群聊（当前实现为“直接入群”，无需审批）
 
 ```
@@ -591,7 +591,7 @@ Content-Type: application/json
 ```json
 {
   "group_id": 6,
-  "user_ids": [9, 10]
+  "invited_user_ids": [9, 10]
 }
 ```
 ### 参数说明
@@ -631,7 +631,7 @@ data 字段
 
 ## 8) 踢出群成员（踢人）
 ```
-POST /groupmember/kick（需要认证）
+POST /v1/groupmember/kick（需要认证）
 说明：将指定成员踢出群聊（服务端实现为把该成员标记为退群 is_quit=1，并扣减群成员数）
 
 ```
@@ -673,7 +673,7 @@ Content-Type: application/json
 
 ## 9) 获取群成员列表
 ```
-GET /groupmember/list（需要认证）
+GET /v1/groupmember/list（需要认证）
 说明：获取指定群聊的成员列表。
 - 仅返回未退群成员（group_member.is_quit = 0）
 - 默认按成员角色升序排列：群主(1) -> 管理员(2) -> 普通成员(3)
@@ -767,7 +767,7 @@ members 元素结构
 
 ## 10) 退出群聊（退群/群主解散群聊）
 ```
-POST /groupmember/quit（需要认证）
+POST /v1/groupmember/quit（需要认证）
 说明：
 普通成员/管理员：退出群聊（服务端实现为把该成员标记为退群 is_quit=1，并扣减群成员数）
 群主：退出时自动解散群聊
@@ -814,9 +814,9 @@ Content-Type: application/json
 | disbanded | bool | 是否解散群聊：true=群主退群并解散；false=普通成员/管理员退群 |
 
 
-## 11) 发送消息
+## 11) 个人禁言/解除禁言
 ```
-POST /groupmember/mute（需要认证）
+POST /v1/groupmember/mute（需要认证）
 说明：群主/管理员对单个成员进行禁言或解除禁言
 权限规则（业务约束）:
 只有 群主(role=1) 或 管理员(role=2) 可以操作
@@ -891,7 +891,7 @@ Content-Type: application/json
 
 ## 12) 群全员禁言开关
 ```
-POST /groupmember/mute-all（需要认证）
+POST /v1/groupmember/mute-all（需要认证）
 说明：群主/管理员开启/关闭全员禁言（仅禁普通成员，群主/管理员仍可发言）
 权限规则：只有群主/管理员可以操作
 开启全员禁言后：
@@ -991,7 +991,7 @@ Content-Type: application/json
 
 ## 13) 设置/撤销管理员
 ```
-POST /groupmember/admin（需要认证）
+POST /v1/groupmember/admin（需要认证）
 说明:仅群主可使用。用于将某个群成员设置为管理员或撤销管理员身份
 不允许对群主本身进行该操作
 
@@ -1070,7 +1070,7 @@ Content-Type: application/json
 
 ## 14) 转让群主
 ```
-POST /groupmember/transfer-owner（需要认证）
+POST /v1/groupmember/transfer-owner（需要认证）
 说明：群主将群聊所有权转让给群内其他成员。
 
 ```

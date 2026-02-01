@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -35,7 +36,7 @@ type ISessionService interface {
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
 	GetUnreadNum(ctx context.Context, userId int) (int64, error)
-	CreateSession(ctx context.Context, userId int, groupId uint64) (uint64, error)
+	//CreateSession(ctx context.Context, tx *gorm.DB, userId int, groupId uint64) (uint64, error)
 }
 
 func (s *SessionService) GetUnreadNum(ctx context.Context, userId int) (int64, error) {
@@ -343,24 +344,52 @@ func (s *SessionService) ClearUnread(ctx context.Context, userId uint64, session
 	return nil
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, userId int, groupId uint64) (uint64, error) {
-	now := time.Now()
-	session := &models.Session{
-		UserId:         uint64(userId),
-		SessionType:    2,       // 2 表示群聊（1 表示单聊）
-		PeerId:         groupId, // 群ID
-		LastMsgId:      0,
-		LastMsgType:    1,
-		LastMsgContent: "创建了群聊",
-		LastMsgTime:    now.Unix(),
-		UnreadCount:    0,
-		IsTop:          0,
-		IsMute:         0,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+//func (s *SessionService) CreateSession(ctx context.Context, tx *gorm.DB, userId int, groupId uint64) (uint64, error) {
+//	// 允许外部不传事务：不传就用默认 DB
+//	if tx == nil {
+//		tx = s.DB
+//	}
+//	now := time.Now()
+//	session := &models.Session{
+//		UserId:         uint64(userId),
+//		SessionType:    2,       // 2 表示群聊（1 表示单聊）
+//		PeerId:         groupId, // 群ID
+//		LastMsgId:      0,
+//		LastMsgType:    1,
+//		LastMsgContent: "创建了群聊",
+//		LastMsgTime:    now.UnixMilli(),
+//		UnreadCount:    0,
+//		IsTop:          0,
+//		IsMute:         0,
+//		CreatedAt:      now,
+//		UpdatedAt:      now,
+//	}
+//	err := tx.WithContext(ctx).Create(session).Error
+//	if err == nil {
+//		return session.Id, nil
+//	}
+//
+//	//幂等：如果是唯一键冲突，说明会话已经存在 -> 查出来返回 id
+//	if isMySQLDuplicateKey(err) {
+//		var exist models.Session
+//		qErr := tx.WithContext(ctx).
+//			Select("id").
+//			Where("user_id = ? AND session_type = ? AND peer_id = ?", uint64(userId), 2, groupId).
+//			First(&exist).Error
+//		if qErr != nil {
+//			return 0, errors.New("创建会话失败: 查询已存在会话失败")
+//		}
+//		return exist.Id, nil
+//	}
+//
+//	return 0, errors.New("创建会话失败")
+//}
+
+func isMySQLDuplicateKey(err error) bool {
+	var me *mysql.MySQLError
+	if errors.As(err, &me) {
+		// 1062 = Duplicate entry（唯一键冲突）
+		return me.Number == 1062
 	}
-	if err := s.DB.Create(session).Error; err != nil {
-		return 0, errors.New("创建会话失败")
-	}
-	return session.Id, nil
+	return false
 }
