@@ -41,9 +41,14 @@ func (r *Relation) DelGroupRelation(ctx context.Context, uid, gid int) {
 }
 
 func (r *Relation) BatchDelGroupRelation(ctx context.Context, uids []int, gid int) {
-	for _, uid := range uids {
-		r.DelGroupRelation(ctx, uid, gid)
+	if len(uids) == 0 {
+		return
 	}
+	keys := make([]string, 0, len(uids))
+	for _, uid := range uids {
+		keys = append(keys, r.keyGroupRelation(uid, gid))
+	}
+	r.redis.Del(ctx, keys...)
 }
 
 func (r *Relation) keyContactRelation(uid, uid2 int) string {
@@ -55,5 +60,5 @@ func (r *Relation) keyContactRelation(uid, uid2 int) string {
 }
 
 func (r *Relation) keyGroupRelation(uid, gid int) string {
-	return fmt.Sprintf("im:contact:relation:%d_%d", uid, gid)
+	return fmt.Sprintf("im:group:relation:%d_%d", uid, gid)
 }
