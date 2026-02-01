@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"Hyper/models"
@@ -116,4 +117,68 @@ func (d *SessionDAO) GetUnreadNum(ctx context.Context, userID int) (int64, error
 	}
 
 	return total, nil
+}
+func (d *SessionDAO) WithDB(db *gorm.DB) *SessionDAO {
+	nd := *d
+	nd.db = db
+	return &nd
+}
+
+// EnsureSession: 确保某个用户对某个 peer 的会话存在（幂等）
+// sessionType: 1=单聊(peerId=对方user_id), 2=群聊(peerId=group_id)
+func (d *SessionDAO) EnsureSession(ctx context.Context, tx *gorm.DB, uid uint64, sessionType int, peerId uint64) (uint64, error) {
+	if tx == nil {
+		tx = d.db
+	}
+	if tx == nil {
+		return 0, errors.New("SessionDAO db 未初始化")
+	}
+
+	now := time.Now()
+	nowMs := now.UnixMilli()
+
+	s := &models.Session{
+		UserId:      uid,
+		SessionType: sessionType,
+		PeerId:      peerId,
+
+		LastMsgId:      0,
+		LastMsgType:    0,
+		LastMsgContent: "",
+		LastMsgTime:    nowMs,
+
+		UnreadCount: 0,
+		IsTop:       0,
+		IsMute:      0,
+
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	// 幂等插入：已存在就不插
+	if err := tx.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "user_id"},
+				{Name: "session_type"},
+				{Name: "peer_id"},
+			},
+			DoNothing: true,
+		}).
+		Create(s).Error; err != nil {
+		return 0, err
+	}
+
+	// 如果是新插入，s.Id 会回填；如果 DoNothing，s.Id 可能还是 0，需要查一次
+	if s.Id != 0 {
+		return s.Id, nil
+	}
+
+	var existing models.Session
+	if err := tx.WithContext(ctx).
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", uid, sessionType, peerId).
+		First(&existing).Error; err != nil {
+		return 0, err
+	}
+	return existing.Id, nil
 }

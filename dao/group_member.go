@@ -38,7 +38,7 @@ func (g *GroupMember) IsLeader(ctx context.Context, gid, uid int) bool {
 // IsMember 检测是属于群成员
 func (g *GroupMember) IsMember(ctx context.Context, gid, uid int, cache bool) bool {
 
-	if cache && g.relation.IsGroupRelation(ctx, uid, gid) == nil {
+	if cache && g.relation != nil && g.relation.IsGroupRelation(ctx, uid, gid) == nil {
 		return true
 	}
 
@@ -47,7 +47,7 @@ func (g *GroupMember) IsMember(ctx context.Context, gid, uid int, cache bool) bo
 		return false
 	}
 
-	if exist {
+	if exist && g.relation != nil {
 		g.relation.SetGroupRelation(ctx, uid, gid)
 	}
 
@@ -152,7 +152,9 @@ func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
 }
 
 func (g *GroupMember) ClearGroupRelation(ctx context.Context, uid int, gid int) {
-	g.relation.DelGroupRelation(ctx, uid, gid)
+	if g.relation != nil {
+		g.relation.DelGroupRelation(ctx, uid, gid)
+	}
 }
 func (g *GroupMember) SetMemberMute(ctx context.Context, gid int, uid int, mute int) error {
 	return g.Repo.Model(ctx).
