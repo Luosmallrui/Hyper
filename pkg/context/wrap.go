@@ -1,10 +1,14 @@
 package context
 
 import (
+	"Hyper/pkg/log"
 	"Hyper/pkg/response"
 	"errors"
-	"github.com/gin-gonic/gin"
+	"fmt"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 const (
@@ -17,7 +21,8 @@ type HandlerFunc func(*gin.Context) error
 func Wrap(h func(*gin.Context) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := h(c); err != nil {
-
+			log.L.Error(fmt.Sprintf("[Error] path: %s, method: %s, err: %+v",
+				c.Request.URL.Path, c.Request.Method, err), zap.Error(err))
 			// 如果已经写过响应，直接返回
 			if c.Writer.Written() {
 				return
