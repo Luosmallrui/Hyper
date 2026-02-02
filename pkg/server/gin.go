@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -65,6 +66,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(CORSMiddleware())
+	r.Use(middleware.PrometheusMiddleware())
 	r.Use(middleware.GinZap(), gin.Recovery())
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
@@ -85,6 +87,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Order.RegisterRouter(api)
 	h.Serch.RegisterRouter(api)
 	h.Channel.RegisterRouter(api)
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	return r
 }
 

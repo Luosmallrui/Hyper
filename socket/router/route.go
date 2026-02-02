@@ -9,12 +9,14 @@ import (
 	"net/http/pprof"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // NewRouter 初始化配置路由
 func NewRouter(conf *config.Config, handle *handler.Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	router.Use(middleware.PrometheusMiddleware())
 	router.Use(middleware.GinZap(), gin.Recovery())
 	router.Use(gin.RecoveryWithWriter(gin.DefaultWriter, func(c *gin.Context, err any) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{"code": 500, "msg": "系统错误，请重试!!!"})
@@ -28,6 +30,7 @@ func NewRouter(conf *config.Config, handle *handler.Handler) *gin.Engine {
 		c.JSON(http.StatusOK, map[string]any{"ok": "success"})
 	})
 
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, map[string]any{"msg": "请求地址不存在"})
 	})
