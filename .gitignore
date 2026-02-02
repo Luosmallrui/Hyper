@@ -19,3 +19,7 @@ vendor/
 configs/config.*.yaml
 
 certs/
+instgo
+
+arms_cache/
+.otel-build/
