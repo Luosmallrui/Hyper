@@ -55,13 +55,13 @@ build-api: gen-api
 	@echo "==> build api-server"
 	@mkdir -p $(BIN_DIR)
 	@CGO_ENABLED=$(CGO) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-		$(GO) build -o $(BIN_DIR)/api-server ./$(API_CMD)
+		 ./instgo $(GO) build -o $(BIN_DIR)/api-server ./$(API_CMD)
 
 build-conn: gen-conn
 	@echo "==> build conn-server"
 	@mkdir -p $(BIN_DIR)
 	@CGO_ENABLED=$(CGO) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-		$(GO) build -o $(BIN_DIR)/conn-server $(CONN_CMD)/.
+	 ./instgo	$(GO)  build -o $(BIN_DIR)/conn-server $(CONN_CMD)/.
 
 build-fanout: gen-fanout
 	@echo "==> build fanout-server"
