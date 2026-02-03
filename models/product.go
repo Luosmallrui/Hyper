@@ -7,9 +7,9 @@ import (
 )
 
 type Product struct {
-	ID            uint64 `gorm:"primaryKey;autoIncrement;column:id" json:"id,string"`
-	PartyId       uint64 `gorm:"column:party_id;uniqueIndex:uk_party_product;not null" json:"party_id"` // 所属商家
-	ParentId      uint64 `gorm:"column:parent_id;default:0;index" json:"parent_id"`                     // 0:独立商品/主套餐, >0:子商品
+	ID      uint64 `gorm:"primaryKey;autoIncrement;column:id" json:"id,string"`
+	PartyId uint64 `gorm:"column:party_id;uniqueIndex:uk_party_product;not null" json:"party_id"` // 所属商家
+	//ParentId      uint64 `gorm:"column:parent_id;default:0;index" json:"parent_id"`                     // 0:独立商品/主套餐, >0:子商品
 	ProductName   string `gorm:"column:product_name;uniqueIndex:uk_party_product;size:255;not null" json:"product_name"`
 	Price         uint32 `gorm:"column:price;not null" json:"price"`                    // 售卖价(分)
 	OriginalPrice uint32 `gorm:"column:original_price;default:0" json:"original_price"` // 划线价/原价(分)

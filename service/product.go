@@ -35,7 +35,7 @@ func (p *ProductService) CreateProduct(ctx context.Context, partyId int, req *ty
 	}
 
 	// 2. 商家合法性与权限校验
-	var party models.Party
+	var party models.Merchant
 	if err := p.DB.WithContext(ctx).Where("id = ?", partyId).First(&party).Error; err != nil {
 		return errors.New("目标商家不存在，无法发布商品")
 	}
@@ -69,7 +69,6 @@ func (p *ProductService) CreateProduct(ctx context.Context, partyId int, req *ty
 	// 5. 构造并写入模型
 	product := &models.Product{
 		PartyId:       uint64(partyId),
-		ParentId:      req.ParentId,
 		ProductName:   req.ProductName,
 		Price:         req.Price,
 		OriginalPrice: req.OriginalPrice,

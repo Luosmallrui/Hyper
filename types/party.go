@@ -20,8 +20,22 @@ type CreatePartyRequest struct {
 }
 
 type PartyList struct {
-	List     []models.PartyListItem `json:"list"`
-	Total    int64                  `json:"total"`
-	Page     int                    `json:"page"`
-	PageSize int                    `json:"pageSize"`
+	List     []models.MerchantListItem `json:"list"`
+	Total    int64                     `json:"total"`
+	Page     int                       `json:"page"`
+	PageSize int                       `json:"pageSize"`
+}
+
+type MerchantDetail struct {
+	Id            int64             `json:"id"`
+	Name          string            `json:"name"`
+	AvgPrice      int64             `json:"avg_price"` //人均价格
+	LocationName  string            `json:"location_name"`
+	Images        []string          `json:"images"`
+	Goods         []models.Product  `json:"goods"`
+	Notes         ListNotesBriefRep `json:"notes"`
+	UserName      string            `json:"user_name"`
+	UserAvatar    string            `json:"user_avatar"`
+	IsFollow      bool              `json:"is_follow"`
+	BusinessHours string            `json:"business_hours"`
 }

@@ -68,6 +68,9 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r.Use(CORSMiddleware())
 	r.Use(middleware.PrometheusMiddleware())
 	r.Use(middleware.GinZap(), gin.Recovery())
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
 	h.Map.RegisterRouter(api)

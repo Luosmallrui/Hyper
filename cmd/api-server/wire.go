@@ -37,7 +37,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.TopicHandler), "*"),
 		wire.Struct(new(handler.GroupHandler), "*"),
 		wire.Struct(new(handler.GroupMemberHandler), "*"),
-		wire.Struct(new(handler.Party), "*"),
+		wire.Struct(new(handler.Merchant), "*"),
 		wire.Struct(new(handler.PointHandler), "*"),
 		wire.Struct(new(handler.Order), "*"),
 		wire.Struct(new(handler.Channel), "*"),

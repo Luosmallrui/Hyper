@@ -39,7 +39,7 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 		dbUsers   []models.Users
 		dbNotes   []models.Note
-		dbParties []models.Party
+		dbParties []models.Merchant
 	)
 
 	keyword := "%" + req.Keyword + "%"
@@ -97,7 +97,7 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 	if req.Type == 0 || req.Type == 3 {
 		g.Go(func() error {
-			db := s.DB.WithContext(ctx).Model(&models.Party{}).
+			db := s.DB.WithContext(ctx).Model(&models.Merchant{}).
 				Where("(title LIKE ? OR location_name LIKE ?) AND status IN (0,1)", keyword, keyword)
 			if req.PartyCursor > 0 {
 				db = db.Where("id < ?", req.PartyCursor)
@@ -166,10 +166,6 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 				Title:        p.Title,
 				Type:         p.Type,
 				LocationName: p.LocationName,
-				Price:        p.Price,
-				StartTime:    p.StartTime,
-				CoverImage:   p.CoverImage,
-				Status:       p.Status,
 			})
 		}
 	}
