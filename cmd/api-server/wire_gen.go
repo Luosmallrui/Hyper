@@ -242,8 +242,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:         cfg,
 		ProductService: productService,
 	}
-	party := &handler.Party{
-		DB: db,
+	merchant := &handler.Merchant{
+		DB:          db,
+		UserService: userService,
+		NoteService: noteService,
 	}
 	channel := &handler.Channel{
 		Config:     cfg,
@@ -292,7 +294,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CommentsHandler: commentsHandler,
 		TopicHandler:    topicHandler,
 		ProductHandler:  productHandler,
-		Party:           party,
+		Party:           merchant,
 		Channel:         channel,
 		Order:           order,
 		Points:          pointHandler,

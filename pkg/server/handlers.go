@@ -18,7 +18,7 @@ type Handlers struct {
 	CommentsHandler *handler.CommentsHandler
 	TopicHandler    *handler.TopicHandler
 	ProductHandler  *handler.ProductHandler
-	Party           *handler.Party
+	Party           *handler.Merchant
 	Channel         *handler.Channel
 	Order           *handler.Order
 	Points          *handler.PointHandler
