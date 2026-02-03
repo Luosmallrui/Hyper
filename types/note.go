@@ -229,8 +229,8 @@ type CommentPreview struct {
 
 type ListNotesBriefRep struct {
 	Notes      []*NoteBrief `json:"notes"`
-	Nickname   string       `json:"nickname"`
-	Avatar     string       `json:"avatar"`
-	NextCursor int64        `json:"next_cursor"` // 返回给前端，下次请求带上
-	HasMore    bool         `json:"has_more"`    // 告诉前端是否还有更多
+	Nickname   string       `json:"nickname,omitempty"`
+	Avatar     string       `json:"avatar,omitempty"`
+	NextCursor int64        `json:"next_cursor,string"` // 返回给前端，下次请求带上
+	HasMore    bool         `json:"has_more"`           // 告诉前端是否还有更多
 }

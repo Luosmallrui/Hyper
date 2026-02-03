@@ -176,6 +176,7 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	avatar, nickname, _ := pc.UserService.GetUserAvatar(c.Request.Context(), int64(marchant.UserID))
 	resp.UserAvatar = avatar
 	resp.UserName = nickname
+	resp.Id = marchant.ID
 	resp.IsFollow = true
 	resp.BusinessHours = "19:30-次日02:30"
 	userId := c.GetInt("user_id")
@@ -193,7 +194,7 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 		userId,
 		marchant.UserID,
 	)
-	resp.Notes = notes
+	resp.ListNotesBriefRep = notes
 
 	response.Success(c, resp)
 	return nil
