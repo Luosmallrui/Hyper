@@ -179,7 +179,7 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	resp.Id = marchant.ID
 	resp.IsFollow = true
 	resp.BusinessHours = "19:30-次日02:30"
-	userId := c.GetInt("user_id")
+	//userId := c.GetInt("user_id")
 	var req types.FeedRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误")
@@ -187,14 +187,6 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = 10
 	}
-	notes, _ := pc.NoteService.ListNoteByUser(
-		c.Request.Context(),
-		req.Cursor,
-		req.PageSize,
-		userId,
-		marchant.UserID,
-	)
-	resp.ListNotesBriefRep = notes
 
 	response.Success(c, resp)
 	return nil
