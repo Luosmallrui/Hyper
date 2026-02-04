@@ -27,15 +27,14 @@ type PartyList struct {
 }
 
 type MerchantDetail struct {
-	Id           int64            `json:"id"`
-	Name         string           `json:"name"`
-	AvgPrice     int64            `json:"avg_price"` //人均价格
-	LocationName string           `json:"location_name"`
-	Images       []string         `json:"images"`
-	Goods        []models.Product `json:"goods"`
-	ListNotesBriefRep
-	UserName      string `json:"user_name,omitempty"`
-	UserAvatar    string `json:"user_avatar,omitempty"`
-	IsFollow      bool   `json:"is_follow"`
-	BusinessHours string `json:"business_hours"`
+	Id            int64            `json:"id"`
+	Name          string           `json:"name"`
+	AvgPrice      int64            `json:"avg_price"` //人均价格
+	LocationName  string           `json:"location_name"`
+	Images        []string         `json:"images"`
+	Goods         []models.Product `json:"goods"`
+	UserName      string           `json:"user_name,omitempty"`
+	UserAvatar    string           `json:"user_avatar,omitempty"`
+	IsFollow      bool             `json:"is_follow"`
+	BusinessHours string           `json:"business_hours"`
 }
