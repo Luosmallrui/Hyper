@@ -55,7 +55,7 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int6
 
 	// --- 下面是之前的详情填充逻辑 ---
 	resp := make([]*types.Order, len(orders))
-	orderIds := make([]int, len(orders))
+	orderSns := make([]string, len(orders))
 	for i, order := range orders {
 		resp[i] = &types.Order{
 			Id:      order.ID,
@@ -63,20 +63,21 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int6
 			Status:  order.Status,
 			Price:   int(order.TotalAmount),
 		}
-		orderIds[i] = order.ID
+		orderSns[i] = order.OrderSn
 	}
 	// 2. 获取订单详情 (OrderItem)
 	var orderItems []*models.OrderItem
-	err = f.DB.WithContext(ctx).Where("order_id IN ?", orderIds).Find(&orderItems).Error
+	err = f.DB.WithContext(ctx).Where("order_sn IN ?", orderSns).Find(&orderItems).Error
 	if err != nil {
 		return resp, nextCursor, hasMore, err
 	}
 
 	// 使用 Map 存储详情，并使用 set 思想收集去重后的 SellerID
-	orderItemMap := make(map[int]*models.OrderItem)
+	orderItemMap := make(map[string]*models.OrderItem)
 	sellerIDMap := make(map[int]struct{}) // 用于去重
+
 	for _, item := range orderItems {
-		orderItemMap[int(item.OrderID)] = item
+		orderItemMap[item.OrderSn] = item
 		sellerIDMap[item.SellerID] = struct{}{}
 	}
 
@@ -105,8 +106,8 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int6
 			}
 
 			// 4. 最后一次性回填数据
-			for i, item := range resp {
-				if orderItem, ok := orderItemMap[item.Id]; ok && orderItem != nil {
+			for i, _ := range resp {
+				if orderItem, ok := orderItemMap[orders[i].OrderSn]; ok && orderItem != nil {
 					resp[i].Name = orderItem.ProductName
 					resp[i].ImageUrl = orderItem.CoverImage
 					resp[i].Quantity = int(orderItem.Quantity)

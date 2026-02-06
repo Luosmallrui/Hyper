@@ -299,6 +299,7 @@ func (s *SessionService) UpdateSessionSettings(ctx context.Context, userID uint6
 	if req.SessionType != 1 && req.SessionType != 2 {
 		return errors.New("session_type 必须是 1 或 2")
 	}
+
 	if req.PeerID == 0 {
 		return errors.New("peer_id 不能为空")
 	}

@@ -50,6 +50,7 @@ func main() {
 		log.L.Fatal("failed to start server", zap.Error(err))
 	}
 }
+
 func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *redis.Client) {
 	h := &handler.PushServiceImpl{Db: Db, Redis: redis}
 	nacosRegistry := nacos.NewRegistry(cfg)

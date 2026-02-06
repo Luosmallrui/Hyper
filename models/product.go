@@ -29,18 +29,18 @@ func (Product) TableName() string {
 }
 
 type OrderItem struct {
-	ID             uint64    `gorm:"primaryKey;autoIncrement;column:id" json:"id"`                      // ID: 自增主键，明细唯一标识
-	OrderID        uint64    `gorm:"not null;index:idx_order_id;column:order_id" json:"order_id"`       // OrderID: 所属订单ID，关联主订单
-	ProductID      uint64    `gorm:"not null;index:idx_product_id;column:product_id" json:"product_id"` // ProductID: 商品ID，关联原始商品
-	ProductName    string    `gorm:"size:255;not null;column:product_name" json:"product_name"`         // ProductName: 冗余商品名称，防止原商品删除/更名
-	ProductPrice   uint32    `gorm:"not null;column:product_price" json:"product_price"`                // ProductPrice: 冗余下单单价（分），锁定成交价
-	Quantity       uint32    `gorm:"default:1;not null;column:quantity" json:"quantity"`                // Quantity: 购买数量
-	SubtotalAmount uint32    `gorm:"not null;column:subtotal_amount" json:"subtotal_amount"`            // SubtotalAmount: 小计金额（分），单价 * 数量
-	CoverImage     string    `gorm:"size:512;default:'';column:cover_image" json:"cover_image"`         // CoverImage: 冗余商品封面图，防止原图失效
-	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`                // CreatedAt: 明细创建时间
-	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`                // UpdatedAt: 最后更新时间
-	ConsumeType    string    `gorm:"column:consume_type" json:"consume_type"`                           // ConsumeType: 消费类型 票or商品
-	SellerID       int       `gorm:"column:seller_id" json:"seller_id"`                                 // SellerID 商家ID
+	ID             uint64    `gorm:"primaryKey;autoIncrement;column:id" json:"id"`                                 // ID: 自增主键，明细唯一标识
+	OrderSn        string    `gorm:"column:order_sn;type:varchar(32);not null;index:idx_order_sn" json:"order_sn"` // OrderSn: 订单编号，关联订单主表
+	ProductID      uint64    `gorm:"not null;index:idx_product_id;column:product_id" json:"product_id"`            // ProductID: 商品ID，关联原始商品
+	ProductName    string    `gorm:"size:255;not null;column:product_name" json:"product_name"`                    // ProductName: 冗余商品名称，防止原商品删除/更名
+	ProductPrice   uint32    `gorm:"not null;column:product_price" json:"product_price"`                           // ProductPrice: 冗余下单单价（分），锁定成交价
+	Quantity       uint32    `gorm:"default:1;not null;column:quantity" json:"quantity"`                           // Quantity: 购买数量
+	SubtotalAmount uint32    `gorm:"not null;column:subtotal_amount" json:"subtotal_amount"`                       // SubtotalAmount: 小计金额（分），单价 * 数量
+	CoverImage     string    `gorm:"size:512;default:'';column:cover_image" json:"cover_image"`                    // CoverImage: 冗余商品封面图，防止原图失效
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`                           // CreatedAt: 明细创建时间
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`                           // UpdatedAt: 最后更新时间
+	ConsumeType    string    `gorm:"column:consume_type" json:"consume_type"`                                      // ConsumeType: 消费类型 票or商品
+	SellerID       int       `gorm:"column:seller_id" json:"seller_id"`                                            // SellerID 商家ID
 }
 
 func (OrderItem) TableName() string {
