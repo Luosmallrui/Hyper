@@ -47,7 +47,22 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 
 		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))     // 查询订单
 		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt)) // 获取订单电子回执
+		pay.GET("/detail", authorize, context.Wrap(p.Detail))           //查询订单详情
 	}
+}
+
+// Detail 根据订单编号查询订单详情
+func (p *Pay) Detail(c *gin.Context) error {
+
+	OrderSN := c.Query("out_trade_no") //获取订单号
+	fmt.Println(OrderSN)
+
+	resp, err := p.PayService.OrderDetail(c, OrderSN)
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
 }
 
 // NewPay 创建支付处理器
