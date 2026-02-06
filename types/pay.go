@@ -6,9 +6,9 @@ type PrepayRequest struct {
 	Amount      int64  `json:"amount" binding:"required,min=1"` // 金额（分）
 	Openid      string `json:"openid" binding:"required"`       // 用户openid
 	UserId      int    `json:"user_id"`
-	Attach      string `json:"attach"`                            // 附加数据（可选）
-	ProductId   uint64 `json:"product_id" binding:"required"`     // 购买的商品ID
-	Quantity    uint32 `json:"quantity" binding:"required,min=1"` // 购买数量
+	Attach      string `json:"attach"`                               // 附加数据（可选）
+	ProductId   uint64 `json:"product_id,string" binding:"required"` // 购买的商品ID
+	Quantity    uint32 `json:"quantity" binding:"required,min=1"`    // 购买数量
 }
 
 type PrepayWithRequestPaymentResponse struct {

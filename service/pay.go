@@ -61,7 +61,7 @@ func (p *PayService) PreWeChatPay(
 			UserID:      req.UserId,
 			OrderSn:     orderSn,
 			TotalAmount: uint64(req.Amount),
-			Description: req.Description,
+			Description: product.Description,
 			Status:      10, // 待支付
 		}
 		if err := tx.Create(order).Error; err != nil {
