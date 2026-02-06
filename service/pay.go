@@ -26,8 +26,34 @@ type PayService struct {
 }
 
 func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error) {
-	//TODO implement me
-	panic("implement me")
+	var resq types.OrderDetail
+	var order models.Order
+	var orderItems models.OrderItem
+
+	err := p.DB.WithContext(ctx).Where("order_sn = ?", OrderId).First(&order).Error
+	if err != nil {
+		return nil, fmt.Errorf("获取订单失败: %w", err)
+	}
+	err = p.DB.WithContext(ctx).Where("order_sn = ?", order.OrderSn).First(&orderItems).Error
+	if err != nil {
+		return nil, fmt.Errorf("获取订单明细失败: %w", err)
+	}
+	resq = types.OrderDetail{
+		Name:       orderItems.ProductName,
+		Avatar:     orderItems.CoverImage,
+		Price:      int64(orderItems.ProductPrice),
+		Quantity:   int(orderItems.Quantity),
+		Status:     order.Status,
+		PayedAt:    *order.PaidAt,
+		OutTradeNo: order.OrderSn,
+	}
+	if orderItems.ConsumeType == "ticket" {
+		// 把活动开始时间作为附加信息返回给前端(先固定了，后续加上活动时间字段)
+		resq.Attach = map[string]string{
+			"event_time": "2024-12-31 19:00:00",
+		}
+	}
+	return &resq, nil
 }
 
 type IPayService interface {
@@ -74,7 +100,7 @@ func (p *PayService) PreWeChatPay(
 			return err
 		}
 		orderItem := &models.OrderItem{
-			OrderID:        uint64(order.ID),
+			OrderSn:        order.OrderSn,
 			ProductID:      product.ID,
 			ProductName:    product.ProductName,
 			ProductPrice:   product.Price,
