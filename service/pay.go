@@ -25,10 +25,16 @@ type PayService struct {
 	Config *config.Config
 }
 
+func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 type IPayService interface {
 	ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error
 	PreWeChatPay(ctx context.Context, weChatClient *core.Client, req types.PrepayRequest) (types.PrepayWithRequestPaymentResponse, error)
 	GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error)
+	OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error)
 }
 
 func (p *PayService) PreWeChatPay(
@@ -127,13 +133,14 @@ func (p *PayService) PreWeChatPay(
 
 	// 4. 组装返回给前端的支付参数
 	respData = types.PrepayWithRequestPaymentResponse{
-		Appid:     *wxResp.Appid,
-		TimeStamp: *wxResp.TimeStamp,
-		NonceStr:  *wxResp.NonceStr,
-		Package:   *wxResp.Package,
-		SignType:  *wxResp.SignType,
-		PaySign:   *wxResp.PaySign,
-		PrepayId:  *wxResp.PrepayId,
+		Appid:      *wxResp.Appid,
+		TimeStamp:  *wxResp.TimeStamp,
+		NonceStr:   *wxResp.NonceStr,
+		Package:    *wxResp.Package,
+		SignType:   *wxResp.SignType,
+		PaySign:    *wxResp.PaySign,
+		PrepayId:   *wxResp.PrepayId,
+		OutTradeNo: orderSn,
 	}
 
 	return respData, nil
