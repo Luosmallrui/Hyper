@@ -53,6 +53,9 @@ func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.Or
 			"event_time": "2024-12-31 19:00:00",
 		}
 	}
+	if resq.Attach == nil {
+		resq.Attach = make(map[string]string)
+	}
 	return &resq, nil
 }
 
