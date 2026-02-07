@@ -240,7 +240,7 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 			return fmt.Errorf("更新订单状态失败或订单状态已改变")
 		}
 		var items []models.OrderItem
-		if err := tx.Where("order_id = ?", order.ID).Find(&items).Error; err != nil {
+		if err := tx.Where("order_sn = ?", order.ID).Find(&items).Error; err != nil {
 			return fmt.Errorf("获取订单明细失败: %w", err)
 		}
 		for _, item := range items {
@@ -291,7 +291,7 @@ func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId
 	//2、获取支付流水信息
 	p.DB.WithContext(ctx).Where("order_sn = ?", orderSn).First(&payRecord)
 	//3、获取订单明细
-	if err := p.DB.WithContext(ctx).Where("order_id", order.ID).Find(&items).Error; err != nil {
+	if err := p.DB.WithContext(ctx).Where("order_sn", order.ID).Find(&items).Error; err != nil {
 		return nil, fmt.Errorf("获取订单明细失败: %w", err)
 	}
 	//4、组装响应体
