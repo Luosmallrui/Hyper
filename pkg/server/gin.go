@@ -71,6 +71,9 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+	r.HEAD("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
 	h.Map.RegisterRouter(api)
