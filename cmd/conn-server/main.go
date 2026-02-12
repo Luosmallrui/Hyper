@@ -3,7 +3,6 @@ package main
 import (
 	"Hyper/config"
 	"Hyper/pkg/log"
-	"Hyper/pkg/nacos"
 	"Hyper/rpc"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
 	s "Hyper/socket"
@@ -11,7 +10,6 @@ import (
 	"net"
 	"os"
 
-	"github.com/cloudwego/kitex/pkg/registry"
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/server"
 	"github.com/redis/go-redis/v9"
@@ -53,21 +51,14 @@ func main() {
 
 func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *redis.Client) {
 	h := &handler.PushServiceImpl{Db: Db, Redis: redis}
-	nacosRegistry := nacos.NewRegistry(cfg)
 
 	listenAddr := &net.TCPAddr{IP: net.IPv4zero, Port: rpcPort}
 
-	registryAddr := &net.TCPAddr{IP: net.ParseIP(cfg.Address), Port: rpcPort}
+	//registryAddr := &net.TCPAddr{IP: net.ParseIP(cfg.Address), Port: rpcPort}
 
 	svr := pushservice.NewServer(
 		h,
-		server.WithRegistry(nacosRegistry),
-		server.WithServiceAddr(listenAddr),
-		server.WithRegistryInfo(&registry.Info{
-			ServiceName: "PushService",
-			Addr:        registryAddr,
-			Tags:        map[string]string{"node_id": "ws-01"},
-		}),
+		server.WithServiceAddr(listenAddr), // 指定端口
 		server.WithServerBasicInfo(
 			&rpcinfo.EndpointBasicInfo{
 				ServiceName: "PushService",
@@ -75,7 +66,7 @@ func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *red
 		),
 	)
 
-	log.L.Info("[RPC] Kitex Server starting", zap.String("listen", listenAddr.String()), zap.String("registry", registryAddr.String()))
+	log.L.Info("[RPC] Kitex Server starting", zap.String("listen", listenAddr.String()))
 
 	if err := svr.Run(); err != nil {
 		log.L.Fatal("failed to start rpc server", zap.Error(err))
