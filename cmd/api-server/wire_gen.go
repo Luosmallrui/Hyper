@@ -97,6 +97,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MqProducer:     producer,
 		Redis:          redisClient,
 		DB:             db,
+		NoteDAO:        noteDAO,
 	}
 	unreadStorage := cache.NewUnreadStorage(redisClient)
 	messageStorage := cache.NewMessageStorage(redisClient)
