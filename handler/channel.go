@@ -24,7 +24,9 @@ func (ch *Channel) RegisterRouter(r gin.IRouter) {
 	channel.GET("/list", authorize, context.Wrap(ch.GetChannelsList)) //创建
 	channel.POST("/create", authorize, context.Wrap(ch.CreateChannel))
 	channel.POST("/upload", authorize, context.Wrap(ch.UploadIcon))
-
+	channel.GET("/mychannels", authorize, context.Wrap(ch.GetUserChannelView))
+	channel.POST("/subscribe", authorize, context.Wrap(ch.SubscribeChannel))
+	channel.POST("/unsubscribe", authorize, context.Wrap(ch.UnsubscribeChannel))
 }
 
 func (ch *Channel) UploadIcon(c *gin.Context) error {
@@ -45,7 +47,6 @@ func (ch *Channel) GetChannelsList(c *gin.Context) error {
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return err
 	}
-
 	res, err := ch.ChannelSrv.ListChannels(c.Request.Context(), &req)
 	if err != nil {
 		return err
@@ -66,5 +67,66 @@ func (ch *Channel) CreateChannel(c *gin.Context) error {
 	}
 
 	response.Success(c, res)
+	return nil
+}
+func (ch *Channel) GetUserChannelView(c *gin.Context) error {
+	// 获取用户ID
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+	globalchannels, err := ch.ChannelSrv.GetGlobalChannels(c.Request.Context())
+	if err != nil {
+		return err
+	}
+	res, err := ch.ChannelSrv.GetUserChannelView(c.Request.Context(), userId, globalchannels)
+	if err != nil {
+		return err
+	}
+	response.Success(c, res)
+	return nil
+}
+
+func (ch *Channel) SubscribeChannel(c *gin.Context) error {
+	var req types.SubscribeChannelReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
+	}
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+
+	err := ch.ChannelSrv.SubscribeChannel(c.Request.Context(), userId, req.ChannelId)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "订阅成功")
+	return nil
+}
+
+func (ch *Channel) UnsubscribeChannel(c *gin.Context) error {
+	var req types.UnSubscribeChannelReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
+	}
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+	err := ch.ChannelSrv.UnsubscribeChannel(c.Request.Context(), userId, req.ChannelId)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "取消订阅成功")
 	return nil
 }
