@@ -54,7 +54,20 @@ func (s *SessionService) UpdateSingleSession(
 	}
 
 	summary := truncateContent(msg.Content, 50)
+	if msg.MsgType == types.MsgTypeCard {
+		// 默认兜底
+		summary = "卡片消息"
 
+		// 只处理 note_forward
+		if ct, _ := msg.Ext[types.ExtKeyCardType].(string); ct == types.CardTypeNoteForward {
+			summary = "转发帖子"
+			if m, ok := msg.Ext[types.ExtKeyNote].(map[string]interface{}); ok {
+				if title, ok := m["title"].(string); ok && title != "" {
+					summary = truncateContent("转发帖子："+title, 50)
+				}
+			}
+		}
+	}
 	// 发送方会话（unread = 0）
 	if err := s.upsertConversation(
 		ctx,
@@ -95,6 +108,23 @@ func (s *SessionService) UpsertGroupSessions(ctx context.Context, msg *types.Mes
 
 	// last_msg_content 最大 255
 	lastContent := msg.Content
+	// 卡片消息摘要
+
+	if msg.MsgType == types.MsgTypeCard {
+		// 默认兜底
+		lastContent = "卡片消息"
+
+		// 只处理 note_forward
+		if ct, _ := msg.Ext[types.ExtKeyCardType].(string); ct == types.CardTypeNoteForward {
+			lastContent = "转发帖子"
+			if m, ok := msg.Ext[types.ExtKeyNote].(map[string]interface{}); ok {
+				if title, ok := m["title"].(string); ok && title != "" {
+					lastContent = "转发帖子：" + title
+				}
+			}
+		}
+	}
+	// 统一做截断（无论文本还是卡片摘要）
 	if len([]rune(lastContent)) > 200 { // 留点余量，避免 emoji 等导致超长
 		r := []rune(lastContent)
 		lastContent = string(r[:200]) + "..."

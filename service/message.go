@@ -7,8 +7,10 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"strconv"
 	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
@@ -24,6 +26,7 @@ type MessageService struct {
 	MqProducer     rmq_client.Producer
 	Redis          *redis.Client
 	DB             *gorm.DB
+	NoteDAO        *dao.NoteDAO
 }
 
 var _ IMessageService = (*MessageService)(nil)
@@ -194,24 +197,24 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	default:
 		return fmt.Errorf("unknown session_type=%d", msg.SessionType)
 	}
-	// 3.5) 群聊禁言校验：必须在发 MQ 之前做
+	// 3) 群聊禁言校验：必须在发 MQ 之前做
 	if msg.SessionType == types.GroupChatSessionTypeGroup {
 
 		gid := int(msg.TargetID) // 群ID
 		uid := int(msg.SenderID) // 发送者ID
 
-		// 1) 查群成员记录：是否成员/是否退群/角色/个人禁言
+		// 3.1) 查群成员记录：是否成员/是否退群/角色/个人禁言
 		m, err := s.GroupMemberDAO.FindByUserId(context.Background(), gid, uid)
 		if err != nil || m.IsQuit == 1 {
 			return fmt.Errorf("你不在群内或已退群")
 		}
 
-		// 2) 个人禁言：优先级最高
+		// 3.2) 个人禁言：优先级最高
 		if m.IsMute == 1 {
 			return fmt.Errorf("你已被禁言")
 		}
 
-		// 3) 群全员禁言：只禁普通成员(role=3)，群主/管理员仍可发言
+		// 3.3) 群全员禁言：只禁普通成员(role=3)，群主/管理员仍可发言
 		g, err := s.GroupDAO.FindByID(context.Background(), gid)
 		if err != nil {
 			return fmt.Errorf("群不存在")
@@ -221,10 +224,17 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		}
 	}
 
-	// 3) 频道（给 ws / 路由用）
+	// 4) 频道（给 ws / 路由用）
 	msg.Channel = types.ChannelChat
 
-	// 4) 发 MQ
+	// 5) 卡片消息：转发帖子卡片（服务端补全卡片信息，防止前端伪造）
+	if msg.MsgType == types.MsgTypeCard {
+		if err := s.fillNoteForwardCard(context.Background(), msg); err != nil {
+			return err
+		}
+	}
+
+	// 6) 发 MQ
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -273,4 +283,85 @@ func GetGroupSessionHash(groupID int64) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(rawID))
 	return int64(h.Sum64())
+}
+
+func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Message) error {
+	if msg.Ext == nil {
+		return errors.New("ext 不能为空")
+	}
+
+	// 1) 判断是不是 note_forward
+	ct, _ := msg.Ext[types.ExtKeyCardType].(string)
+	if ct != types.CardTypeNoteForward {
+		// 不是转发帖子卡片，就不处理（以后还能扩展别的卡片）
+		return nil
+	}
+
+	// 2) 取 note_id（注意前端可能传 string / float64）
+	raw := msg.Ext[types.ExtKeyNoteID]
+	var noteID uint64
+	switch v := raw.(type) {
+	case float64:
+		noteID = uint64(v)
+	case string:
+		// string -> uint64
+		parsed, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return errors.New("note_id 非法")
+		}
+		noteID = parsed
+	default:
+		return errors.New("note_id 不能为空")
+	}
+	if noteID == 0 {
+		return errors.New("note_id 不能为空")
+	}
+	if s.NoteDAO == nil {
+		return errors.New("NoteDAO 未初始化")
+	}
+
+	// 3) 查 note
+	note, err := s.NoteDAO.GetByID(ctx, noteID)
+	if err != nil {
+		return errors.New("帖子不存在")
+	}
+
+	// 4) 状态/可见性校验
+	if note.Status != 1 {
+		// 不是审核通过，不允许转发
+		return errors.New("帖子未通过审核，无法转发")
+	}
+	// visible_conf: 1公开 2粉丝可见 3自己可见
+	if note.VisibleConf == 3 && uint64(msg.SenderID) != note.UserID {
+		return errors.New("帖子仅作者可见，无法转发")
+	}
+
+	// 5) 取封面：从 media_data JSON 里取第一张
+	cover := ""
+	if note.MediaData != "" {
+		var media []map[string]interface{}
+		if err := json.Unmarshal([]byte(note.MediaData), &media); err == nil && len(media) > 0 {
+			if u, ok := media[0]["thumbnail_url"].(string); ok && u != "" {
+				cover = u
+			} else if u, ok := media[0]["url"].(string); ok {
+				cover = u
+			}
+		}
+	}
+
+	// 6) 查作者信息
+	userMap := s.UserService.BatchGetUserInfo(ctx, []uint64{note.UserID})
+	author := userMap[note.UserID]
+
+	// 7) 回填 ext.note（注意：只由服务端写入，前端传的会被覆盖）
+	msg.Ext["note"] = map[string]interface{}{
+		"id":              note.ID,
+		"title":           note.Title,
+		"cover":           cover,
+		"author_id":       note.UserID,
+		"author_avatar":   author.Avatar,
+		"author_nickname": author.Nickname,
+	}
+
+	return nil
 }
