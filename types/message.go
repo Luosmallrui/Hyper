@@ -38,6 +38,15 @@ const (
 	ExtKeyBadge      = "badge"       // 角标数字
 	ExtKeyIsSilent   = "is_silent"   // 是否静默消息
 )
+const (
+	ExtKeyCardType = "card_type"
+	ExtKeyNoteID   = "note_id"
+	ExtKeyNote     = "note"
+)
+
+const (
+	CardTypeNoteForward = "note_forward"
+)
 
 type Message struct {
 	Id          int64 `json:"msg_id,string"`    // 全局唯一雪花ID
