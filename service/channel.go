@@ -4,8 +4,13 @@ import (
 	"Hyper/models"
 	"Hyper/types"
 	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/cloudwego/kitex/pkg/kerrors"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -14,6 +19,10 @@ var _ IChannelService = (*ChannelService)(nil)
 type IChannelService interface {
 	CreateChannel(ctx context.Context, req *types.CreateChannelReq) (*types.CreateChannelResp, error)
 	ListChannels(ctx context.Context, req *types.ListChannelsReq) (*types.ListChannelsResp, error)
+	GetGlobalChannels(ctx context.Context) ([]models.Channel, error)
+	UnsubscribeChannel(ctx context.Context, userID int, channelID int) error
+	SubscribeChannel(ctx context.Context, userID int, channelID int) error
+	GetUserChannelView(ctx context.Context, userID int, AllGlobalChannels []models.Channel) (*types.ChannelViewResponse, error)
 }
 
 func (s *ChannelService) ListChannels(ctx context.Context, req *types.ListChannelsReq) (*types.ListChannelsResp, error) {
@@ -52,7 +61,8 @@ func (s *ChannelService) ListChannels(ctx context.Context, req *types.ListChanne
 }
 
 type ChannelService struct {
-	Db *gorm.DB
+	Db    *gorm.DB
+	Redis *redis.Client
 }
 
 // CreateChannel 实现 IDL 定义的接口
@@ -78,4 +88,92 @@ func (s *ChannelService) CreateChannel(ctx context.Context, req *types.CreateCha
 		ChannelId: newChannel.ID,
 	}
 	return resp, nil
+}
+
+func (s *ChannelService) GenerateKey(useID int) string {
+	return fmt.Sprintf("user:channel:%d", useID)
+}
+
+func (s *ChannelService) GetUserChannelView(ctx context.Context, userID int, AllGlobalChannels []models.Channel) (*types.ChannelViewResponse, error) {
+	key := s.GenerateKey(userID)
+
+	subscribedIDsStrs, err := s.Redis.ZRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, kerrors.NewBizStatusError(50002, "获取用户频道失败")
+	}
+
+	myChannels := make([]*models.Channel, 0)
+	otherChannels := make([]*models.Channel, 0)
+	// 构建全局频道的 ID 到 Channel 的映射
+	globalChannels := make(map[int]models.Channel, 0)
+	for _, ch := range AllGlobalChannels {
+		globalChannels[ch.ID] = ch
+	}
+	subscribedSet := make(map[int]bool)
+
+	for _, idStr := range subscribedIDsStrs {
+		id, _ := strconv.Atoi(idStr) //redis 返回的是字符串，需要转换为整数
+		if ch, exists := globalChannels[id]; exists {
+			myChannels = append(myChannels, &ch)
+			subscribedSet[id] = true
+		}
+	}
+
+	for _, ch := range AllGlobalChannels {
+		if !subscribedSet[ch.ID] {
+			otherChannels = append(otherChannels, &ch)
+		}
+	}
+	return &types.ChannelViewResponse{
+		Mychannels:    myChannels,
+		Otherchannels: otherChannels,
+	}, nil
+}
+
+func (s *ChannelService) SubscribeChannel(ctx context.Context, userID int, channelID int) error {
+	key := s.GenerateKey(userID)
+
+	socre := float64(time.Now().UnixNano())
+
+	err := s.Redis.ZAdd(ctx, key, redis.Z{Score: socre, Member: channelID}).Err()
+	if err != nil {
+		return kerrors.NewBizStatusError(50003, "订阅频道失败")
+	}
+	return nil
+}
+
+func (s *ChannelService) UnsubscribeChannel(ctx context.Context, userID int, channelID int) error {
+	key := s.GenerateKey(userID)
+
+	err := s.Redis.ZRem(ctx, key, channelID).Err()
+	if err != nil {
+		return kerrors.NewBizStatusError(50004, "取消订阅频道失败")
+	}
+	return nil
+}
+
+func (s *ChannelService) GetGlobalChannels(ctx context.Context) ([]models.Channel, error) {
+	var channels []models.Channel
+	val, err := s.Redis.Get(ctx, "app:global:channels").Result()
+
+	if err == nil {
+		if jsonErr := json.Unmarshal([]byte(val), &channels); jsonErr == nil {
+			// 从缓存获取成功
+			return channels, nil
+		}
+	} else if err != redis.Nil {
+		// 其他 Redis 错误
+	}
+	err = s.Db.WithContext(ctx).
+		Where("is_visible = ?", true).
+		Order("sort_weight DESC, id ASC").
+		Find(&channels).Error
+	if err != nil {
+		return nil, kerrors.NewBizStatusError(50000, "获取频道列表失败")
+	}
+	if len(channels) > 0 {
+		data, _ := json.Marshal(channels)
+		s.Redis.Set(ctx, "app:global:channels", string(data), 24*time.Hour)
+	}
+	return channels, nil
 }

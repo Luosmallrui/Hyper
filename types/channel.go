@@ -1,5 +1,7 @@
 package types
 
+import "Hyper/models"
+
 type CreateChannelResp struct {
 	ChannelId int `thrift:"channel_id,1" json:"channel_id"`
 }
@@ -38,4 +40,17 @@ type ChannelInfo struct {
 	Description string `json:"description"`
 	SortWeight  int32  `json:"sort_weight"`
 	ParentId    uint32 `json:"parent_id"`
+}
+
+type ChannelViewResponse struct {
+	Mychannels    []*models.Channel `json:"my_channels"`
+	Otherchannels []*models.Channel `json:"other_channels"`
+}
+
+type SubscribeChannelReq struct {
+	ChannelId int `json:"channel_id" binding:"required"`
+}
+
+type UnSubscribeChannelReq struct {
+	ChannelId int `json:"channel_id" binding:"required"`
 }
