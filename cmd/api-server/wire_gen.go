@@ -150,7 +150,8 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:             db,
 	}
 	channelService := &service.ChannelService{
-		Db: db,
+		Db:    db,
+		Redis: redisClient,
 	}
 	note := &handler.Note{
 		OssService:     iOssService,
