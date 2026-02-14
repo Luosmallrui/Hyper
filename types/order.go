@@ -26,3 +26,24 @@ type ListOrderReq struct {
 	HasMore    bool     `json:"has_more"`
 	NextCursor int64    `json:"next_cursor,string"`
 }
+
+type CreateViewerReq struct {
+	RealName string `json:"real_name" binding:"required,min=2,max=20"` // 真实姓名
+	IDCard   string `json:"id_card" binding:"required,len=18"`         // 身份证号（固定18位）
+	Phone    string `json:"phone" binding:"required,len=11"`           // 手机号（固定11位）
+}
+
+type UpdateViewerReq struct {
+	ID       int64  `json:"id" binding:"required"`
+	RealName string `json:"real_name" binding:"omitempty,min=2,max=20"`
+	Phone    string `json:"phone" binding:"omitempty,len=11"`
+}
+
+type DeleteViewerReq struct {
+	ID int64 `json:"id" binding:"required"`
+}
+
+type ListViewerReq struct {
+	Page     int `json:"page" form:"page,default=1"`
+	PageSize int `json:"page_size" form:"page_size,default=10"`
+}
