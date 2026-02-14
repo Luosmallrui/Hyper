@@ -78,6 +78,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	}
 	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
 	producer := rocketmq.InitProducer(rocketMQConfig)
+	noteDAO := dao.NewNoteDAO(db)
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,
 		UserService:    userService,
@@ -86,6 +87,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		MqProducer:     producer,
 		Redis:          redisClient,
 		DB:             db,
+		NoteDAO:        noteDAO,
 	}
 	messageStorage := cache.NewMessageStorage(redisClient)
 	sessionService := &service.SessionService{

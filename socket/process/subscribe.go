@@ -363,8 +363,25 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 	receiverID := int(msg.TargetID)
 	senderID := int(msg.SenderID)
 
+	summaryContent := truncateContent(msg.Content, 50)
+
+	// 卡片消息：优先用“转发帖子：标题”
+	if msg.MsgType == types.MsgTypeCard {
+		// 默认兜底
+		summaryContent = "转发帖子"
+
+		// 只处理 note_forward
+		if ct, _ := msg.Ext[types.ExtKeyCardType].(string); ct == types.CardTypeNoteForward {
+			if noteObj, ok := msg.Ext[types.ExtKeyNote].(map[string]interface{}); ok {
+				if title, ok := noteObj["title"].(string); ok && title != "" {
+					summaryContent = truncateContent("转发帖子："+title, 50)
+				}
+			}
+		}
+	}
+
 	summary := &cache.LastCacheMessage{
-		Content:   truncateContent(msg.Content, 50), // 截断内容防止浪费内存
+		Content:   summaryContent,
 		Timestamp: msg.Timestamp,
 	}
 
@@ -441,8 +458,21 @@ func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Messa
 func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) error {
 	groupID := int(msg.TargetID)
 
+	summaryContent := truncateContent(msg.Content, 50)
+	// 卡片消息：优先用“转发帖子：标题”
+	if msg.MsgType == types.MsgTypeCard {
+		summaryContent = "转发帖子"
+
+		if ct, _ := msg.Ext[types.ExtKeyCardType].(string); ct == types.CardTypeNoteForward {
+			if noteObj, ok := msg.Ext[types.ExtKeyNote].(map[string]interface{}); ok {
+				if title, ok := noteObj["title"].(string); ok && title != "" {
+					summaryContent = truncateContent("转发帖子："+title, 50)
+				}
+			}
+		}
+	}
 	summary := &cache.LastCacheMessage{
-		Content:   truncateContent(msg.Content, 50),
+		Content:   summaryContent,
 		Timestamp: msg.Timestamp,
 	}
 	// 群聊摘要：所有成员都更新一份 last_message（包括 sender）
