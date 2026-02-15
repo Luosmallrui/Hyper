@@ -105,4 +105,5 @@ type MerchantListItem struct {
 	AvgPrice     int64     `json:"avg_price"`     //人均价格
 	CurrentCount int64     `json:"current_count"` // 参与人数
 	PostCount    int64     `json:"post_count"`
+	Icon         string    `json:"icon"`
 }

@@ -326,15 +326,15 @@ func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Mes
 		return errors.New("帖子不存在")
 	}
 
-	// 4) 状态/可见性校验
-	if note.Status != 1 {
-		// 不是审核通过，不允许转发
-		return errors.New("帖子未通过审核，无法转发")
-	}
-	// visible_conf: 1公开 2粉丝可见 3自己可见
-	if note.VisibleConf == 3 && uint64(msg.SenderID) != note.UserID {
-		return errors.New("帖子仅作者可见，无法转发")
-	}
+	//// 4) 状态/可见性校验
+	//if note.Status != 1 {
+	//	// 不是审核通过，不允许转发
+	//	return errors.New("帖子未通过审核，无法转发")
+	//}
+	//// visible_conf: 1公开 2粉丝可见 3自己可见
+	//if note.VisibleConf == 3 && uint64(msg.SenderID) != note.UserID {
+	//	return errors.New("帖子仅作者可见，无法转发")
+	//}
 
 	// 5) 取封面：从 media_data JSON 里取第一张
 	cover := ""
