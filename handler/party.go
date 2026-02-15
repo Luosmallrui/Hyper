@@ -124,6 +124,12 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		userId := uint64(m.UserID)
 		userAvatar := userMap[userId].Avatar
 		userName := userMap[userId].Nickname
+		icon := ""
+		if m.Type == "场地" {
+			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
+		} else {
+			icon = "https://cdn.hypercn.cn/icon/party.webp"
+		}
 		list = append(list, models.MerchantListItem{
 			ID:           m.ID,
 			UserAvatar:   userAvatar,
@@ -138,6 +144,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			CurrentCount: 9932,
 			AvgPrice:     7600,
 			PostCount:    372,
+			Icon:         icon,
 		})
 	}
 

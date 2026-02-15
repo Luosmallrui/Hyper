@@ -24,7 +24,7 @@ func (ch *Channel) RegisterRouter(r gin.IRouter) {
 	channel.GET("/list", authorize, context.Wrap(ch.GetChannelsList)) //创建
 	channel.POST("/create", authorize, context.Wrap(ch.CreateChannel))
 	channel.POST("/upload", authorize, context.Wrap(ch.UploadIcon))
-	channel.GET("/mychannels", authorize, context.Wrap(ch.GetUserChannelView))
+	channel.GET("/", authorize, context.Wrap(ch.GetUserChannelView))
 	channel.POST("/subscribe", authorize, context.Wrap(ch.SubscribeChannel))
 	channel.POST("/unsubscribe", authorize, context.Wrap(ch.UnsubscribeChannel))
 }
