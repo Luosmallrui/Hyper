@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"Hyper/models"
+	"time"
+)
 
 type Order struct {
 	Id         int       `json:"id"`
@@ -44,6 +47,10 @@ type DeleteViewerReq struct {
 }
 
 type ListViewerReq struct {
-	Page     int `json:"page" form:"page,default=1"`
-	PageSize int `json:"page_size" form:"page_size,default=10"`
+	userId int `json:"user_id" binding:"required"`
+}
+
+type GetViewerListResp struct {
+	Total   int64            `json:"total"`
+	Viewers []*models.Viewer `json:"viewers"`
 }
