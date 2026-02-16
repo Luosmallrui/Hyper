@@ -355,7 +355,7 @@ func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Mes
 
 	// 7) 回填 ext.note（注意：只由服务端写入，前端传的会被覆盖）
 	msg.Ext["note"] = map[string]interface{}{
-		"id":              note.ID,
+		"id":              fmt.Sprintf("%d", note.ID),
 		"title":           note.Title,
 		"cover":           cover,
 		"author_id":       note.UserID,

@@ -65,6 +65,7 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		log.L.Error("unmarshal msg error", zap.Error(err))
 		return err //返回err防止Ack 掉
 	}
+	log.L.Info("receive message", zap.Any("msg", imMsg))
 	// 幂等去重：done + lock 两段式
 	doneKey := fmt.Sprintf("im:dedup:done:%d", imMsg.Id)
 	lockKey := fmt.Sprintf("im:dedup:lock:%d", imMsg.Id)

@@ -89,10 +89,6 @@ func (o *Order) DeleteViewer(c *gin.Context) error {
 }
 
 func (o *Order) GetViewerList(c *gin.Context) error {
-	var req types.ListViewerReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(http.StatusBadRequest, "参数错误")
-	}
 	var userId int
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "Bearer debug-mode" {
