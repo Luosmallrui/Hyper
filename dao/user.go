@@ -3,6 +3,7 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -35,6 +36,24 @@ func (u *Users) GetOrCreateByOpenID(ctx context.Context, openid string) (*models
 		Where("open_id = ?", openid).
 		FirstOrCreate(user).Error
 	return user, err
+}
+
+func (u *Users) RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error) {
+	var user models.Users
+	// 查找或创建用户
+	err := u.Repo.Db.Where("phone = ?", phone).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		user = models.Users{
+			Mobile:   phone,
+			Nickname: fmt.Sprintf("用户%s", phone[7:]), // 默认昵称
+		}
+		if err := u.Repo.Db.Create(&user).Error; err != nil {
+			return nil, fmt.Errorf("创建用户失败: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("数据库错误: %w", err)
+	}
+	return &user, nil
 }
 
 func (u *Users) UpdateById(

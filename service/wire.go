@@ -66,5 +66,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(ChannelService), "*"),
 	wire.Bind(new(IChannelService), new(*ChannelService)),
 
+	wire.Struct(new(SMSService), "*"),
+	wire.Bind(new(ISMSService), new(*SMSService)),
+
 	NewOssService,
 )

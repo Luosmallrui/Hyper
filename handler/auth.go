@@ -11,6 +11,7 @@ import (
 	"Hyper/types"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,12 +28,15 @@ type Auth struct {
 	FollowService  service.IFollowService
 	LikeService    service.ILikeService
 	CollectService service.ICollectService
+	SmsService     service.ISMSService
 }
 
 func (u *Auth) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
 	auth := r.Group("/v1/auth")
-	auth.POST("/wx-login", context.Wrap(u.Login))                  // 微信登录
+	auth.POST("/wx-login", context.Wrap(u.Login)) // 微信登录
+	auth.POST("/login", context.Wrap(u.SMSLogin))
+	auth.POST("/send-code", context.Wrap(u.SendCode))
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
 	auth.GET("/token", context.Wrap(u.GetToken))
@@ -46,6 +50,68 @@ func (u *Auth) test(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
 	fmt.Println(userId)
 	fmt.Println(err)
+	return nil
+}
+
+func (u *Auth) SMSLogin(c *gin.Context) error {
+	var req types.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	// 验证手机号格式
+	if !isValidPhone(req.Phone) {
+		return response.NewError(400, "手机号格式不正确")
+	}
+	// 验证验证码
+	valid, err := u.SmsService.VerifyCode(c, req.Phone, req.Code)
+	if err != nil || !valid {
+		return response.NewError(400, "验证码错误或已过期")
+	}
+
+	user, err := u.UserService.RegisterOrLogin(c, req.Phone)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	accessToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "access", time.Duration(u.Config.Jwt.ExpiresTime)*time.Second)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	log.L.Info("generating access token", zap.String("token", accessToken))
+	refreshToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "refresh", 7*24*time.Hour)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	log.L.Info("generating refresh token", zap.String("token", refreshToken))
+	rep := types.UserToken{
+		AccessToken:   accessToken,
+		RefreshToken:  refreshToken,
+		AccessExpire:  time.Now().Add(time.Duration(u.Config.Jwt.ExpiresTime) * time.Second).Unix(),
+		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	response.Success(c, rep)
+	return nil
+}
+
+func isValidPhone(phone string) bool {
+	pattern := `^1[3-9]\d{9}$`
+	match, _ := regexp.MatchString(pattern, phone)
+	return match
+}
+
+func (u *Auth) SendCode(c *gin.Context) error {
+	var req types.SendCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	if !isValidPhone(req.Phone) {
+		return response.NewError(400, "手机号格式不正确")
+	}
+
+	err := u.SmsService.SendVerificationCode(c, req.Phone)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
 	return nil
 }
 
