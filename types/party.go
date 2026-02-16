@@ -40,11 +40,11 @@ type MerchantDetail struct {
 }
 
 type SubcribPartyRequest struct {
-	PartyId int64 `json:"party_id" binding:"required"`
+	PartyId int64 `json:"party_id,string" binding:"required"`
 }
 
 type UnsubcribPartyRequest struct {
-	PartyId int64 `json:"party_id" binding:"required"`
+	PartyId int64 `json:"party_id,string" binding:"required"`
 }
 
 //type SharePartyResponse struct {
