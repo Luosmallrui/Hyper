@@ -4,6 +4,12 @@ import (
 	"Hyper/models"
 	"Hyper/types"
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strconv"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -18,6 +24,8 @@ var _ IOrderService = (*OrderService)(nil)
 
 type IOrderService interface {
 	GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error)
+	AddViewers(ctx context.Context, UserId int, req types.CreateViewerReq) error
+	DeleteViewer(ctx context.Context, UserId int, req types.DeleteViewerReq) error
 }
 
 func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error) {
@@ -125,4 +133,102 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int6
 	}
 
 	return resp, nextCursor, hasMore, err
+}
+
+func (f *OrderService) AddViewers(ctx context.Context, UserId int, req types.CreateViewerReq) error {
+	return f.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 身份证合法性验证
+		viewerType, err := GetAgeTypeByIDCard(req.IDCard)
+		if err != nil {
+			return err // 已经包含 http code 前缀
+		}
+
+		// 2. 数量上限校验
+		var count int64
+		tx.Model(&models.Viewer{}).Where("user_id = ?", UserId).Count(&count)
+		if count >= 5 {
+			return errors.New(fmt.Sprintf("%d:常用观影人已达上限", http.StatusBadRequest))
+		}
+
+		// 3. 查重 (修正了你代码中的 SQL 笔误: AND user_id 后缺少 = ?)
+		var existViewer models.Viewer
+		if err := tx.Where("id_card = ? AND user_id = ?", req.IDCard, UserId).First(&existViewer).Error; err == nil {
+			return errors.New(fmt.Sprintf("%d:该观影人已存在", http.StatusBadRequest))
+		}
+
+		// 4. 执行创建
+		viewer := models.Viewer{
+			UserID:   UserId,
+			RealName: req.RealName,
+			IDCard:   req.IDCard,
+			Phone:    req.Phone,
+			Type:     viewerType,
+		}
+		if err := tx.Create(&viewer).Error; err != nil {
+			return errors.New(fmt.Sprintf("%d:添加失败", http.StatusInternalServerError))
+		}
+		return nil
+	})
+}
+
+func GetAgeTypeByIDCard(idCard string) (int8, error) {
+	// 调用上面的校验函数
+	if !IsValidIDCard(idCard) {
+		return 0, errors.New(fmt.Sprintf("%d:身份证号格式或校验码错误", http.StatusBadRequest))
+	}
+
+	yearStr := idCard[6:10]
+	birthYear, _ := strconv.Atoi(yearStr) // 校验过正则，这里不会报错
+
+	currentYear := time.Now().Year()
+	age := currentYear - birthYear
+
+	if age < 18 {
+		return 1, nil // 未成年
+	} else if age >= 18 && age < 60 {
+		return 2, nil // 成年
+	} else {
+		return 3, nil // 老年
+	}
+}
+func (f *OrderService) DeleteViewer(ctx context.Context, UserId int, req types.DeleteViewerReq) error {
+	return f.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var viewer models.Viewer
+		err := tx.Where("id = ? AND user_id = ?", req.ID, UserId).First(&viewer).Error
+		if err != nil {
+			return errors.New("查询观影人失败: " + err.Error())
+		}
+		//这里要考虑添加的观影人是否存在订单
+		if err := tx.Delete(&viewer).Error; err != nil {
+			return errors.New("删除观影人失败: " + err.Error())
+		}
+		return nil
+	})
+}
+
+// IsValidIDCard 验证身份证号是否合法 (GB 11643-1999)
+func IsValidIDCard(idCard string) bool {
+	// 1. 长度及基本格式校验
+	reg := regexp.MustCompile(`^[1-9]\d{5}(18|19|20)\d{2}((0[1-9])|(1[0-2]))(([0-2][1-9])|10|20|30|31)\d{3}[0-9Xx]$`)
+	if !reg.MatchString(idCard) {
+		return false
+	}
+
+	// 2. 校验码计算 (加权因子)
+	weights := []int{7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2}
+	checkCodes := []byte{'1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'}
+
+	sum := 0
+	for i := 0; i < 17; i++ {
+		n, _ := strconv.Atoi(string(idCard[i]))
+		sum += n * weights[i]
+	}
+
+	// 取模结果对应的校验码
+	actualCheckCode := idCard[17]
+	if actualCheckCode == 'x' {
+		actualCheckCode = 'X'
+	}
+
+	return checkCodes[sum%11] == actualCheckCode
 }

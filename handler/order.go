@@ -22,6 +22,8 @@ func (o *Order) RegisterRouter(r gin.IRouter) {
 	order := r.Group("/v1/order")
 	order.Use(authorize)
 	order.GET("/list", context.Wrap(o.GetOrder))
+	order.POST("/create-viewer", authorize, context.Wrap(o.CreateViewer))
+	order.POST("/delete-viewer", authorize, context.Wrap(o.DeleteViewer))
 
 }
 
@@ -42,5 +44,45 @@ func (o *Order) GetOrder(c *gin.Context) error {
 		NextCursor: nextCursor,
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (o *Order) CreateViewer(c *gin.Context) error {
+	var req types.CreateViewerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+	err := o.OrderService.AddViewers(c.Request.Context(), userId, req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "添加观影人成功")
+	return nil
+}
+
+func (o *Order) DeleteViewer(c *gin.Context) error {
+	var req types.DeleteViewerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+	err := o.OrderService.DeleteViewer(c.Request.Context(), userId, req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, "删除观影人成功")
 	return nil
 }

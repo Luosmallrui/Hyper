@@ -244,10 +244,15 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:         cfg,
 		ProductService: productService,
 	}
+	merchantService := &service.MerchantService{
+		Redis: redisClient,
+		DB:    db,
+	}
 	merchant := &handler.Merchant{
-		DB:          db,
-		UserService: userService,
-		NoteService: noteService,
+		DB:              db,
+		UserService:     userService,
+		NoteService:     noteService,
+		MerchantService: merchantService,
 	}
 	channel := &handler.Channel{
 		Config:     cfg,
