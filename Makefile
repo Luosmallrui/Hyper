@@ -55,7 +55,7 @@ build-api: gen-api
 	@echo "==> build api-server"
 	@mkdir -p $(BIN_DIR)
 	@CGO_ENABLED=$(CGO) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-		 ./instgo $(GO) build -o $(BIN_DIR)/api-server ./$(API_CMD)
+		  $(GO) build -o $(BIN_DIR)/api-server ./$(API_CMD)
 
 build-conn: gen-conn
 	@echo "==> build conn-server"
