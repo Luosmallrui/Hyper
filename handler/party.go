@@ -126,9 +126,9 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		userName := userMap[userId].Nickname
 		icon := ""
 		if m.Type == "场地" {
-			icon = "https://cdn.hypercn.cn/icon/jiuba.svg"
+			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
 		} else {
-			icon = "https://cdn.hypercn.cn/icon/party.svg"
+			icon = "https://cdn.hypercn.cn/icon/party.png"
 		}
 		list = append(list, models.MerchantListItem{
 			ID:           m.ID,
