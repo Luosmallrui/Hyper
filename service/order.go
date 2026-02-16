@@ -26,6 +26,7 @@ type IOrderService interface {
 	GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error)
 	AddViewers(ctx context.Context, UserId int, req types.CreateViewerReq) error
 	DeleteViewer(ctx context.Context, UserId int, req types.DeleteViewerReq) error
+	GetViewerList(ctx context.Context, userID int) (*types.GetViewerListResp, error)
 }
 
 func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int64, pageSize int) ([]*types.Order, int64, bool, error) {
@@ -143,20 +144,17 @@ func (f *OrderService) AddViewers(ctx context.Context, UserId int, req types.Cre
 			return err // 已经包含 http code 前缀
 		}
 
-		// 2. 数量上限校验
 		var count int64
 		tx.Model(&models.Viewer{}).Where("user_id = ?", UserId).Count(&count)
 		if count >= 5 {
 			return errors.New(fmt.Sprintf("%d:常用观影人已达上限", http.StatusBadRequest))
 		}
 
-		// 3. 查重 (修正了你代码中的 SQL 笔误: AND user_id 后缺少 = ?)
 		var existViewer models.Viewer
 		if err := tx.Where("id_card = ? AND user_id = ?", req.IDCard, UserId).First(&existViewer).Error; err == nil {
 			return errors.New(fmt.Sprintf("%d:该观影人已存在", http.StatusBadRequest))
 		}
 
-		// 4. 执行创建
 		viewer := models.Viewer{
 			UserID:   UserId,
 			RealName: req.RealName,
@@ -231,4 +229,25 @@ func IsValidIDCard(idCard string) bool {
 	}
 
 	return checkCodes[sum%11] == actualCheckCode
+}
+
+func (f *OrderService) GetViewerList(ctx context.Context, userID int) (*types.GetViewerListResp, error) {
+	var viewers []*models.Viewer
+	if err := f.DB.WithContext(ctx).Where("user_id = ?", userID).Find(&viewers).Error; err != nil {
+		return nil, errors.New(fmt.Sprintf("%d:获取列表失败", http.StatusInternalServerError))
+	}
+
+	for _, v := range viewers {
+		if len(v.IDCard) == 18 {
+			v.IDCard = v.IDCard[:4] + "**********" + v.IDCard[14:]
+		}
+		if len(v.Phone) == 11 {
+			v.Phone = v.Phone[:3] + "****" + v.Phone[7:]
+		}
+	}
+
+	return &types.GetViewerListResp{
+		Total:   int64(len(viewers)),
+		Viewers: viewers,
+	}, nil
 }

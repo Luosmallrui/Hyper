@@ -24,6 +24,7 @@ func (o *Order) RegisterRouter(r gin.IRouter) {
 	order.GET("/list", context.Wrap(o.GetOrder))
 	order.POST("/create-viewer", authorize, context.Wrap(o.CreateViewer))
 	order.POST("/delete-viewer", authorize, context.Wrap(o.DeleteViewer))
+	order.GET("/list-viewer", authorize, context.Wrap(o.GetViewerList))
 
 }
 
@@ -85,4 +86,26 @@ func (o *Order) DeleteViewer(c *gin.Context) error {
 	}
 	response.Success(c, "删除观影人成功")
 	return nil
+}
+
+func (o *Order) GetViewerList(c *gin.Context) error {
+	var req types.ListViewerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误")
+	}
+	var userId int
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "Bearer debug-mode" {
+		userId = 6 // Debug 模式下使用固定用户ID
+	} else {
+		userId = c.GetInt("user_id")
+	}
+	viewers_list, err := o.OrderService.GetViewerList(c.Request.Context(), userId)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+
+	response.Success(c, viewers_list)
+	return nil
+
 }
