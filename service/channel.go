@@ -97,6 +97,24 @@ func (s *ChannelService) GenerateKey(useID int) string {
 func (s *ChannelService) GetUserChannelView(ctx context.Context, userID int, AllGlobalChannels []models.Channel) (*types.ChannelViewResponse, error) {
 	key := s.GenerateKey(userID)
 
+	count, err := s.Redis.ZCard(ctx, key).Result()
+	if err != nil {
+		return nil, kerrors.NewBizStatusError(50001, "获取用户频道失败")
+	}
+	if count == 0 && len(AllGlobalChannels) == 0 {
+		limit := 8
+		if len(AllGlobalChannels) < 8 {
+			limit = len(AllGlobalChannels)
+		}
+		pipe := s.Redis.Pipeline()
+		for i := 0; i < limit; i++ {
+			pipe.ZAdd(ctx, key, redis.Z{
+				Score:  float64(i),
+				Member: AllGlobalChannels[i].ID,
+			})
+		}
+	}
+
 	subscribedIDsStrs, err := s.Redis.ZRange(ctx, key, 0, -1).Result()
 	if err != nil {
 		return nil, kerrors.NewBizStatusError(50002, "获取用户频道失败")
@@ -114,14 +132,16 @@ func (s *ChannelService) GetUserChannelView(ctx context.Context, userID int, All
 	for _, idStr := range subscribedIDsStrs {
 		id, _ := strconv.Atoi(idStr) //redis 返回的是字符串，需要转换为整数
 		if ch, exists := globalChannels[id]; exists {
-			myChannels = append(myChannels, &ch)
+			tempCh := ch
+			myChannels = append(myChannels, &tempCh)
 			subscribedSet[id] = true
 		}
 	}
 
 	for _, ch := range AllGlobalChannels {
 		if !subscribedSet[ch.ID] {
-			otherChannels = append(otherChannels, &ch)
+			tempCh := ch
+			otherChannels = append(otherChannels, &tempCh)
 		}
 	}
 	return &types.ChannelViewResponse{

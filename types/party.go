@@ -38,3 +38,15 @@ type MerchantDetail struct {
 	IsFollow      bool             `json:"is_follow"`
 	BusinessHours string           `json:"business_hours"`
 }
+
+type SubcribPartyRequest struct {
+	PartyId int64 `json:"party_id" binding:"required"`
+}
+
+type UnsubcribPartyRequest struct {
+	PartyId int64 `json:"party_id" binding:"required"`
+}
+
+//type SharePartyResponse struct {
+//	ShareURL string `json:"share_url"`
+//}
