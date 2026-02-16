@@ -62,6 +62,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		NoteDAO:       noteDAO,
 		Redis:         redisClient,
 	}
+	smsService := &service.SMSService{
+		Config: cfg,
+		DB:     db,
+		Redis:  redisClient,
+	}
 	auth := &handler.Auth{
 		Config:         cfg,
 		UserService:    userService,
@@ -70,6 +75,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		FollowService:  followService,
 		LikeService:    likeService,
 		CollectService: collectService,
+		SmsService:     smsService,
 	}
 	payService := &service.PayService{
 		DB:     db,

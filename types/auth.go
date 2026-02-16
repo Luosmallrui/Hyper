@@ -16,6 +16,14 @@ type WxLoginRequest struct {
 	LoginCode string `json:"code"` // wx.login 获取的 code (用于换 openid)
 }
 
+type SendCodeRequest struct {
+	Phone string `json:"phone" binding:"required"`
+}
+
+type LoginRequest struct {
+	Phone string `json:"phone" binding:"required"`
+	Code  string `json:"code" binding:"required"`
+}
 type WxSessionResponse struct {
 	OpenID     string `json:"openid"`
 	SessionKey string `json:"session_key"`

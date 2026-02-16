@@ -19,6 +19,7 @@ var _ IUserService = (*UserService)(nil)
 
 type IUserService interface {
 	GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error)
+	RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error)
 	Register(ctx context.Context, opt *UserRegisterOpt) (*models.Users, error)
 	Login(mobile string, password string) (*models.Users, error)
 	Forget(opt *UserForgetOpt) (bool, error)
@@ -72,6 +73,11 @@ func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber 
 	})
 
 	return err
+}
+
+func (s *UserService) RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error) {
+	return s.UsersRepo.RegisterOrLogin(ctx, phone)
+
 }
 
 func (s *UserService) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {
