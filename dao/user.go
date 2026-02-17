@@ -41,7 +41,7 @@ func (u *Users) GetOrCreateByOpenID(ctx context.Context, openid string) (*models
 func (u *Users) RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error) {
 	var user models.Users
 	// 查找或创建用户
-	err := u.Repo.Db.Where("phone = ?", phone).First(&user).Error
+	err := u.Repo.Db.Where("mobile = ?", phone).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		user = models.Users{
 			Mobile:   phone,
