@@ -224,12 +224,18 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		}
 	}
 
+	fmt.Println("ok")
 	// 4) 频道（给 ws / 路由用）
 	msg.Channel = types.ChannelChat
 
 	// 5) 卡片消息：转发帖子卡片（服务端补全卡片信息，防止前端伪造）
 	if msg.MsgType == types.MsgTypeCard {
 		if err := s.fillNoteForwardCard(context.Background(), msg); err != nil {
+			return err
+		}
+	}
+	if msg.MsgType == types.MsgTypeActivity {
+		if err := s.fillActivityCard(context.Background(), msg); err != nil {
 			return err
 		}
 	}
@@ -240,6 +246,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		return err
 	}
 
+	fmt.Println(body)
 	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
 		Body:  body,
@@ -326,17 +333,6 @@ func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Mes
 		return errors.New("帖子不存在")
 	}
 
-	//// 4) 状态/可见性校验
-	//if note.Status != 1 {
-	//	// 不是审核通过，不允许转发
-	//	return errors.New("帖子未通过审核，无法转发")
-	//}
-	//// visible_conf: 1公开 2粉丝可见 3自己可见
-	//if note.VisibleConf == 3 && uint64(msg.SenderID) != note.UserID {
-	//	return errors.New("帖子仅作者可见，无法转发")
-	//}
-
-	// 5) 取封面：从 media_data JSON 里取第一张
 	cover := ""
 	if note.MediaData != "" {
 		var media []map[string]interface{}
@@ -363,5 +359,49 @@ func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Mes
 		"author_nickname": author.Nickname,
 	}
 
+	return nil
+}
+
+func (s *MessageService) fillActivityCard(ctx context.Context, msg *types.Message) error {
+	if msg.Ext == nil {
+		return errors.New("ext 不能为空")
+	}
+	// 1) 判断是不是 note_forward
+	ct, _ := msg.Ext[types.ExtKeyCardType].(string)
+	if ct != types.CardTypeActivityForward {
+		// 不是转发帖子卡片，就不处理（以后还能扩展别的卡片）
+		return nil
+	}
+	raw := msg.Ext[types.ExtKeyActivity]
+	var id uint64
+	switch v := raw.(type) {
+	case float64:
+		id = uint64(v)
+	case string:
+		// string -> uint64
+		parsed, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return errors.New("note_id 非法")
+		}
+		id = parsed
+	default:
+		return errors.New("note_id 不能为空")
+	}
+	var merchant models.Merchant
+
+	if err := s.DB.Model(&models.Merchant{}).Where("id = ?", id).First(&merchant).Error; err != nil {
+		return nil
+	}
+	msg.Ext["party"] = map[string]interface{}{
+		"id":            merchant.ID,           // 商家/活动ID
+		"title":         merchant.Title,        // 标题
+		"type":          merchant.Type,         // 类型 (如：剧本杀、徒步等)
+		"cover_image":   merchant.CoverImage,   // 封面图
+		"location_name": merchant.LocationName, // 场地名称
+		"address":       merchant.Address,      // 详细地址
+		"lat":           merchant.Latitude,     // 纬度
+		"lng":           merchant.Longitude,    // 经度
+		"status":        "active",              // 额外状态标识
+	}
 	return nil
 }

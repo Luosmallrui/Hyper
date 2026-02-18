@@ -16,12 +16,14 @@ const (
 	MsgTypeLocation           = 6 // 位置消息
 	MsgTypeInteraction        = 7 // 互动消息（点赞、关注提醒）
 	MsgTypeCard               = 8 // 卡片/链接消息
-	MsgStatusSending          = 0 // 发送中/待处理
-	MsgStatusSuccess          = 1 // 发送成功
-	MsgStatusRead             = 2 // 已读
-	MsgStatusRevoked          = 3 // 已撤回
-	MsgStatusFailed           = 4 // 发送失败
-	MsgStatusDeleted          = 5 // 逻辑删除
+	MsgTypeActivity           = 9
+
+	MsgStatusSending = 0 // 发送中/待处理
+	MsgStatusSuccess = 1 // 发送成功
+	MsgStatusRead    = 2 // 已读
+	MsgStatusRevoked = 3 // 已撤回
+	MsgStatusFailed  = 4 // 发送失败
+	MsgStatusDeleted = 5 // 逻辑删除
 )
 
 const (
@@ -42,10 +44,12 @@ const (
 	ExtKeyCardType = "card_type"
 	ExtKeyNoteID   = "note_id"
 	ExtKeyNote     = "note"
+	ExtKeyActivity = "activity_id"
 )
 
 const (
-	CardTypeNoteForward = "note_forward"
+	CardTypeNoteForward     = "note_forward"
+	CardTypeActivityForward = "activity_forward"
 )
 
 type Message struct {
