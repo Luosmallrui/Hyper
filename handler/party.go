@@ -99,9 +99,12 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	ctx := c.Request.Context()
-
 	query := pc.DB.Model(&models.Merchant{})
-
+	districtId := c.Query("district_id")
+	districtIdNum, _ := strconv.Atoi(districtId)
+	if districtIdNum > 0 {
+		query = query.Where("district_id = ?", districtIdNum)
+	}
 	var total int64
 	total = 2
 	offset := (page - 1) * pageSize
