@@ -380,6 +380,19 @@ func (m *MessageSubscribe) updateUserCache(ctx context.Context, msg *types.Messa
 			}
 		}
 	}
+	if msg.MsgType == types.MsgTypeActivity {
+		// 默认兜底
+		summaryContent = "分享活动"
+
+		// 只处理 note_forward
+		if ct, _ := msg.Ext[types.ExtKeyCardType].(string); ct == types.CardTypeActivityForward {
+			if noteObj, ok := msg.Ext[types.ExtKeyActivity].(map[string]interface{}); ok {
+				if title, ok := noteObj["title"].(string); ok && title != "" {
+					summaryContent = truncateContent("转发活动："+title, 50)
+				}
+			}
+		}
+	}
 
 	summary := &cache.LastCacheMessage{
 		Content:   summaryContent,
