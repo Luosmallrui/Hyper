@@ -106,4 +106,5 @@ type MerchantListItem struct {
 	CurrentCount int64     `json:"current_count"` // 参与人数
 	PostCount    int64     `json:"post_count"`
 	Icon         string    `json:"icon"`
+	IsSubscriber bool      `json:"is_subscribe"`
 }

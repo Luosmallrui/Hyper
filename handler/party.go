@@ -108,6 +108,30 @@ func (pc *Merchant) CreateMerchant(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 200, "msg": "发布成功", "data": party.ID})
 }
 
+func (pc *Merchant) GetPartyLikeStatus(userID int, partyIDs []int) (map[int]bool, error) {
+	result := make(map[int]bool, len(partyIDs))
+	for _, pid := range partyIDs {
+		result[pid] = false
+	}
+	if len(partyIDs) == 0 {
+		return result, nil
+	}
+
+	var likedPartyIDs []int
+	err := pc.DB.
+		Model(&models.PartyLike{}).
+		Select("party_id").
+		Where("user_id = ? AND party_id IN ?", userID, partyIDs).
+		Pluck("party_id", &likedPartyIDs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pid := range likedPartyIDs {
+		result[pid] = true
+	}
+	return result, nil
+}
 func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
@@ -139,9 +163,13 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	}
 
 	userIDArr := make([]uint64, 0)
+	memIdSlice := make([]int, 0)
 	for _, m := range merchant {
 		userIDArr = append(userIDArr, uint64(m.UserID))
+		memIdSlice = append(memIdSlice, int(m.ID))
 	}
+
+	isSubcribe, _ := pc.GetPartyLikeStatus(c.GetInt("user_id"), memIdSlice)
 
 	userMap := pc.UserService.BatchGetUserInfo(ctx, userIDArr)
 
@@ -171,6 +199,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			AvgPrice:     7600,
 			PostCount:    372,
 			Icon:         icon,
+			IsSubscriber: isSubcribe[int(m.ID)],
 		})
 	}
 
