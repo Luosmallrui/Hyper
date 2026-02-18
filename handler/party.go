@@ -32,7 +32,7 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 
 		m.POST("/:id/attend", pc.AttendParty)                   // 报名
 		m.DELETE("/:id/attend", pc.CancelAttend)                // 取消报名
-		m.POST("/subscribe", context.Wrap(pc.SubcribParty))     // 订阅派对
+		m.POST("/subscribe", context.Wrap(pc.subscribeParty))   // 订阅派对
 		m.POST("/unsubscribe", context.Wrap(pc.UnsubcribParty)) // 取消订阅
 	}
 }
@@ -304,19 +304,13 @@ func (pc *Merchant) updateHotScore(partyID int64) {
 	}
 }
 
-func (pc *Merchant) SubcribParty(c *gin.Context) error {
+func (pc *Merchant) subscribeParty(c *gin.Context) error {
 	var req types.SubcribPartyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(http.StatusBadRequest, "参数错误")
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
-	var userId int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userId = 6 // Debug 模式下使用固定用户ID
-	} else {
-		userId = c.GetInt("user_id")
-	}
-	err := pc.MerchantService.SubcribParty(c.Request.Context(), int(userId), int(req.PartyId))
+	userId := c.GetInt("user_id")
+	err := pc.MerchantService.SubcribParty(c.Request.Context(), userId, int(req.PartyId))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
