@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -34,7 +35,19 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 		m.DELETE("/:id/attend", pc.CancelAttend)                // 取消报名
 		m.POST("/subscribe", context.Wrap(pc.subscribeParty))   // 订阅派对
 		m.POST("/unsubscribe", context.Wrap(pc.UnsubcribParty)) // 取消订阅
+
+		m.GET("/tags", pc.GetTags)
 	}
+}
+
+func (pc *Merchant) GetTags(c *gin.Context) {
+	configs := []types.TagConfigResp{
+		{Name: "积分立减", Id: 1},
+		{Name: "买单立减", Id: 2},
+		{Name: "新人优惠", Id: 4},
+	}
+	c.JSON(200, gin.H{"code": 200, "msg": "ok", "data": configs})
+
 }
 
 func (pc *Merchant) CreateMerchant(c *gin.Context) {
@@ -104,6 +117,16 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	districtIdNum, _ := strconv.Atoi(districtId)
 	if districtIdNum > 0 {
 		query = query.Where("district_id = ?", districtIdNum)
+	}
+	tagsParam := c.Query("tags") // 假设前端传 "1,2,4"
+	tagStrings := strings.Split(tagsParam, ",")
+	var requiredTags int
+	for _, s := range tagStrings {
+		val, _ := strconv.Atoi(s)
+		requiredTags |= val
+	}
+	if requiredTags > 0 {
+		query = query.Where("tags & ? = ?", requiredTags, requiredTags)
 	}
 	var total int64
 	total = 2

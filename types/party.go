@@ -50,3 +50,8 @@ type UnsubcribPartyRequest struct {
 //type SharePartyResponse struct {
 //	ShareURL string `json:"share_url"`
 //}
+
+type TagConfigResp struct {
+	Name string `json:"name"`
+	Id   int    `json:"id"`
+}
