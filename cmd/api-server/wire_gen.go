@@ -85,11 +85,13 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	mapDao := dao.NewMapDao()
 	mapService := &service.MapService{
 		MapDao: mapDao,
+		DB:     db,
 	}
 	handlerMap := &handler.Map{
 		MapService: mapService,
 		OssService: iOssService,
 		Redis:      redisClient,
+		DB:         db,
 	}
 	messageDAO := dao.NewMessageDAO(db)
 	relation := cache.NewRelation(redisClient)
