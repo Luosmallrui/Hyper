@@ -91,7 +91,8 @@ func (PartyLike) TableName() string {
 
 // MerchantListItem 派对列表项（前端展示格式）
 type MerchantListItem struct {
-	ID       int64   `json:"id"`       // 派对 ID
+	ID       int64   `json:"id"` // 派对 ID
+	UserID   int     `json:"user_id"`
 	Title    string  `json:"title"`    // 标题
 	Type     string  `json:"type"`     // 类型：派对/场地
 	Location string  `json:"location"` //位置
@@ -107,4 +108,5 @@ type MerchantListItem struct {
 	PostCount    int64     `json:"post_count"`
 	Icon         string    `json:"icon"`
 	IsSubscriber bool      `json:"is_subscribe"`
+	IsFollow     bool      `json:"is_follow"`
 }

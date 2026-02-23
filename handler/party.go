@@ -20,6 +20,7 @@ type Merchant struct {
 	UserService     service.IUserService
 	NoteService     service.INoteService
 	MerchantService service.IMerchantService
+	FollowService   service.IFollowService
 }
 
 func (pc *Merchant) RegisterRouter(r gin.IRouter) {
@@ -175,6 +176,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 
 	list := make([]models.MerchantListItem, 0, len(merchant))
 	for _, m := range merchant {
+		isFollow, _ := pc.FollowService.CheckFollowStatus(c, uint64(c.GetInt("user_id")), uint64(m.UserID))
 		userId := uint64(m.UserID)
 		userAvatar := userMap[userId].Avatar
 		userName := userMap[userId].Nickname
@@ -186,6 +188,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		}
 		list = append(list, models.MerchantListItem{
 			ID:           m.ID,
+			UserID:       m.UserID,
 			UserAvatar:   userAvatar,
 			UserName:     userName,
 			CoverImage:   m.CoverImage,
@@ -199,6 +202,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			AvgPrice:     7600,
 			PostCount:    372,
 			Icon:         icon,
+			IsFollow:     isFollow,
 			IsSubscriber: isSubcribe[int(m.ID)],
 		})
 	}
@@ -227,6 +231,7 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	}
 
 	resp.AvgPrice = 7600
+	resp.UserId = marchant.UserID
 	resp.Name = marchant.Title
 	resp.LocationName = marchant.LocationName
 	images := make([]string, 0)
@@ -242,17 +247,9 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	resp.UserAvatar = avatar
 	resp.UserName = nickname
 	resp.Id = marchant.ID
-	resp.IsFollow = true
+	isFollow, _ := pc.FollowService.CheckFollowStatus(c, uint64(c.GetInt("user_id")), uint64(marchant.UserID))
 	resp.BusinessHours = "19:30-次日02:30"
-	//userId := c.GetInt("user_id")
-	var req types.FeedRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
-		return response.NewError(http.StatusBadRequest, "参数错误")
-	}
-	if req.PageSize == 0 {
-		req.PageSize = 10
-	}
-
+	resp.IsFollow = isFollow
 	response.Success(c, resp)
 	return nil
 
