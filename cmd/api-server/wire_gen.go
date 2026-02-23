@@ -261,6 +261,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:     userService,
 		NoteService:     noteService,
 		MerchantService: merchantService,
+		FollowService:   followService,
 	}
 	channel := &handler.Channel{
 		Config:     cfg,

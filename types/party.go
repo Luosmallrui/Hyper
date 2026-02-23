@@ -28,6 +28,7 @@ type PartyList struct {
 
 type MerchantDetail struct {
 	Id            int64            `json:"id"`
+	UserId        int              `json:"user_id"`
 	Name          string           `json:"name"`
 	AvgPrice      int64            `json:"avg_price"` //人均价格
 	LocationName  string           `json:"location_name"`
