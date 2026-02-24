@@ -23,6 +23,7 @@ var _ IMerchantService = (*MerchantService)(nil)
 type IMerchantService interface {
 	SubcribParty(ctx context.Context, userId int, partyId int) error
 	UnsubcribParty(ctx context.Context, userId int, partyId int) error
+	CheckSubcribe(ctx context.Context, userId int, partyId int) (bool, error)
 }
 
 // GenerateKey 生成 Redis Key，例如 user:party:subscribe:100
@@ -114,6 +115,19 @@ func (s *MerchantService) UnsubcribParty(ctx context.Context, userId int, partyI
 
 		return nil
 	})
+}
+func (s *MerchantService) CheckSubcribe(ctx context.Context, userId int, partyId int) (bool, error) {
+	var partyLike models.PartyLike
+	err := s.DB.WithContext(ctx).
+		Where("user_id = ? AND party_id = ?", userId, partyId).
+		First(&partyLike).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.New("查询订阅状态失败，请稍后再试")
+	}
+	return true, nil
 }
 
 //func(s *MerchantService) ShareParty(ctx context.Context,partyId int64) (types.SharePartyResq,error) {

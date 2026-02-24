@@ -38,6 +38,7 @@ type MerchantDetail struct {
 	UserAvatar    string           `json:"user_avatar,omitempty"`
 	IsFollow      bool             `json:"is_follow"`
 	BusinessHours string           `json:"business_hours"`
+	IsSubscribe   bool             `json:"is_subscribe"`
 }
 
 type SubcribPartyRequest struct {
