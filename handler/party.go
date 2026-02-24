@@ -248,8 +248,14 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 	resp.UserName = nickname
 	resp.Id = marchant.ID
 	isFollow, _ := pc.FollowService.CheckFollowStatus(c, uint64(c.GetInt("user_id")), uint64(marchant.UserID))
+	isSub, err := pc.MerchantService.CheckSubcribe(c, int(c.GetInt("user_id")), int(marchant.ID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "查询订阅状态失败")
+	}
+	resp.IsSubscribe = isSub
 	resp.BusinessHours = "19:30-次日02:30"
 	resp.IsFollow = isFollow
+
 	response.Success(c, resp)
 	return nil
 
