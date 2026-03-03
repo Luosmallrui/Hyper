@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
@@ -17,13 +18,40 @@ type SearchHandler struct {
 }
 
 func (s *SearchHandler) RegisterRouter(r gin.IRouter) {
-	//authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
+	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
 
 	serchGroup := r.Group("/v1/search")
-	serchGroup.GET("/searchgobal", context.Wrap(s.GlobalSerch))
+	serchGroup.GET("/", authorize, context.Wrap(s.Globalserch))
+	serchGroup.GET("/history", authorize, context.Wrap(s.GetSearchHistory))
+	serchGroup.DELETE("/history", authorize, context.Wrap(s.DeleteSearchKeyword))
+
 }
 
-func (s *SearchHandler) GlobalSerch(c *gin.Context) error {
+func (s *SearchHandler) DeleteSearchKeyword(c *gin.Context) error {
+	var req types.GlobalSearchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	err := s.Serch.DeleteSearchKeyword(c, c.GetInt("user_id"), req.Keyword)
+	if err != nil {
+		return err
+
+	}
+	response.Success(c, "ok")
+	return nil
+}
+
+func (s *SearchHandler) GetSearchHistory(c *gin.Context) error {
+	res, err := s.Serch.GetSearchHistory(c, c.GetInt("user_id"))
+	if err != nil {
+		return err
+
+	}
+	response.Success(c, res)
+	return nil
+}
+
+func (s *SearchHandler) Globalserch(c *gin.Context) error {
 	var req types.GlobalSearchReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
@@ -34,6 +62,7 @@ func (s *SearchHandler) GlobalSerch(c *gin.Context) error {
 	}
 
 	res, err := s.Serch.GlobalSerch(c.Request.Context(), req)
+	s.Serch.SaveSearchHistory(c, c.GetInt("user_id"), req.Keyword)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}

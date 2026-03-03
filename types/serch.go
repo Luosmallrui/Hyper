@@ -4,7 +4,7 @@ import "time"
 
 // GlobalSearchReq 搜索请求参数
 type GlobalSearchReq struct {
-	Keyword string `form:"keyword" binding:"required"`
+	Keyword string `form:"keyword" json:"keyword" binding:"required"`
 	Type    int    `form:"type,default=0"` // 0-综合, 1-用户, 2-笔记, 3-活动
 	Limit   int    `form:"limit,default=10"`
 

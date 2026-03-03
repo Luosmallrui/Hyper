@@ -6,7 +6,9 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
@@ -23,8 +25,50 @@ var _ ISearchService = (*SearchService)(nil)
 
 type ISearchService interface {
 	GlobalSerch(ctx context.Context, req types.GlobalSearchReq) (*types.GlobalSearchResp, error)
+	SaveSearchHistory(ctx context.Context, userId int, keyword string) error
+	GetSearchHistory(ctx context.Context, userId int) ([]string, error)
+	DeleteSearchKeyword(ctx context.Context, userId int, keyword string) error
 }
 
+func (s *SearchService) DeleteSearchKeyword(ctx context.Context, userId int, keyword string) error {
+	key := fmt.Sprintf("search:history:%d", userId)
+	return s.Redis.ZRem(ctx, key, keyword).Err()
+}
+
+func (s *SearchService) GetSearchHistory(ctx context.Context, userId int) ([]string, error) {
+	key := fmt.Sprintf("search:history:%d", userId)
+
+	result, err := s.Redis.ZRevRange(ctx, key, 0, 9).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+func (s *SearchService) SaveSearchHistory(ctx context.Context, userId int, keyword string) error {
+	key := fmt.Sprintf("search:history:%d", userId)
+	now := float64(time.Now().Unix())
+
+	// 先删除旧的（去重）
+	s.Redis.ZRem(ctx, key, keyword)
+
+	// 添加新的
+	err := s.Redis.ZAdd(ctx, key, redis.Z{
+		Score:  now,
+		Member: keyword,
+	}).Err()
+	if err != nil {
+		return err
+	}
+
+	// 只保留最新 10 条
+	s.Redis.ZRemRangeByRank(ctx, key, 0, -11)
+
+	// 设置过期时间（可选）
+	s.Redis.Expire(ctx, key, 30*24*time.Hour)
+
+	return nil
+}
 func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchReq) (*types.GlobalSearchResp, error) {
 	// 防御性检查
 	if s.DB == nil {
@@ -98,7 +142,7 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 	if req.Type == 0 || req.Type == 3 {
 		g.Go(func() error {
 			db := s.DB.WithContext(ctx).Model(&models.Merchant{}).
-				Where("(title LIKE ? OR location_name LIKE ?) AND status IN (0,1)", keyword, keyword)
+				Where("(title LIKE ? OR location_name LIKE ?)", keyword, keyword)
 			if req.PartyCursor > 0 {
 				db = db.Where("id < ?", req.PartyCursor)
 			}
@@ -166,6 +210,9 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 				Title:        p.Title,
 				Type:         p.Type,
 				LocationName: p.LocationName,
+				CoverImage:   p.CoverImage,
+				Price:        76,
+				StartTime:    p.CreatedAt,
 			})
 		}
 	}

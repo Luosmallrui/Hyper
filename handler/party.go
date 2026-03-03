@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
@@ -16,6 +18,7 @@ import (
 )
 
 type Merchant struct {
+	Config          *config.Config
 	DB              *gorm.DB
 	UserService     service.IUserService
 	NoteService     service.INoteService
@@ -24,7 +27,9 @@ type Merchant struct {
 }
 
 func (pc *Merchant) RegisterRouter(r gin.IRouter) {
+	authorize := middleware.Auth([]byte(pc.Config.Jwt.Secret))
 	m := r.Group("/v1/merchant")
+	m.Use(authorize)
 	{
 		// 公开接口
 		m.GET("/list", context.Wrap(pc.GetPartyList))  // 获取派对列表
@@ -38,7 +43,36 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 		m.POST("/unsubscribe", context.Wrap(pc.UnsubcribParty)) // 取消订阅
 
 		m.GET("/tags", pc.GetTags)
+
 	}
+	c := r.Group("/v1/category")
+	{
+		c.GET("/list", authorize, context.Wrap(pc.GetCategoryList))
+	}
+	s := r.Group("/v1/subscribe")
+	{
+		s.GET("/list", authorize, context.Wrap(pc.GetSubscribeList))
+	}
+}
+
+func (pc *Merchant) GetSubscribeList(c *gin.Context) error {
+	resp, err := pc.MerchantService.GetUserSubscribedParties(c, 2)
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (pc *Merchant) GetCategoryList(c *gin.Context) error {
+	var resp []models.Category
+	err := pc.DB.
+		Model(&models.Category{}).Find(&resp).Error
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
 }
 
 func (pc *Merchant) GetTags(c *gin.Context) {
@@ -143,6 +177,20 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	if districtIdNum > 0 {
 		query = query.Where("district_id = ?", districtIdNum)
 	}
+	categoryParam := c.Query("category")
+	if categoryParam != "" {
+		categoryStrings := strings.Split(categoryParam, ",")
+		var filtered []string
+		for _, v := range categoryStrings {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				filtered = append(filtered, v)
+			}
+		}
+		if len(filtered) > 0 {
+			query = query.Where("category IN ?", filtered)
+		}
+	}
 	tagsParam := c.Query("tags") // 假设前端传 "1,2,4"
 	tagStrings := strings.Split(tagsParam, ",")
 	var requiredTags int
@@ -152,6 +200,43 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	}
 	if requiredTags > 0 {
 		query = query.Where("tags & ? = ?", requiredTags, requiredTags)
+	}
+	sortType := c.DefaultQuery("sort", "default")
+
+	switch sortType {
+
+	case "rating":
+		query = query.Order("price DESC")
+
+	case "popularity":
+		// 推荐按 join_count + view_count 组合
+		query = query.Order("district_id DESC")
+
+	case "distance":
+		latStr := c.Query("lat")
+		lngStr := c.Query("lng")
+
+		lat, err1 := strconv.ParseFloat(latStr, 64)
+		lng, err2 := strconv.ParseFloat(lngStr, 64)
+
+		if err1 == nil && err2 == nil {
+			// Haversine 公式计算距离（单位：km）
+			distanceSQL := `
+        (6371 * acos(
+            cos(radians(?)) *
+            cos(radians(latitude)) *
+            cos(radians(longitude) - radians(?)) +
+            sin(radians(?)) *
+            sin(radians(latitude))
+        ))
+        `
+			query = query.
+				Select("*,"+distanceSQL+" AS distance", lat, lng, lat).
+				Order("distance ASC")
+		}
+
+	default:
+		query = query.Order("created_at DESC")
 	}
 	var total int64
 	total = 2
