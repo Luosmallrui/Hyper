@@ -24,6 +24,7 @@ type IMerchantService interface {
 	SubcribParty(ctx context.Context, userId int, partyId int) error
 	UnsubcribParty(ctx context.Context, userId int, partyId int) error
 	CheckSubcribe(ctx context.Context, userId int, partyId int) (bool, error)
+	GetUserSubscribedParties(ctx context.Context, userId int) ([]models.Merchant, error)
 }
 
 // GenerateKey 生成 Redis Key，例如 user:party:subscribe:100
@@ -133,3 +134,43 @@ func (s *MerchantService) CheckSubcribe(ctx context.Context, userId int, partyId
 //func(s *MerchantService) ShareParty(ctx context.Context,partyId int64) (types.SharePartyResq,error) {
 //
 //}
+
+func (s *MerchantService) GetUserSubscribedParties(ctx context.Context, userId int) ([]models.Merchant, error) {
+	userSubKey := fmt.Sprintf("user:party:subscribe:list:%d", userId)
+
+	partyIds, err := s.Redis.SMembers(ctx, userSubKey).Result()
+	if err != nil {
+		return nil, errors.New("获取订阅列表失败")
+	}
+
+	if len(partyIds) == 0 {
+		var likes []models.PartyLike
+		if err := s.DB.WithContext(ctx).
+			Where("user_id = ?", userId).
+			Find(&likes).Error; err != nil {
+			return nil, errors.New("查询订阅记录失败")
+		}
+
+		for _, like := range likes {
+			partyIds = append(partyIds, fmt.Sprintf("%d", like.PartyID))
+		}
+
+		if len(partyIds) > 0 {
+			s.Redis.SAdd(ctx, userSubKey, partyIds)
+			s.Redis.Expire(ctx, userSubKey, time.Hour)
+		}
+	}
+
+	if len(partyIds) == 0 {
+		return []models.Merchant{}, nil
+	}
+
+	var parties []models.Merchant
+	if err := s.DB.WithContext(ctx).
+		Where("id IN ?", partyIds).
+		Find(&parties).Error; err != nil {
+		return nil, errors.New("查询活动详情失败")
+	}
+
+	return parties, nil
+}

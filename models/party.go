@@ -22,6 +22,7 @@ type Merchant struct {
 	CreatedAt    time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
 	ImagesJSON   string    `gorm:"type:json;column:images_json" json:"images"`
+	Category     int       `gorm:"column:category" json:"categories"`
 }
 
 // PartyAttendee 报名记录表
@@ -109,4 +110,16 @@ type MerchantListItem struct {
 	Icon         string    `json:"icon"`
 	IsSubscriber bool      `json:"is_subscribe"`
 	IsFollow     bool      `json:"is_follow"`
+}
+
+type Category struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"type:varchar(100);uniqueIndex;not null" json:"name"`
+	Description string    `gorm:"type:text" json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (Category) TableName() string {
+	return "categories"
 }

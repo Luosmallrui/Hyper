@@ -257,6 +257,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:    db,
 	}
 	merchant := &handler.Merchant{
+		Config:          cfg,
 		DB:              db,
 		UserService:     userService,
 		NoteService:     noteService,
