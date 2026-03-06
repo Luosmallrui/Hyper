@@ -56,7 +56,7 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 }
 
 func (pc *Merchant) GetSubscribeList(c *gin.Context) error {
-	resp, err := pc.MerchantService.GetUserSubscribedParties(c, 2)
+	resp, err := pc.MerchantService.GetUserSubscribedParties(c, c.GetInt("user_id"))
 	if err != nil {
 		return response.NewError(500, err.Error())
 	}
