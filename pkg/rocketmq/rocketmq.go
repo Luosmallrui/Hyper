@@ -33,15 +33,12 @@ func init() {
 }
 
 func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
-	//os.Setenv("mq.consoleAppender.enabled", "true")
 	dir, _ := os.Getwd()
-	logPath := filepath.Join(dir, "logs") // 结果类似 /Users/name/project/logs
+	logPath := filepath.Join(dir, "logs")
 
-	// 确保在设置变量前，手动创建好这个目录
 	_ = os.MkdirAll(logPath, 0755)
 
 	fmt.Println("log path:", logPath)
-	// 必须在 ResetLogger 之前设置
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("mq.consoleAppender.enabled", "true")
 	os.Setenv("rmq.client.logRoot", logPath)
@@ -49,7 +46,7 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 	rmq_client.ResetLogger()
 	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0]}
 	if cfg.Ak != "" && cfg.Sk != "" {
-		rmqConfig.Credentials = &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}
+		rmqConfig.Credentials = &credentials.SessionCredentials{}
 	}
 	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(types.ImTopicChat))
 	if err != nil {
