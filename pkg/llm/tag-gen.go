@@ -47,7 +47,7 @@ func GenNoteTag(ctx context.Context, ossURL string) []string {
 		},
 	}
 	params := openai.ChatCompletionNewParams{
-		Model: "qwen3-vl-plus",
+		Model: "qwen3-vl-flash",
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			{OfUser: &userMessage},
 		},

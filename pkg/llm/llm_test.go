@@ -36,3 +36,10 @@ func TestClassifyMultiImageNote(t *testing.T) {
 
 	t.Logf("测试成功！识别出的频道为: %s", channel)
 }
+
+func TestClassifySingleImageNote(t *testing.T) {
+	URL := "https://cdn.hypercn.cn/note/2026/01/25/2015344440675143680.jpg"
+	ctx := context.Background()
+	tags := GenNoteTag(ctx, URL)
+	t.Log(tags)
+}
