@@ -142,6 +142,8 @@ func (n *Note) UploadImage(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
+	tags := llm.GenNoteTag(c, img.Url)
+	img.Tags = tags
 	response.Success(c, img)
 	return nil
 }
@@ -223,7 +225,7 @@ func (n *Note) CreateNote(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
 	}
-
+	go n.Gen(c)
 	// 返回成功响应
 	response.Success(c, types.CreateNoteResponse{
 		NoteID: noteID,
