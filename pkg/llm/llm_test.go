@@ -38,7 +38,7 @@ func TestClassifyMultiImageNote(t *testing.T) {
 }
 
 func TestClassifySingleImageNote(t *testing.T) {
-	URL := "https://cdn.hypercn.cn/note/2026/01/25/2015344440675143680.jpg"
+	URL := "https://cdn.hypercn.cn/note/2026/03/07/2030301279586095104.jpg"
 	ctx := context.Background()
 	tags := GenNoteTag(ctx, URL)
 	t.Log(tags)
