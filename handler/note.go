@@ -6,6 +6,7 @@ import (
 	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/llm"
+	"Hyper/pkg/log"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
@@ -15,11 +16,11 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	_ "golang.org/x/image/webp"
 	"gorm.io/gorm"
 )
@@ -96,7 +97,7 @@ func (n *Note) Gen(c *gin.Context) error {
 				if labelId, ok := tagsMap[label]; ok {
 					err := n.Db.Model(&models.Note{}).Where("id = ?", v.ID).Update("channel_id", labelId).Error
 					if err != nil {
-						log.Printf("更新笔记 %d 失败: %v", v.ID, err)
+						log.L.Info("error", zap.Error(err))
 					}
 				}
 			}
