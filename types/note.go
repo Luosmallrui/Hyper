@@ -78,9 +78,10 @@ type CreateNoteRequest struct {
 
 // Location 地理位置
 type Location struct {
-	Lat  float64 `json:"lat"`  // 纬度
-	Lng  float64 `json:"lng"`  // 经度
-	Name string  `json:"name"` // 地点名称
+	Lat     float64 `json:"lat"`  // 纬度
+	Lng     float64 `json:"lng"`  // 经度
+	Name    string  `json:"name"` // 地点名称
+	Address string  `json:"address"`
 }
 
 // CreateNoteResponse 创建笔记响应
