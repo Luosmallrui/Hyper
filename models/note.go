@@ -17,6 +17,7 @@ type Note struct {
 	VisibleConf int       `gorm:"column:visible_conf;not null;default:1" json:"visible_conf"`
 	CreatedAt   time.Time `gorm:"column:created_at;index:idx_created_at" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ActivityID  int       `gorm:"column:activity_id;not null;index:idx_activity_id" json:"activity_id"`
 }
 
 func (n Note) TableName() string {
