@@ -12,6 +12,11 @@ type CreateOrGetTopicResponse struct {
 	ViewCount uint32 `json:"view_count"` // 相关帖子的关联数
 }
 
+type Topic struct {
+	ID   uint64 `json:"id"`   // 话题 ID
+	Name string `json:"name"` // 话题名字
+}
+
 // TopicSearchResult - 单个话题搜索结果
 type TopicSearchResult struct {
 	ID          uint64 `json:"id"`
