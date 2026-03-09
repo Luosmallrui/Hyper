@@ -167,6 +167,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		NoteService:    noteService,
 		LikeService:    likeService,
 		CollectService: collectService,
+		TopicService:   topicService,
 		Config:         cfg,
 		Channel:        channelService,
 		Db:             db,
