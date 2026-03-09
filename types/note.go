@@ -74,6 +74,7 @@ type CreateNoteRequest struct {
 	MediaData   []NoteMedia `json:"media_data"`                         // 媒体资源列表
 	Type        int         `json:"type" binding:"required,oneof=1 2"`  // 1-图文, 2-视频
 	VisibleConf int         `json:"visible_conf" binding:"oneof=1 2 3"` // 1-公开, 2-粉丝可见, 3-自己可见
+	ActivityID  int         `json:"activity_id"`
 }
 
 // Location 地理位置
@@ -142,6 +143,7 @@ type Notes struct {
 	ShareCount   int64 `json:"share_count"`
 	CommentCount int64 `json:"comment_count"`
 	ViewCount    int64 `json:"view_count,omitempty"`
+	ActivityID   int   `json:"activity_id"`
 
 	// 用户相关状态
 	IsLiked     bool `json:"is_liked"`     // 当前用户是否点赞

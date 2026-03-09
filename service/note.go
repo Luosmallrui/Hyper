@@ -149,6 +149,7 @@ func (s *NoteService) GetNoteByChannelID(ctx context.Context, userId int, cursor
 			IsLiked:      likeStatusMap[note.ID],
 			CreatedAt:    note.CreatedAt,
 			UpdatedAt:    note.UpdatedAt,
+			ActivityID:   note.ActivityID,
 		}
 
 		if user, ok := userMap[note.UserID]; ok {
@@ -300,6 +301,7 @@ func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor i
 			IsLiked:      likeStatusMap[note.ID],
 			CreatedAt:    note.CreatedAt,
 			UpdatedAt:    note.UpdatedAt,
+			ActivityID:   note.ActivityID,
 		}
 
 		if user, ok := userMap[note.UserID]; ok {
@@ -461,6 +463,7 @@ func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, 
 			IsLiked:      likeStatusMap[note.ID],
 			CreatedAt:    note.CreatedAt,
 			UpdatedAt:    note.UpdatedAt,
+			ActivityID:   note.ActivityID,
 		}
 
 		if user, ok := userMap[note.UserID]; ok {
@@ -544,6 +547,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		VisibleConf: req.VisibleConf,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+		ActivityID:  req.ActivityID,
 	}
 
 	if note.VisibleConf == 0 {
