@@ -30,6 +30,7 @@ type Note struct {
 	NoteService    service.INoteService
 	LikeService    service.ILikeService
 	CollectService service.ICollectService
+	TopicService   service.ITopicService
 	Config         *config.Config
 	Channel        service.IChannelService
 	Db             *gorm.DB
@@ -144,7 +145,10 @@ func (n *Note) UploadImage(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	tags := llm.GenNoteTag(c, img.Url)
-	img.Tags = tags
+
+	tag, err := n.TopicService.GetOrCreateTopicIDs(c, tags, uint64(userID))
+	img.Tags = tag
+
 	response.Success(c, img)
 	return nil
 }

@@ -134,7 +134,7 @@ func (s *OssService) UploadIcon(ctx context.Context, header *multipart.FileHeade
 		Height:  cfg.Height,
 	}
 	if resp.Tags == nil {
-		resp.Tags = make([]string, 0)
+		resp.Tags = make([]types.CreateOrGetTopicResponse, 0)
 	}
 	return resp, nil
 }
@@ -238,7 +238,7 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 		Height:  cfg.Height,
 	}
 	if resp.Tags == nil {
-		resp.Tags = make([]string, 0)
+		resp.Tags = make([]types.CreateOrGetTopicResponse, 0)
 	}
 	return resp, nil
 }

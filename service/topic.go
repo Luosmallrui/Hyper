@@ -7,10 +7,11 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 const (
@@ -38,6 +39,34 @@ type ITopicService interface {
 	SearchTopics(ctx context.Context, query string) ([]types.CreateOrGetTopicResponse, error)
 	CreateTopicIfNotExists(ctx context.Context, name string, creatorID uint64) (*types.CreateOrGetTopicResponse, error)
 	GetNotesByTopic(ctx context.Context, topicID uint64, cursor int64, limit int, currentUserID uint64) (*types.TopicNotesResponse, error)
+	GetOrCreateTopicIDs(ctx context.Context, tags []string, userID uint64) ([]types.CreateOrGetTopicResponse, error)
+}
+
+func (ts *TopicService) GetOrCreateTopicIDs(ctx context.Context, tags []string, userID uint64) ([]types.CreateOrGetTopicResponse, error) {
+	var topicIDs []int64
+
+	resp := make([]types.CreateOrGetTopicResponse, 0)
+
+	for _, tagName := range tags {
+		topic := models.Topic{
+			Name:      tagName,
+			CreatorID: userID, // 标记是谁触发创建的（可以是 AI 的系统 ID）
+			Status:    1,      // 正常状态
+		}
+
+		err := ts.DB.WithContext(ctx).Where(models.Topic{Name: tagName}).FirstOrCreate(&topic).Error
+		if err != nil {
+			return nil, err
+		}
+
+		topicIDs = append(topicIDs, int64(topic.ID))
+		resp = append(resp, types.CreateOrGetTopicResponse{
+			ID:   topic.ID,
+			Name: tagName,
+		})
+	}
+
+	return resp, nil
 }
 
 func (ts *TopicService) LoadOrCacheHotTopics(ctx context.Context, limit int) ([]*models.Topic, error) {
@@ -121,7 +150,6 @@ func (ts *TopicService) CreateTopicIfNotExists(ctx context.Context, name string,
 		FollowCount: 0,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
-		LastPostAt:  time.Now(),
 	}
 	err = ts.TopicDAO.CreateTopic(ctx, newTopic)
 	if err != nil {

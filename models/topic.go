@@ -28,10 +28,8 @@ type Topic struct {
 	Status int8 `gorm:"type:tinyint;default:1" json:"status"` // 1正常, 0隐藏, -1封禁
 
 	// 6. 时间戳
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	LastPostAt time.Time `gorm:"index" json:"last_post_at"` // 新增：该话题下最后一次发帖时间
-
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Topic) TableName() string {

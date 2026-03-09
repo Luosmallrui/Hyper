@@ -31,6 +31,7 @@ type INoteService interface {
 	GetALlNote(ctx context.Context) ([]*models.Note, error)
 	GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error)
 }
+
 type NoteService struct {
 	NoteDAO        *dao.NoteDAO
 	CommentDAO     *dao.Comment
@@ -45,142 +46,231 @@ type NoteService struct {
 	DB             *gorm.DB
 }
 
-func (s *NoteService) GetALlNote(ctx context.Context) ([]*models.Note, error) {
+// ============================================================================
+// 通用数据加载器 — 消除所有列表方法中的重复并发逻辑
+// ============================================================================
 
+// noteEnrichment 包含批量加载的关联数据
+type noteEnrichment struct {
+	Users      map[uint64]types.UserProfile
+	Stats      map[uint64]*types.NoteStats
+	LikeStatus map[uint64]bool
+}
+
+// enrichNotes 并发批量加载用户信息、统计数据、点赞状态
+func (s *NoteService) enrichNotes(ctx context.Context, userIDs, noteIDs []uint64, currentUserID uint64) *noteEnrichment {
+	result := &noteEnrichment{
+		Users:      make(map[uint64]types.UserProfile),
+		Stats:      make(map[uint64]*types.NoteStats),
+		LikeStatus: make(map[uint64]bool),
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		users := s.UserService.BatchGetUserInfo(ctx, userIDs)
+		mu.Lock()
+		result.Users = users
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIDs)
+		if err != nil {
+			log.Error("批量获取统计数据失败", "error", err)
+			return
+		}
+		mu.Lock()
+		result.Stats = stats
+		mu.Unlock()
+	}()
+
+	go func() {
+		defer wg.Done()
+		if currentUserID == 0 {
+			return
+		}
+		status, err := s.LikeService.BatchCheckLikeStatus(ctx, currentUserID, noteIDs)
+		if err != nil {
+			log.Error("批量获取点赞状态失败", "error", err)
+			return
+		}
+		mu.Lock()
+		result.LikeStatus = status
+		mu.Unlock()
+	}()
+
+	wg.Wait()
+	return result
+}
+
+// getStatsOrDefault 安全地获取统计数据，不存在时返回零值
+func (e *noteEnrichment) getStats(noteID uint64) *types.NoteStats {
+	if s, ok := e.Stats[noteID]; ok && s != nil {
+		return s
+	}
+	return &types.NoteStats{}
+}
+
+// ============================================================================
+// 通用 DTO 转换 — 消除重复的 JSON 解析和字段映射
+// ============================================================================
+
+// noteToDTO 将 models.Note 转为 types.Notes，附带关联数据
+func noteToDTO(note *models.Note, enrich *noteEnrichment) *types.Notes {
+	stats := enrich.getStats(note.ID)
+
+	dto := &types.Notes{
+		ID:           int64(note.ID),
+		UserID:       int64(note.UserID),
+		Title:        note.Title,
+		Content:      note.Content,
+		Type:         note.Type,
+		Status:       note.Status,
+		VisibleConf:  note.VisibleConf,
+		LikeCount:    stats.LikeCount,
+		CollCount:    stats.CollCount,
+		ShareCount:   stats.ShareCount,
+		CommentCount: stats.CommentCount,
+		ViewCount:    stats.ViewCount,
+		IsLiked:      enrich.LikeStatus[note.ID],
+		CreatedAt:    note.CreatedAt,
+		UpdatedAt:    note.UpdatedAt,
+		ActivityID:   note.ActivityID,
+	}
+
+	if user, ok := enrich.Users[note.UserID]; ok {
+		dto.Avatar = user.Avatar
+		dto.Nickname = user.Nickname
+	}
+
+	// 安全解析 JSON 字段
+	_ = jsonUnmarshalOr(note.TopicIDs, &dto.TopicIDs, make([]int64, 0))
+	_ = jsonUnmarshalOr(note.Location, &dto.Location, types.Location{})
+	dto.MediaData = parseFirstMedia(note.MediaData)
+
+	return dto
+}
+
+// noteToBrief 将 models.Note 转为 types.NoteBrief
+func noteToBrief(note *models.Note, enrich *noteEnrichment) *types.NoteBrief {
+	stats := enrich.getStats(note.ID)
+
+	dto := &types.NoteBrief{
+		ID:           int64(note.ID),
+		UserID:       int64(note.UserID),
+		Title:        note.Title,
+		Type:         note.Type,
+		LikeCount:    stats.LikeCount,
+		CollCount:    stats.CollCount,
+		ShareCount:   stats.ShareCount,
+		CommentCount: stats.CommentCount,
+		ViewCount:    stats.ViewCount,
+		IsLiked:      enrich.LikeStatus[note.ID],
+		CreatedAt:    note.CreatedAt,
+		UpdatedAt:    note.UpdatedAt,
+		MediaData:    parseFirstMedia(note.MediaData),
+	}
+
+	return dto
+}
+
+// ============================================================================
+// JSON 工具函数
+// ============================================================================
+
+// jsonUnmarshalOr 尝试解析 JSON，失败时设置默认值
+func jsonUnmarshalOr[T any](raw string, dest *T, fallback T) error {
+	if err := json.Unmarshal([]byte(raw), dest); err != nil {
+		*dest = fallback
+		return err
+	}
+	return nil
+}
+
+// parseFirstMedia 从 MediaData JSON 数组中提取第一个元素
+func parseFirstMedia(raw string) types.NoteMedia {
+	var media []types.NoteMedia
+	if err := json.Unmarshal([]byte(raw), &media); err == nil && len(media) > 0 {
+		return media[0]
+	}
+	return types.NoteMedia{}
+}
+
+// ============================================================================
+// 通用分页处理
+// ============================================================================
+
+// collectIDs 从笔记列表中收集去重的 userID 和 noteID
+func collectIDs(notes []*models.Note, count int) (userIDs, noteIDs []uint64) {
+	userSet := make(map[uint64]struct{}, count)
+	noteSet := make(map[uint64]struct{}, count)
+	userIDs = make([]uint64, 0, count)
+	noteIDs = make([]uint64, 0, count)
+
+	for i := 0; i < count; i++ {
+		if _, dup := userSet[notes[i].UserID]; !dup {
+			userSet[notes[i].UserID] = struct{}{}
+			userIDs = append(userIDs, notes[i].UserID)
+		}
+		if _, dup := noteSet[notes[i].ID]; !dup {
+			noteSet[notes[i].ID] = struct{}{}
+			noteIDs = append(noteIDs, notes[i].ID)
+		}
+	}
+	return
+}
+
+// paginateNotes 对查询到的 notes 做分页截断，返回实际展示数量和是否有更多
+func paginateNotes(notes []*models.Note, pageSize int) (displayCount int, hasMore bool) {
+	if len(notes) > pageSize {
+		return pageSize, true
+	}
+	return len(notes), false
+}
+
+// buildListNotesRep 通用列表构建：分页 + 加载关联数据 + 组装 DTO
+func (s *NoteService) buildListNotesRep(ctx context.Context, notes []*models.Note, pageSize int, currentUserID uint64) types.ListNotesRep {
+	rep := types.ListNotesRep{Notes: make([]*types.Notes, 0)}
+
+	if len(notes) == 0 {
+		return rep
+	}
+
+	displayCount, hasMore := paginateNotes(notes, pageSize)
+	rep.HasMore = hasMore
+
+	userIDs, noteIDs := collectIDs(notes, displayCount)
+	enrich := s.enrichNotes(ctx, userIDs, noteIDs, currentUserID)
+
+	for i := 0; i < displayCount; i++ {
+		rep.Notes = append(rep.Notes, noteToDTO(notes[i], enrich))
+	}
+
+	if displayCount > 0 {
+		rep.NextCursor = notes[displayCount-1].CreatedAt.UnixNano()
+	}
+
+	return rep
+}
+
+func (s *NoteService) GetALlNote(ctx context.Context) ([]*models.Note, error) {
 	return s.NoteDAO.ListAllNote(ctx)
 }
 
 func (s *NoteService) GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error) {
-	limit := pageSize + 1
-	nodes, err := s.NoteDAO.ListNodeByChannel(ctx, cursor, limit, channelId)
+	notes, err := s.NoteDAO.ListNodeByChannel(ctx, cursor, pageSize+1, channelId)
 	if err != nil {
 		return types.ListNotesRep{}, err
 	}
-
-	rep := types.ListNotesRep{
-		Notes:   make([]*types.Notes, 0),
-		HasMore: false,
-	}
-
-	if len(nodes) == 0 {
-		return rep, nil
-	}
-
-	displayCount := len(nodes)
-	if displayCount > pageSize {
-		rep.HasMore = true
-		displayCount = pageSize
-	}
-
-	// 收集ID
-	userIds := make([]uint64, 0, displayCount)
-	noteIds := make([]uint64, 0, displayCount)
-	for i := 0; i < displayCount; i++ {
-		userIds = append(userIds, nodes[i].UserID)
-		noteIds = append(noteIds, nodes[i].ID)
-	}
-
-	// 并发获取关联数据
-	var (
-		userMap       map[uint64]types.UserProfile
-		statsMap      map[uint64]*types.NoteStats
-		likeStatusMap map[uint64]bool
-		wg            sync.WaitGroup
-		mu            sync.Mutex
-	)
-
-	wg.Add(3)
-
-	// 获取用户信息
-	go func() {
-		defer wg.Done()
-		userMap = s.UserService.BatchGetUserInfo(ctx, userIds)
-	}()
-
-	// 获取统计数据
-	go func() {
-		defer wg.Done()
-		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
-		mu.Lock()
-		statsMap = stats
-		mu.Unlock()
-		if err != nil {
-			log.Error("批量获取统计数据失败", "error", err)
-		}
-	}()
-
-	// 获取点赞状态
-	go func() {
-		defer wg.Done()
-		if userId > 0 {
-			status, err := s.LikeService.BatchCheckLikeStatus(ctx, uint64(userId), noteIds)
-			mu.Lock()
-			likeStatusMap = status
-			mu.Unlock()
-			if err != nil {
-				log.Error("批量获取点赞状态失败", "error", err)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 组装数据
-	for i := 0; i < displayCount; i++ {
-		note := nodes[i]
-		stats := statsMap[note.ID]
-		if stats == nil {
-			stats = &types.NoteStats{} // 默认值
-		}
-
-		dto := &types.Notes{
-			ID:           int64(note.ID),
-			UserID:       int64(note.UserID),
-			Title:        note.Title,
-			Content:      note.Content,
-			Type:         note.Type,
-			Status:       note.Status,
-			VisibleConf:  note.VisibleConf,
-			LikeCount:    stats.LikeCount,
-			CollCount:    stats.CollCount,
-			ShareCount:   stats.ShareCount,
-			CommentCount: stats.CommentCount,
-			ViewCount:    stats.ViewCount,
-			IsLiked:      likeStatusMap[note.ID],
-			CreatedAt:    note.CreatedAt,
-			UpdatedAt:    note.UpdatedAt,
-			ActivityID:   note.ActivityID,
-		}
-
-		if user, ok := userMap[note.UserID]; ok {
-			dto.Avatar = user.Avatar
-			dto.Nickname = user.Nickname
-		}
-
-		// 处理其他字段
-		if err := json.Unmarshal([]byte(note.TopicIDs), &dto.TopicIDs); err != nil {
-			dto.TopicIDs = make([]int64, 0)
-		}
-		if err := json.Unmarshal([]byte(note.Location), &dto.Location); err != nil {
-			dto.Location = types.Location{}
-		}
-
-		var noteMedia []types.NoteMedia
-		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
-			dto.MediaData = noteMedia[0]
-		} else {
-			dto.MediaData = types.NoteMedia{}
-		}
-
-		rep.Notes = append(rep.Notes, dto)
-	}
-
-	if displayCount > 0 {
-		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
-	}
-
-	return rep, nil
+	return s.buildListNotesRep(ctx, notes, pageSize, uint64(userId)), nil
 }
+
 func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor int64, pageSize int) (types.ListNotesRep, error) {
 	followingIDs, err := s.FollowService.GetFollowingIDs(ctx, userId)
 	if err != nil {
@@ -189,143 +279,45 @@ func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor i
 	if len(followingIDs) == 0 {
 		return types.ListNotesRep{Notes: make([]*types.Notes, 0)}, nil
 	}
-	limit := pageSize + 1
-	// 2. 修改 DAO 层方法：ListNodeByUserIDs (传入关注的人 ID 列表)
-	notes, err := s.NoteDAO.ListNodeByUserIDs(ctx, followingIDs, cursor, limit)
+
+	notes, err := s.NoteDAO.ListNodeByUserIDs(ctx, followingIDs, cursor, pageSize+1)
 	if err != nil {
 		return types.ListNotesRep{}, err
 	}
-	rep := types.ListNotesRep{
-		Notes:   make([]*types.Notes, 0),
-		HasMore: false,
+	return s.buildListNotesRep(ctx, notes, pageSize, uint64(userId)), nil
+}
+
+func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error) {
+	notes, err := s.NoteDAO.ListNode(ctx, cursor, pageSize+1)
+	if err != nil {
+		return types.ListNotesRep{}, err
 	}
+	return s.buildListNotesRep(ctx, notes, pageSize, userID), nil
+}
+
+func (s *NoteService) ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, targetUser int) (types.ListNotesBriefRep, error) {
+	notes, err := s.NoteDAO.ListNodeByUser(ctx, cursor, pageSize+1, targetUser)
+	if err != nil {
+		return types.ListNotesBriefRep{}, err
+	}
+
+	rep := types.ListNotesBriefRep{Notes: make([]*types.NoteBrief, 0)}
 
 	if len(notes) == 0 {
 		return rep, nil
 	}
 
-	displayCount := len(notes)
-	if displayCount > pageSize {
-		rep.HasMore = true
-		displayCount = pageSize
-	}
+	displayCount, hasMore := paginateNotes(notes, pageSize)
+	rep.HasMore = hasMore
 
-	userIds := make([]uint64, 0, displayCount)
-	noteIds := make([]uint64, 0, displayCount)
-
-	// 定义临时 Map 用于去重
-	userMapT := make(map[uint64]struct{})
-	noteMap := make(map[uint64]struct{})
+	_, noteIDs := collectIDs(notes, displayCount)
+	// ListNoteByUser 不需要用户信息，传空 userIDs 即可
+	enrich := s.enrichNotes(ctx, nil, noteIDs, uint64(userID))
 
 	for i := 0; i < displayCount; i++ {
-		uID := notes[i].UserID
-		nID := notes[i].ID
-
-		// 检查 UserID 是否已存在
-		if _, exists := userMapT[uID]; !exists {
-			userMapT[uID] = struct{}{}
-			userIds = append(userIds, uID)
-		}
-
-		// 检查 NoteID 是否已存在
-		if _, exists := noteMap[nID]; !exists {
-			noteMap[nID] = struct{}{}
-			noteIds = append(noteIds, nID)
-		}
+		rep.Notes = append(rep.Notes, noteToBrief(notes[i], enrich))
 	}
-	var (
-		userMap       map[uint64]types.UserProfile
-		statsMap      map[uint64]*types.NoteStats
-		likeStatusMap map[uint64]bool
-		wg            sync.WaitGroup
-		mu            sync.Mutex
-	)
 
-	wg.Add(3)
-
-	// 获取用户信息
-	go func() {
-		defer wg.Done()
-		userMap = s.UserService.BatchGetUserInfo(ctx, userIds)
-	}()
-
-	// 获取统计数据
-	go func() {
-		defer wg.Done()
-		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
-		mu.Lock()
-		statsMap = stats
-		mu.Unlock()
-		if err != nil {
-			log.Error("批量获取统计数据失败", "error", err)
-		}
-	}()
-
-	// 获取点赞状态
-	go func() {
-		defer wg.Done()
-		if userId > 0 {
-			status, err := s.LikeService.BatchCheckLikeStatus(ctx, uint64(userId), noteIds)
-			mu.Lock()
-			likeStatusMap = status
-			mu.Unlock()
-			if err != nil {
-				log.Error("批量获取点赞状态失败", "error", err)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 组装数据
-	for i := 0; i < displayCount; i++ {
-		note := notes[i]
-		stats := statsMap[note.ID]
-		if stats == nil {
-			stats = &types.NoteStats{} // 默认值
-		}
-
-		dto := &types.Notes{
-			ID:           int64(note.ID),
-			UserID:       int64(note.UserID),
-			Title:        note.Title,
-			Content:      note.Content,
-			Type:         note.Type,
-			Status:       note.Status,
-			VisibleConf:  note.VisibleConf,
-			LikeCount:    stats.LikeCount,
-			CollCount:    stats.CollCount,
-			ShareCount:   stats.ShareCount,
-			CommentCount: stats.CommentCount,
-			ViewCount:    stats.ViewCount,
-			IsLiked:      likeStatusMap[note.ID],
-			CreatedAt:    note.CreatedAt,
-			UpdatedAt:    note.UpdatedAt,
-			ActivityID:   note.ActivityID,
-		}
-
-		if user, ok := userMap[note.UserID]; ok {
-			dto.Avatar = user.Avatar
-			dto.Nickname = user.Nickname
-		}
-
-		// 处理其他字段
-		if err := json.Unmarshal([]byte(note.TopicIDs), &dto.TopicIDs); err != nil {
-			dto.TopicIDs = make([]int64, 0)
-		}
-		if err := json.Unmarshal([]byte(note.Location), &dto.Location); err != nil {
-			dto.Location = types.Location{}
-		}
-
-		var noteMedia []types.NoteMedia
-		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
-			dto.MediaData = noteMedia[0]
-		} else {
-			dto.MediaData = types.NoteMedia{}
-		}
-
-		rep.Notes = append(rep.Notes, dto)
-	}
 	if displayCount > 0 {
 		rep.NextCursor = notes[displayCount-1].CreatedAt.UnixNano()
 	}
@@ -334,260 +326,103 @@ func (s *NoteService) GetFollowedPosts(ctx context.Context, userId int, cursor i
 }
 
 func (s *NoteService) GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error) {
-	var notes []*models.Note
-
 	query := s.DB.WithContext(ctx).
 		Model(&models.Note{}).
 		Where("user_id = ? AND status = 0", userID).
 		Order("created_at DESC")
 
 	if cursor > 0 {
-		cursorTime := time.Unix(cursor, 0)
-		query = query.Where("created_at < ?", cursorTime)
+		query = query.Where("created_at < ?", time.Unix(cursor, 0))
 	}
 
-	// 多查一条，用于判断是否还有更多
-	err := query.Limit(pageSize + 1).Find(&notes).Error
-	if err != nil {
+	var notes []*models.Note
+	if err := query.Limit(pageSize + 1).Find(&notes).Error; err != nil {
 		return nil, 0, false, err
 	}
 
-	var nextCursor int64 = 0
 	hasMore := len(notes) > pageSize
-
 	if hasMore {
-		notes = notes[:pageSize] // 截取前 pageSize 条
-		lastNote := notes[len(notes)-1]
-		nextCursor = lastNote.CreatedAt.Unix()
+		notes = notes[:pageSize]
+	}
+
+	var nextCursor int64
+	if hasMore && len(notes) > 0 {
+		nextCursor = notes[len(notes)-1].CreatedAt.Unix()
 	}
 
 	return notes, nextCursor, hasMore, nil
 }
 
-func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error) {
-	limit := pageSize + 1
-	nodes, err := s.NoteDAO.ListNode(ctx, cursor, limit)
-	if err != nil {
-		return types.ListNotesRep{}, err
-	}
+// ============================================================================
+// 创建笔记
+// ============================================================================
 
-	rep := types.ListNotesRep{
-		Notes:   make([]*types.Notes, 0),
-		HasMore: false,
-	}
-
-	if len(nodes) == 0 {
-		return rep, nil
-	}
-
-	displayCount := len(nodes)
-	if displayCount > pageSize {
-		rep.HasMore = true
-		displayCount = pageSize
-	}
-
-	// 收集ID
-	userIds := make([]uint64, 0, displayCount)
-	noteIds := make([]uint64, 0, displayCount)
-	for i := 0; i < displayCount; i++ {
-		userIds = append(userIds, nodes[i].UserID)
-		noteIds = append(noteIds, nodes[i].ID)
-	}
-
-	// 并发获取关联数据
-	var (
-		userMap       map[uint64]types.UserProfile
-		statsMap      map[uint64]*types.NoteStats
-		likeStatusMap map[uint64]bool
-		wg            sync.WaitGroup
-		mu            sync.Mutex
-	)
-
-	wg.Add(3)
-
-	// 获取用户信息
-	go func() {
-		defer wg.Done()
-		userMap = s.UserService.BatchGetUserInfo(ctx, userIds)
-	}()
-
-	// 获取统计数据
-	go func() {
-		defer wg.Done()
-		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
-		mu.Lock()
-		statsMap = stats
-		mu.Unlock()
-		if err != nil {
-			log.Error("批量获取统计数据失败", "error", err)
-		}
-	}()
-
-	// 获取点赞状态
-	go func() {
-		defer wg.Done()
-		if userID > 0 {
-			status, err := s.LikeService.BatchCheckLikeStatus(ctx, userID, noteIds)
-			mu.Lock()
-			likeStatusMap = status
-			mu.Unlock()
-			if err != nil {
-				log.Error("批量获取点赞状态失败", "error", err)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 组装数据
-	for i := 0; i < displayCount; i++ {
-		note := nodes[i]
-		stats := statsMap[note.ID]
-		if stats == nil {
-			stats = &types.NoteStats{} // 默认值
-		}
-
-		dto := &types.Notes{
-			ID:           int64(note.ID),
-			UserID:       int64(note.UserID),
-			Title:        note.Title,
-			Content:      note.Content,
-			Type:         note.Type,
-			Status:       note.Status,
-			VisibleConf:  note.VisibleConf,
-			LikeCount:    stats.LikeCount,
-			CollCount:    stats.CollCount,
-			ShareCount:   stats.ShareCount,
-			CommentCount: stats.CommentCount,
-			ViewCount:    stats.ViewCount,
-			IsLiked:      likeStatusMap[note.ID],
-			CreatedAt:    note.CreatedAt,
-			UpdatedAt:    note.UpdatedAt,
-			ActivityID:   note.ActivityID,
-		}
-
-		if user, ok := userMap[note.UserID]; ok {
-			dto.Avatar = user.Avatar
-			dto.Nickname = user.Nickname
-		}
-
-		// 处理其他字段
-		if err := json.Unmarshal([]byte(note.TopicIDs), &dto.TopicIDs); err != nil {
-			dto.TopicIDs = make([]int64, 0)
-		}
-		if err := json.Unmarshal([]byte(note.Location), &dto.Location); err != nil {
-			dto.Location = types.Location{}
-		}
-
-		var noteMedia []types.NoteMedia
-		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
-			dto.MediaData = noteMedia[0]
-		} else {
-			dto.MediaData = types.NoteMedia{}
-		}
-
-		rep.Notes = append(rep.Notes, dto)
-	}
-
-	if displayCount > 0 {
-		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
-	}
-
-	return rep, nil
-}
-
-// CreateNote 创建笔记
 func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error) {
-	// 参数验证
 	if req.Title == "" {
 		return 0, errors.New("标题不能为空")
 	}
 
-	// 生成笔记ID
 	noteID := uint64(snowflake.GenUserID())
 
-	if len(req.TopicIDs) == 0 {
+	// 规范化空集合，避免存 null
+	if req.TopicIDs == nil {
 		req.TopicIDs = make([]int64, 0)
 	}
-	if len(req.MediaData) == 0 {
+	if req.MediaData == nil {
 		req.MediaData = make([]types.NoteMedia, 0)
 	}
 
-	// 序列化 JSON 字段
-	topicIDsJSON, err := json.Marshal(req.TopicIDs)
-	if err != nil {
-		return 0, err
-	}
+	topicJSON, _ := json.Marshal(req.TopicIDs)
+	mediaJSON, _ := json.Marshal(req.MediaData)
 
 	locationJSON := "{}"
 	if req.Location != nil {
-		locBytes, err := json.Marshal(req.Location)
-		if err != nil {
-			return 0, err
+		if loc, err := json.Marshal(req.Location); err == nil {
+			locationJSON = string(loc)
 		}
-		locationJSON = string(locBytes)
 	}
 
-	mediaDataJSON, err := json.Marshal(req.MediaData)
-	if err != nil {
-		return 0, err
-	}
-
-	// 构建笔记对象
+	now := time.Now()
 	note := &models.Note{
 		ID:          noteID,
 		UserID:      userID,
 		Title:       req.Title,
 		Content:     req.Content,
-		TopicIDs:    string(topicIDsJSON),
+		TopicIDs:    string(topicJSON),
 		Location:    locationJSON,
-		MediaData:   string(mediaDataJSON),
+		MediaData:   string(mediaJSON),
 		Type:        req.Type,
-		Status:      0, // 默认审核中
-		VisibleConf: req.VisibleConf,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		Status:      0,
+		VisibleConf: cond(req.VisibleConf != 0, req.VisibleConf, types.VisibleConfPublic),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 		ActivityID:  req.ActivityID,
 	}
 
-	if note.VisibleConf == 0 {
-		note.VisibleConf = types.VisibleConfPublic
-	}
-
-	// 使用事务保存笔记和统计记录
-	err = s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
-		// 1. 创建笔记
+	err := s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(note).Error; err != nil {
 			return err
 		}
 
-		// 2. 创建统计记录
 		stats := &models.NoteStats{
-			NoteID:       noteID,
-			LikeCount:    0,
-			CollCount:    0,
-			ShareCount:   0,
-			CommentCount: 0,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			NoteID:    noteID,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
-
 		if err := tx.Create(stats).Error; err != nil {
 			return err
 		}
+
 		if len(req.TopicIDs) > 0 {
-			// 3. 创建笔记与话题的关联
 			noteTopics := make([]*models.NoteTopic, 0, len(req.TopicIDs))
-			for _, topicID := range req.TopicIDs {
+			for _, tid := range req.TopicIDs {
 				noteTopics = append(noteTopics, &models.NoteTopic{
 					NoteID:    noteID,
-					TopicID:   uint64(topicID),
-					CreatedAt: time.Now(),
+					TopicID:   uint64(tid),
+					CreatedAt: now,
 				})
 			}
-			if err := tx.CreateInBatches(noteTopics, 100).Error; err != nil {
-				return err
-			}
+			return tx.CreateInBatches(noteTopics, 100).Error
 		}
 		return nil
 	})
@@ -598,21 +433,23 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	return noteID, nil
 }
 
-// GetUserNotes 获取用户的笔记列表
+// ============================================================================
+// 获取用户笔记 / 更新状态
+// ============================================================================
+
 func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error) {
 	return s.NoteDAO.FindByUserID(ctx, userID, status, limit, offset)
 }
 
-// UpdateNoteStatus 更新笔记状态
 func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error {
 	return s.NoteDAO.UpdateStatus(ctx, noteID, status)
 }
 
-// service/note_service.go
+// ============================================================================
+// 笔记详情
+// ============================================================================
 
-// 获取笔记详情
 func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentUserID uint64) (*types.NoteDetail, error) {
-	// 1. 查询笔记基本信息
 	note, err := s.NoteDAO.GetByID(ctx, noteID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -621,12 +458,6 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		return nil, err
 	}
 
-	//// 2. 检查笔记可见性
-	//if err := s.checkNoteVisible(ctx, note, currentUserID); err != nil {
-	//	return nil, err
-	//}
-
-	// 3. 并发获取关联数据
 	var (
 		userInfo       *types.UserProfile
 		stats          *types.NoteStats
@@ -635,80 +466,69 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		isCollected    bool
 		isFollowed     bool
 		wg             sync.WaitGroup
-
-		mu sync.Mutex
+		mu             sync.Mutex
 	)
 
 	wg.Add(6)
 
-	// 获取作者信息
 	go func() {
 		defer wg.Done()
 		users := s.UserService.BatchGetUserInfo(ctx, []uint64{note.UserID})
-		if user, ok := users[note.UserID]; ok {
-			userInfo = &types.UserProfile{
-				Avatar:   user.Avatar,
-				Nickname: user.Nickname,
-			}
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		preview, err := s.getCommentPreview(ctx, noteID, currentUserID)
-		if err == nil {
+		if u, ok := users[note.UserID]; ok {
 			mu.Lock()
-			commentPreview = preview
+			userInfo = &types.UserProfile{Avatar: u.Avatar, Nickname: u.Nickname}
 			mu.Unlock()
 		}
 	}()
-	// 获取统计数据
+
 	go func() {
 		defer wg.Done()
-		statsMap, err := s.LikeService.BatchGetNoteStats(ctx, []uint64{noteID})
-		if err == nil {
-			if s, ok := statsMap[noteID]; ok {
+		if p, err := s.getCommentPreview(ctx, noteID, currentUserID); err == nil {
+			mu.Lock()
+			commentPreview = p
+			mu.Unlock()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		if m, err := s.LikeService.BatchGetNoteStats(ctx, []uint64{noteID}); err == nil {
+			if st, ok := m[noteID]; ok {
 				mu.Lock()
-				stats = s
+				stats = st
 				mu.Unlock()
 			}
 		}
 	}()
 
-	// 获取点赞状态
-	go func() {
-		defer wg.Done()
-		if currentUserID > 0 {
-			liked, err := s.LikeService.checkLikeStatus(ctx, currentUserID, noteID)
-			if err == nil {
-				mu.Lock()
-				isLiked = liked
-				mu.Unlock()
-			}
-		}
-	}()
-
-	// 获取收藏状态
 	go func() {
 		defer wg.Done()
 		if currentUserID > 0 {
-			collected, err := s.CollectService.CheckCollectStatus(ctx, currentUserID, noteID)
-			if err == nil {
+			if v, err := s.LikeService.checkLikeStatus(ctx, currentUserID, noteID); err == nil {
 				mu.Lock()
-				isCollected = collected
+				isLiked = v
 				mu.Unlock()
 			}
 		}
 	}()
 
-	// 获取关注状态
+	go func() {
+		defer wg.Done()
+		if currentUserID > 0 {
+			if v, err := s.CollectService.CheckCollectStatus(ctx, currentUserID, noteID); err == nil {
+				mu.Lock()
+				isCollected = v
+				mu.Unlock()
+			}
+		}
+	}()
+
 	go func() {
 		defer wg.Done()
 		if currentUserID > 0 && currentUserID != note.UserID {
-			followed, err := s.FollowService.CheckFollowStatus(ctx, currentUserID, note.UserID)
-			if err == nil {
+			if v, err := s.FollowService.CheckFollowStatus(ctx, currentUserID, note.UserID); err == nil {
 				mu.Lock()
-				isFollowed = followed
+				isFollowed = v
 				mu.Unlock()
 			}
 		}
@@ -716,25 +536,20 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 
 	wg.Wait()
 
-	// 4. 异步增加浏览数(不阻塞响应)
+	// 异步增加浏览数
 	go func() {
 		_ = s.incrementViewCount(context.Background(), noteID)
 	}()
 
-	// 5. 组装返回数据
-	detail := s.buildNoteDetail(note, userInfo, stats, isLiked, isCollected, isFollowed, commentPreview)
-
-	return detail, nil
+	return s.buildNoteDetail(note, userInfo, stats, isLiked, isCollected, isFollowed, commentPreview), nil
 }
 
 func (s *NoteService) getCommentPreview(ctx context.Context, noteID uint64, currentUserID uint64) (*types.CommentPreview, error) {
-	// 1. 获取前3条一级评论
 	comments, err := s.CommentService.GetTopComments(ctx, noteID, 3, currentUserID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. 获取评论总数
 	totalCount, err := s.CommentDAO.GetRootCommentCount(ctx, noteID)
 	if err != nil {
 		totalCount = 0
@@ -746,17 +561,11 @@ func (s *NoteService) getCommentPreview(ctx context.Context, noteID uint64, curr
 	}, nil
 }
 
-// 检查笔记可见性
 func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, currentUserID uint64) error {
-	// 审核状态检查
-	if note.Status != 1 { // 1-审核通过
-		// 只有作者本人可以看未通过审核的笔记
-		if currentUserID != note.UserID {
-			return errors.New("笔记审核中或已下架")
-		}
+	if note.Status != 1 && currentUserID != note.UserID {
+		return errors.New("笔记审核中或已下架")
 	}
 
-	// 可见性检查
 	switch note.VisibleConf {
 	case 1: // 公开
 		return nil
@@ -767,7 +576,6 @@ func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, c
 		if currentUserID == note.UserID {
 			return nil
 		}
-		// 检查是否是粉丝
 		isFollower, err := s.FollowService.CheckFollowStatus(ctx, currentUserID, note.UserID)
 		if err != nil || !isFollower {
 			return errors.New("仅粉丝可见")
@@ -777,13 +585,16 @@ func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, c
 			return errors.New("仅作者本人可见")
 		}
 	}
-
 	return nil
 }
 
-// 组装笔记详情
-func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserProfile, stats *types.NoteStats, isLiked, isCollected, isFollowed bool, commentPreview *types.CommentPreview) *types.NoteDetail {
-
+func (s *NoteService) buildNoteDetail(
+	note *models.Note,
+	userInfo *types.UserProfile,
+	stats *types.NoteStats,
+	isLiked, isCollected, isFollowed bool,
+	commentPreview *types.CommentPreview,
+) *types.NoteDetail {
 	detail := &types.NoteDetail{
 		ID:          int64(note.ID),
 		UserID:      int64(note.UserID),
@@ -794,151 +605,49 @@ func (s *NoteService) buildNoteDetail(note *models.Note, userInfo *types.UserPro
 		VisibleConf: note.VisibleConf,
 		CreatedAt:   note.CreatedAt,
 		UpdatedAt:   note.UpdatedAt,
-		Nickname:    userInfo.Nickname,
-		Avatar:      userInfo.Avatar,
+		IsLiked:     isLiked,
+		IsCollected: isCollected,
+		IsFollowed:  isFollowed,
 	}
 
-	// 统计数据
+	if userInfo != nil {
+		detail.Nickname = userInfo.Nickname
+		detail.Avatar = userInfo.Avatar
+	}
+
 	if stats != nil {
 		detail.LikeCount = stats.LikeCount
 		detail.CollCount = stats.CollCount
 		detail.ShareCount = stats.ShareCount
 	}
-	detail.CommentCount = commentPreview.TotalCount
-	// 用户交互状态
-	detail.IsLiked = isLiked
-	detail.IsCollected = isCollected
-	detail.IsFollowed = isFollowed
-	detail.CommentPreview = commentPreview
 
-	// 解析 JSON 字段
-	if err := json.Unmarshal([]byte(note.TopicIDs), &detail.TopicIDs); err != nil {
-		detail.TopicIDs = make([]int64, 0)
+	if commentPreview != nil {
+		detail.CommentCount = commentPreview.TotalCount
+		detail.CommentPreview = commentPreview
 	}
 
-	if err := json.Unmarshal([]byte(note.Location), &detail.Location); err != nil {
-		detail.Location = types.Location{}
-	}
-
-	if err := json.Unmarshal([]byte(note.MediaData), &detail.MediaData); err != nil {
-		detail.MediaData = make([]types.NoteMedia, 0)
-	}
+	_ = jsonUnmarshalOr(note.TopicIDs, &detail.TopicIDs, make([]int64, 0))
+	_ = jsonUnmarshalOr(note.Location, &detail.Location, types.Location{})
+	_ = jsonUnmarshalOr(note.MediaData, &detail.MediaData, make([]types.NoteMedia, 0))
 
 	return detail
 }
 
-// 增加浏览数(异步)
 func (s *NoteService) incrementViewCount(ctx context.Context, noteID uint64) error {
-	// 先更新 Redis
 	key := fmt.Sprintf("note:view:count:%d", noteID)
 	s.RedisClient.Incr(ctx, key)
 	s.RedisClient.Expire(ctx, key, 24*time.Hour)
-
-	// 定期批量刷新到数据库(或者用消息队列)
-	// 这里简化为直接更新
 	return s.StatsDAO.IncrementViewCount(ctx, noteID, 1)
 }
 
-func (s *NoteService) ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, TargetUser int) (types.ListNotesBriefRep, error) {
-	limit := pageSize + 1
-	nodes, err := s.NoteDAO.ListNodeByUser(ctx, cursor, limit, TargetUser)
-	if err != nil {
-		return types.ListNotesBriefRep{}, err
+// ============================================================================
+// 工具函数
+// ============================================================================
+
+// cond 是一个简单的三元表达式替代
+func cond[T any](predicate bool, trueVal, falseVal T) T {
+	if predicate {
+		return trueVal
 	}
-
-	rep := types.ListNotesBriefRep{
-		Notes:   make([]*types.NoteBrief, 0, len(nodes)),
-		HasMore: false,
-	}
-
-	if len(nodes) == 0 {
-		return rep, nil
-	}
-
-	displayCount := len(nodes)
-	if displayCount > pageSize {
-		rep.HasMore = true
-		displayCount = pageSize
-	}
-
-	noteIds := make([]uint64, 0, displayCount)
-	for i := 0; i < displayCount; i++ {
-		noteIds = append(noteIds, nodes[i].ID)
-	}
-
-	var (
-		statsMap      map[uint64]*types.NoteStats
-		likeStatusMap map[uint64]bool
-		wg            sync.WaitGroup
-		mu            sync.Mutex
-	)
-
-	wg.Add(2)
-
-	// 获取统计数据
-	go func() {
-		defer wg.Done()
-		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIds)
-		mu.Lock()
-		statsMap = stats
-		mu.Unlock()
-		if err != nil {
-			log.Error("批量获取统计数据失败", "error", err)
-		}
-	}()
-
-	// 获取点赞状态
-	go func() {
-		defer wg.Done()
-		if userID > 0 {
-			status, err := s.LikeService.BatchCheckLikeStatus(ctx, uint64(userID), noteIds)
-			mu.Lock()
-			likeStatusMap = status
-			mu.Unlock()
-			if err != nil {
-				log.Error("批量获取点赞状态失败", "error", err)
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 组装数据
-	for i := 0; i < displayCount; i++ {
-		note := nodes[i]
-		stats := statsMap[note.ID]
-		if stats == nil {
-			stats = &types.NoteStats{} // 默认值
-		}
-
-		dto := &types.NoteBrief{
-			ID:           int64(note.ID),
-			UserID:       int64(note.UserID),
-			Title:        note.Title,
-			Type:         note.Type,
-			LikeCount:    stats.LikeCount,
-			CollCount:    stats.CollCount,
-			ShareCount:   stats.ShareCount,
-			CommentCount: stats.CommentCount,
-			ViewCount:    stats.ViewCount,
-			IsLiked:      likeStatusMap[note.ID],
-			CreatedAt:    note.CreatedAt,
-			UpdatedAt:    note.UpdatedAt,
-		}
-
-		var noteMedia []types.NoteMedia
-		if err := json.Unmarshal([]byte(note.MediaData), &noteMedia); err == nil && len(noteMedia) > 0 {
-			dto.MediaData = noteMedia[0]
-		} else {
-			dto.MediaData = types.NoteMedia{}
-		}
-
-		rep.Notes = append(rep.Notes, dto)
-	}
-
-	if displayCount > 0 {
-		rep.NextCursor = nodes[displayCount-1].CreatedAt.UnixNano()
-	}
-
-	return rep, nil
+	return falseVal
 }
