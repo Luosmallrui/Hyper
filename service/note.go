@@ -33,17 +33,18 @@ type INoteService interface {
 }
 
 type NoteService struct {
-	NoteDAO        *dao.NoteDAO
-	CommentDAO     *dao.Comment
-	UserService    IUserService
-	LikeService    ILikeService
-	RedisClient    *redis.Client
-	StatsDAO       *dao.NoteStatsDAO
-	FollowService  IFollowService
-	CollectService ICollectService
-	CommentService ICommentsService
-	TopicService   ITopicService
-	DB             *gorm.DB
+	NoteDAO         *dao.NoteDAO
+	CommentDAO      *dao.Comment
+	UserService     IUserService
+	LikeService     ILikeService
+	RedisClient     *redis.Client
+	StatsDAO        *dao.NoteStatsDAO
+	FollowService   IFollowService
+	MerchantService IMerchantService
+	CollectService  ICollectService
+	CommentService  ICommentsService
+	TopicService    ITopicService
+	DB              *gorm.DB
 }
 
 // ============================================================================
@@ -120,9 +121,51 @@ func (e *noteEnrichment) getStats(noteID uint64) *types.NoteStats {
 // ============================================================================
 // 通用 DTO 转换 — 消除重复的 JSON 解析和字段映射
 // ============================================================================
+func (s *NoteService) getTopicsByIDs(ctx context.Context, ids []int64) ([]types.Topic, error) {
+	if len(ids) == 0 {
+		return []types.Topic{}, nil
+	}
+
+	topics := make([]types.Topic, 0, len(ids))
+	missIDs := make([]int64, 0)
+
+	// 先批量查缓存
+	for _, id := range ids {
+		key := fmt.Sprintf("topic:%d", id)
+		val, err := s.RedisClient.Get(ctx, key).Result()
+		if err == nil {
+			var t types.Topic
+			if json.Unmarshal([]byte(val), &t) == nil {
+				topics = append(topics, t)
+				continue
+			}
+		}
+		missIDs = append(missIDs, id)
+	}
+
+	// 缓存未命中的回源数据库
+	if len(missIDs) > 0 {
+		var dbTopics []types.Topic
+		err := s.DB.WithContext(ctx).
+			Where("id IN ?", missIDs).
+			Find(&dbTopics).Error
+		if err != nil {
+			return nil, err
+		}
+
+		// 回写缓存
+		for _, t := range dbTopics {
+			data, _ := json.Marshal(t)
+			key := fmt.Sprintf("topic:%d", t.ID)
+			s.RedisClient.Set(ctx, key, string(data), 30*time.Minute)
+		}
+		topics = append(topics, dbTopics...)
+	}
+	return topics, nil
+}
 
 // noteToDTO 将 models.Note 转为 types.Notes，附带关联数据
-func noteToDTO(note *models.Note, enrich *noteEnrichment) *types.Notes {
+func (s *NoteService) noteToDTO(ctx context.Context, note *models.Note, enrich *noteEnrichment, currentUserID int) *types.Notes {
 	stats := enrich.getStats(note.ID)
 
 	dto := &types.Notes{
@@ -149,11 +192,12 @@ func noteToDTO(note *models.Note, enrich *noteEnrichment) *types.Notes {
 		dto.Nickname = user.Nickname
 	}
 
-	// 安全解析 JSON 字段
-	_ = jsonUnmarshalOr(note.TopicIDs, &dto.TopicIDs, make([]int64, 0))
+	var topicIDs []int64
+	_ = jsonUnmarshalOr(note.TopicIDs, &topicIDs, make([]int64, 0))
+	topics, _ := s.getTopicsByIDs(ctx, topicIDs)
 	_ = jsonUnmarshalOr(note.Location, &dto.Location, types.Location{})
+	dto.TopicIDs = topics
 	dto.MediaData = parseFirstMedia(note.MediaData)
-
 	return dto
 }
 
@@ -249,7 +293,7 @@ func (s *NoteService) buildListNotesRep(ctx context.Context, notes []*models.Not
 	enrich := s.enrichNotes(ctx, userIDs, noteIDs, currentUserID)
 
 	for i := 0; i < displayCount; i++ {
-		rep.Notes = append(rep.Notes, noteToDTO(notes[i], enrich))
+		rep.Notes = append(rep.Notes, s.noteToDTO(ctx, notes[i], enrich, int(currentUserID)))
 	}
 
 	if displayCount > 0 {
@@ -541,7 +585,7 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		_ = s.incrementViewCount(context.Background(), noteID)
 	}()
 
-	return s.buildNoteDetail(note, userInfo, stats, isLiked, isCollected, isFollowed, commentPreview), nil
+	return s.buildNoteDetail(ctx, note, userInfo, stats, isLiked, isCollected, isFollowed, commentPreview, currentUserID), nil
 }
 
 func (s *NoteService) getCommentPreview(ctx context.Context, noteID uint64, currentUserID uint64) (*types.CommentPreview, error) {
@@ -589,11 +633,13 @@ func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, c
 }
 
 func (s *NoteService) buildNoteDetail(
+	ctx context.Context,
 	note *models.Note,
 	userInfo *types.UserProfile,
 	stats *types.NoteStats,
 	isLiked, isCollected, isFollowed bool,
 	commentPreview *types.CommentPreview,
+	currentUserID uint64,
 ) *types.NoteDetail {
 	detail := &types.NoteDetail{
 		ID:          int64(note.ID),
@@ -625,11 +671,37 @@ func (s *NoteService) buildNoteDetail(
 		detail.CommentCount = commentPreview.TotalCount
 		detail.CommentPreview = commentPreview
 	}
-
-	_ = jsonUnmarshalOr(note.TopicIDs, &detail.TopicIDs, make([]int64, 0))
+	var topicIDs []int64
+	_ = jsonUnmarshalOr(note.TopicIDs, &topicIDs, make([]int64, 0))
+	topics, _ := s.getTopicsByIDs(context.Background(), topicIDs)
+	detail.TopicIDs = topics
 	_ = jsonUnmarshalOr(note.Location, &detail.Location, types.Location{})
 	_ = jsonUnmarshalOr(note.MediaData, &detail.MediaData, make([]types.NoteMedia, 0))
 
+	MerchantID := note.ActivityID
+
+	resp := &types.MerchantDetail{}
+	var merchant models.Merchant
+	if err := s.DB.Where("id = ?", MerchantID).First(&merchant).Error; err != nil {
+	}
+
+	resp.AvgPrice = 7600
+	resp.UserId = merchant.UserID
+	resp.Name = merchant.Title
+	resp.LocationName = merchant.LocationName
+	images := make([]string, 0)
+	_ = json.Unmarshal([]byte(merchant.ImagesJSON), &images)
+	resp.Images = images
+	avatar, nickname, _ := s.UserService.GetUserAvatar(ctx, int64(merchant.UserID))
+	resp.UserAvatar = avatar
+	resp.UserName = nickname
+	resp.Id = merchant.ID
+	isFollow, _ := s.FollowService.CheckFollowStatus(ctx, currentUserID, uint64(merchant.UserID))
+	isSub, _ := s.MerchantService.CheckSubcribe(ctx, int(currentUserID), int(merchant.ID))
+	resp.IsSubscribe = isSub
+	resp.BusinessHours = "19:30-次日02:30"
+	resp.IsFollow = isFollow
+	detail.Activity = resp
 	return detail
 }
 
@@ -637,7 +709,7 @@ func (s *NoteService) incrementViewCount(ctx context.Context, noteID uint64) err
 	key := fmt.Sprintf("note:view:count:%d", noteID)
 	s.RedisClient.Incr(ctx, key)
 	s.RedisClient.Expire(ctx, key, 24*time.Hour)
-	return s.StatsDAO.IncrementViewCount(ctx, noteID, 1)
+	return nil
 }
 
 // ============================================================================

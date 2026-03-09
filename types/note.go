@@ -124,7 +124,7 @@ type Notes struct {
 	UserID    int64     `json:"user_id"`   // 作者ID
 	Title     string    `json:"title"`     // 标题
 	Content   string    ` json:"content"`  // 正文内容
-	TopicIDs  []int64   `json:"topic_ids"` // 话题列表
+	TopicIDs  []Topic   `json:"topic_ids"` // 话题列表
 	Location  Location  `json:"location"`  // 地理位置{lat, lng, name}
 	MediaData NoteMedia `json:"media_data"`
 
@@ -195,16 +195,17 @@ type NoteStats struct {
 }
 
 type NoteDetail struct {
-	ID          int64       `json:"id"`
-	UserID      int64       `json:"user_id"`
-	Title       string      `json:"title"`
-	Content     string      `json:"content"`
-	TopicIDs    []int64     `json:"topic_ids"`
-	Location    Location    `json:"location"`
-	MediaData   []NoteMedia `json:"media_data"`
-	Type        int         `json:"type"`
-	Status      int         `json:"status"`
-	VisibleConf int         `json:"visible_conf"`
+	ID          int64           `json:"id"`
+	UserID      int64           `json:"user_id"`
+	Title       string          `json:"title"`
+	Content     string          `json:"content"`
+	TopicIDs    []Topic         `json:"topic"`
+	Activity    *MerchantDetail `json:"activity"`
+	Location    Location        `json:"location"`
+	MediaData   []NoteMedia     `json:"media_data"`
+	Type        int             `json:"type"`
+	Status      int             `json:"status"`
+	VisibleConf int             `json:"visible_conf"`
 
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`

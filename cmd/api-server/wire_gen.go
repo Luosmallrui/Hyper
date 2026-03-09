@@ -127,6 +127,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SessionService: sessionService,
 	}
 	comment := dao.NewComment(db)
+	merchantService := &service.MerchantService{
+		Redis: redisClient,
+		DB:    db,
+	}
 	commentLike := dao.NewCommentLike(db)
 	commentsService := &service.CommentsService{
 		DB:             db,
@@ -146,17 +150,18 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis:       redisClient,
 	}
 	noteService := &service.NoteService{
-		NoteDAO:        noteDAO,
-		CommentDAO:     comment,
-		UserService:    userService,
-		LikeService:    likeService,
-		RedisClient:    redisClient,
-		StatsDAO:       noteStatsDAO,
-		FollowService:  followService,
-		CollectService: collectService,
-		CommentService: commentsService,
-		TopicService:   topicService,
-		DB:             db,
+		NoteDAO:         noteDAO,
+		CommentDAO:      comment,
+		UserService:     userService,
+		LikeService:     likeService,
+		RedisClient:     redisClient,
+		StatsDAO:        noteStatsDAO,
+		FollowService:   followService,
+		MerchantService: merchantService,
+		CollectService:  collectService,
+		CommentService:  commentsService,
+		TopicService:    topicService,
+		DB:              db,
 	}
 	channelService := &service.ChannelService{
 		Db:    db,
@@ -252,10 +257,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	productHandler := &handler.ProductHandler{
 		Config:         cfg,
 		ProductService: productService,
-	}
-	merchantService := &service.MerchantService{
-		Redis: redisClient,
-		DB:    db,
 	}
 	merchant := &handler.Merchant{
 		Config:          cfg,
