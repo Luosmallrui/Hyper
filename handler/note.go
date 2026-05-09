@@ -63,21 +63,19 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 
 func (n *Note) Gen(c *gin.Context) error {
 	// 1. 预先获取频道映射，避免在循环里调接口
-	tags, err := n.Channel.ListChannels(c.Request.Context(), &types.ListChannelsReq{})
-	if err != nil {
-		return err
-	}
-	tagsSlice := make([]string, 0)
-	tagsMap := make(map[string]int) // ID 建议用 uint32，与数据库对应
-	for _, v := range tags.Channels {
-		tagsSlice = append(tagsSlice, v.Name)
-		tagsMap[v.Name] = v.Id
-	}
-
 	// 2. 异步处理，不阻塞接口返回
 	go func() {
 		// 使用一个独立的 Context，不要用 Gin 的 c.Request.Context()，因为请求结束它会 cancel
 		ctx := base.Background()
+		tags, err := n.Channel.ListChannels(ctx, &types.ListChannelsReq{})
+		if err != nil {
+		}
+		tagsSlice := make([]string, 0)
+		tagsMap := make(map[string]int) // ID 建议用 uint32，与数据库对应
+		for _, v := range tags.Channels {
+			tagsSlice = append(tagsSlice, v.Name)
+			tagsMap[v.Name] = v.Id
+		}
 
 		// 3. 分批处理（例如每次取 100 条），只取未分类的 (channel_id = 0)
 		var notes []models.Note
@@ -105,9 +103,33 @@ func (n *Note) Gen(c *gin.Context) error {
 			return nil
 		})
 	}()
+	return nil
+}
 
-	// 接口立即返回
-	c.JSON(200, gin.H{"msg": "已开始异步分类任务"})
+// CreateNote 创建笔记
+func (n *Note) CreateNote(c *gin.Context) error {
+	//从 context 获取用户 ID
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	//userID := uint64(1)
+	// 绑定请求参数
+	var req types.CreateNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
+	}
+
+	// 调用 MessageService 层创建笔记
+	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
+	}
+	go n.Gen(c)
+	// 返回成功响应
+	response.Success(c, types.CreateNoteResponse{
+		NoteID: noteID,
+	})
 	return nil
 }
 func (n *Note) GetNoteDetail(c *gin.Context) error {
@@ -208,33 +230,6 @@ func (n *Note) ListFollowedNotes(c *gin.Context) error {
 	}
 
 	response.Success(c, rep)
-	return nil
-}
-
-// CreateNote 创建笔记
-func (n *Note) CreateNote(c *gin.Context) error {
-	//从 context 获取用户 ID
-	userID, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, err.Error())
-	}
-	//userID := uint64(1)
-	// 绑定请求参数
-	var req types.CreateNoteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
-	}
-
-	// 调用 MessageService 层创建笔记
-	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
-	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
-	}
-	go n.Gen(c)
-	// 返回成功响应
-	response.Success(c, types.CreateNoteResponse{
-		NoteID: noteID,
-	})
 	return nil
 }
 
