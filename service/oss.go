@@ -50,6 +50,7 @@ type IOssService interface {
 	ListBuckets(ctx context.Context) ([]string, error)
 	UploadImage(ctx context.Context, userID int, header *multipart.FileHeader) (*types.UploadImageResp, error)
 	UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error)
+	UploadRaw(ctx context.Context, reader io.Reader, objectKey string) error
 }
 
 func (s *OssService) UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error) {
@@ -308,6 +309,11 @@ func (s *OssService) UploadReader(
 		Body:   reader,
 	})
 	return err
+}
+
+// UploadRaw 上传原始流（不写 image 表）
+func (s *OssService) UploadRaw(ctx context.Context, reader io.Reader, objectKey string) error {
+	return s.UploadReader(ctx, reader, objectKey)
 }
 
 // Download 下载到本地文件

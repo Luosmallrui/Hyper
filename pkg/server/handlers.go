@@ -23,4 +23,5 @@ type Handlers struct {
 	Order           *handler.Order
 	Points          *handler.PointHandler
 	Serch           *handler.SearchHandler
+	Event           *handler.Event
 }

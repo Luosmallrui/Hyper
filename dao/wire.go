@@ -27,4 +27,6 @@ var ProviderSet = wire.NewSet(
 	NewTopic,
 	NewProduct,
 	NewPoint,
+	NewEventDAO,
+	NewEventTicketDAO,
 )
