@@ -51,3 +51,57 @@ CREATE TABLE IF NOT EXISTS `user_stats`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='用户统计表';
+
+CREATE TABLE IF NOT EXISTS `events`
+(
+    `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
+    `user_id`           int unsigned    NOT NULL COMMENT '创建者用户ID',
+    `title`             varchar(80)     NOT NULL COMMENT '活动名称',
+    `share_title`       varchar(20)     NOT NULL COMMENT '分享标题',
+    `start_at`          datetime        NOT NULL COMMENT '开始时间',
+    `end_at`            datetime        NOT NULL COMMENT '结束时间',
+    `summary`           text            COMMENT '活动概要（纯文本）',
+    `summary_html`      text            COMMENT '活动概要（HTML）',
+    `strong_real_name`  tinyint(1)      NOT NULL DEFAULT 0 COMMENT '是否强实名',
+    `minor_protection`  tinyint(1)      NOT NULL DEFAULT 0 COMMENT '是否未成年人校验',
+    `address_mode`      varchar(20)     NOT NULL DEFAULT 'default' COMMENT '地址模式',
+    `province`          varchar(50)     NOT NULL DEFAULT '' COMMENT '省份',
+    `city`              varchar(50)     NOT NULL DEFAULT '' COMMENT '城市',
+    `district`          varchar(50)     NOT NULL DEFAULT '' COMMENT '地区',
+    `location`          varchar(255)    NOT NULL DEFAULT '' COMMENT '详细地址',
+    `detail_poster`     text            COMMENT '详情页海报',
+    `detail_long_poster` text           COMMENT '详情长图海报',
+    `share_poster`      text            COMMENT '列表及分享海报',
+    `group_poster`      text            COMMENT '社群海报',
+    `promoter_confirmed` tinyint(1)     NOT NULL DEFAULT 0 COMMENT '主办方确认',
+    `safety_agreement`  tinyint(1)      NOT NULL DEFAULT 0 COMMENT '安全保障确认',
+    `ticket_statement`  tinyint(1)      NOT NULL DEFAULT 0 COMMENT '票券声明确认',
+    `notes`             text            COMMENT '补充说明',
+    `status`            varchar(20)     NOT NULL DEFAULT 'draft' COMMENT '状态: draft/已上架/已下架',
+    `created_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_event_user_id` (`user_id`) USING BTREE,
+    KEY `idx_event_status` (`status`) USING BTREE,
+    KEY `idx_event_start_at` (`start_at`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='活动表';
+
+CREATE TABLE IF NOT EXISTS `event_tickets`
+(
+    `id`              bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '票券ID',
+    `event_id`        bigint unsigned NOT NULL COMMENT '活动ID',
+    `name`            varchar(50)     NOT NULL COMMENT '票券名称',
+    `price`           bigint          NOT NULL COMMENT '价格（分）',
+    `stock`           int             NOT NULL COMMENT '库存',
+    `purchase_limit`  int             NOT NULL DEFAULT 1 COMMENT '限购数量',
+    `start_at`        datetime        NOT NULL COMMENT '开售时间',
+    `end_at`          datetime        NOT NULL COMMENT '停售时间',
+    `description`     text            COMMENT '描述',
+    `created_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_ticket_event_id` (`event_id`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='活动票券表';

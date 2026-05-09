@@ -299,6 +299,18 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config: cfg,
 		Serch:  searchService,
 	}
+	eventDAO := dao.NewEventDAO(db)
+	eventTicketDAO := dao.NewEventTicketDAO(db)
+	eventService := &service.EventService{
+		EventDAO:  eventDAO,
+		TicketDAO: eventTicketDAO,
+		DB:        db,
+	}
+	event := &handler.Event{
+		Config:       cfg,
+		EventService: eventService,
+		OssService:   iOssService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -318,6 +330,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Order:           order,
 		Points:          pointHandler,
 		Serch:           searchHandler,
+		Event:           event,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
