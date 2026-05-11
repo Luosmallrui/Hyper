@@ -24,6 +24,15 @@ type LoginRequest struct {
 	Phone string `json:"phone" binding:"required"`
 	Code  string `json:"code" binding:"required"`
 }
+
+type PasswordLoginRequest struct {
+	Phone    string `json:"phone" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type SetPasswordRequest struct {
+	Password string `json:"password" binding:"required,min=6"`
+}
 type WxSessionResponse struct {
 	OpenID     string `json:"openid"`
 	SessionKey string `json:"session_key"`
@@ -83,10 +92,11 @@ type UserProfileResp struct {
 }
 
 type UserToken struct {
-	AccessToken   string `json:"access_token"`
-	RefreshToken  string `json:"refresh_token"`
-	AccessExpire  int64  `json:"access_expire"`
-	RefreshExpire int64  `json:"refresh_expire"`
+	AccessToken      string `json:"access_token"`
+	RefreshToken     string `json:"refresh_token"`
+	AccessExpire     int64  `json:"access_expire"`
+	RefreshExpire    int64  `json:"refresh_expire"`
+	NeedSetPassword  bool   `json:"need_set_password,omitempty"`
 }
 type UserBasicInfo struct {
 	Id          int       `json:"id"`

@@ -24,6 +24,7 @@ type IUserService interface {
 	Login(mobile string, password string) (*models.Users, error)
 	Forget(opt *UserForgetOpt) (bool, error)
 	UpdatePassword(uid int, oldPassword string, password string) error
+	SetPassword(ctx context.Context, uid int, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
 	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile
@@ -132,6 +133,10 @@ func (s *UserService) Login(mobile string, password string) (*models.Users, erro
 		return nil, err
 	}
 
+	if user.Password == "" {
+		return nil, errors.New("该账号尚未设置密码，请使用验证码登录后设置密码")
+	}
+
 	if !encrypt.VerifyPassword(user.Password, password) {
 		return nil, errors.New("登录密码填写错误! ")
 	}
@@ -169,6 +174,15 @@ func (s *UserService) UpdatePassword(uid int, oldPassword string, password strin
 	}
 
 	return err
+}
+
+// SetPassword 为用户设置密码（首次设置或重置）
+func (s *UserService) SetPassword(ctx context.Context, uid int, password string) error {
+	hashed := encrypt.HashPassword(password)
+	return s.UsersRepo.UpdateById(ctx, int64(uid), map[string]any{
+		"password":   hashed,
+		"updated_at": time.Now(),
+	})
 }
 
 func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateUserReq) error {
