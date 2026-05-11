@@ -36,6 +36,8 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth := r.Group("/v1/auth")
 	auth.POST("/wx-login", context.Wrap(u.Login)) // 微信登录
 	auth.POST("/login", context.Wrap(u.SMSLogin))
+	auth.POST("/login-password", context.Wrap(u.PasswordLogin))
+	auth.POST("/set-password", authorize, context.Wrap(u.SetPassword))
 	auth.POST("/send-code", context.Wrap(u.SendCode))
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
@@ -84,10 +86,11 @@ func (u *Auth) SMSLogin(c *gin.Context) error {
 	}
 	log.L.Info("generating refresh token", zap.String("token", refreshToken))
 	rep := types.UserToken{
-		AccessToken:   accessToken,
-		RefreshToken:  refreshToken,
-		AccessExpire:  time.Now().Add(time.Duration(u.Config.Jwt.ExpiresTime) * time.Second).Unix(),
-		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
+		AccessToken:     accessToken,
+		RefreshToken:    refreshToken,
+		AccessExpire:    time.Now().Add(time.Duration(u.Config.Jwt.ExpiresTime) * time.Second).Unix(),
+		RefreshExpire:   time.Now().Add(7 * 24 * time.Hour).Unix(),
+		NeedSetPassword: user.Password == "",
 	}
 	response.Success(c, rep)
 	return nil
@@ -287,6 +290,62 @@ func (u *Auth) UpdatePhone(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, "手机号更新成功")
+	return nil
+}
+
+// PasswordLogin 手机号+密码登录
+// POST /api/v1/auth/login-password
+func (u *Auth) PasswordLogin(c *gin.Context) error {
+	var req types.PasswordLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	if !isValidPhone(req.Phone) {
+		return response.NewError(400, "手机号格式不正确")
+	}
+
+	user, err := u.UserService.Login(req.Phone, req.Password)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	accessToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "access", time.Duration(u.Config.Jwt.ExpiresTime)*time.Second)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	refreshToken, err := jwt.GenerateToken([]byte(u.Config.Jwt.Secret), uint(user.Id), user.OpenID, "refresh", 7*24*time.Hour)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	rep := types.UserToken{
+		AccessToken:   accessToken,
+		RefreshToken:  refreshToken,
+		AccessExpire:  time.Now().Add(time.Duration(u.Config.Jwt.ExpiresTime) * time.Second).Unix(),
+		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	response.Success(c, rep)
+	return nil
+}
+
+// SetPassword 设置密码（短信登录后设置，后续可用密码登录）
+// POST /api/v1/auth/set-password
+func (u *Auth) SetPassword(c *gin.Context) error {
+	var req types.SetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	userId, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "请先登录")
+	}
+
+	err = u.UserService.SetPassword(c.Request.Context(), int(userId), req.Password)
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+
+	response.Success(c, "密码设置成功")
 	return nil
 }
 
