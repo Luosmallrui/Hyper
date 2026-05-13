@@ -72,5 +72,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(EventService), "*"),
 	wire.Bind(new(IEventService), new(*EventService)),
 
+	wire.Struct(new(AdminService), "*"),
+	wire.Bind(new(IAdminService), new(*AdminService)),
+
 	NewOssService,
 )

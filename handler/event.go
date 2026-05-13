@@ -173,7 +173,7 @@ func (e *Event) GetEventDetail(c *gin.Context) error {
 
 	detail, err := e.EventService.GetEventDetail(c.Request.Context(), id)
 	if err != nil {
-		return response.NewError(http.StatusNotFound, "活动不存在")
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
 	}
 
 	response.Success(c, detail)

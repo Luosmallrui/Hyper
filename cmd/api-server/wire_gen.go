@@ -311,6 +311,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		EventService: eventService,
 		OssService:   iOssService,
 	}
+	adminDAO := dao.NewAdmin(db)
+	adminService := &service.AdminService{
+		AdminDAO: adminDAO,
+		DB:       db,
+		Secret:   []byte(cfg.Jwt.Secret),
+	}
+	admin := &handler.Admin{
+		Config:       cfg,
+		AdminService: adminService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -331,6 +341,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Points:          pointHandler,
 		Serch:           searchHandler,
 		Event:           event,
+		Admin:           admin,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

@@ -19,6 +19,7 @@ type Merchant struct {
 	Address      string    `gorm:"size:500" json:"address"`
 	Latitude     float64   `gorm:"type:decimal(10,7);not null" json:"lat"`
 	Longitude    float64   `gorm:"type:decimal(10,7);not null" json:"lng"`
+	Status       string    `gorm:"size:20;default:active;not null" json:"status"` // active / offline
 	CreatedAt    time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
 	ImagesJSON   string    `gorm:"type:json;column:images_json" json:"images"`

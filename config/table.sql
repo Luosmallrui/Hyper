@@ -52,6 +52,34 @@ CREATE TABLE IF NOT EXISTS `user_stats`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='用户统计表';
 
+CREATE TABLE IF NOT EXISTS `parties`
+(
+    `id`            bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '派对ID',
+    `user_id`       int unsigned    NOT NULL COMMENT '创建者用户ID',
+    `title`         varchar(255)    NOT NULL COMMENT '标题',
+    `type`          varchar(50)     NOT NULL COMMENT '类型: 派对/场地',
+    `description`   text            COMMENT '描述',
+    `cover_image`   text            COMMENT '封面图',
+    `location_name` varchar(255)    NOT NULL DEFAULT '' COMMENT '位置名称',
+    `address`       varchar(500)    NOT NULL DEFAULT '' COMMENT '详细地址',
+    `latitude`      decimal(10,7)   NOT NULL COMMENT '纬度',
+    `longitude`     decimal(10,7)   NOT NULL COMMENT '经度',
+    `status`        varchar(20)     NOT NULL DEFAULT 'active' COMMENT '状态: active/offline',
+    `images_json`   json            COMMENT '图片列表',
+    `category`      int             NOT NULL DEFAULT 0 COMMENT '分类',
+    `created_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_user_id` (`user_id`) USING BTREE,
+    KEY `idx_type` (`type`) USING BTREE,
+    KEY `idx_status` (`status`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='派对/场地表';
+
+-- 如已有 parties 表，执行以下 ALTER 添加 status 字段:
+-- ALTER TABLE `parties` ADD COLUMN `status` varchar(20) NOT NULL DEFAULT 'active' COMMENT '状态: active/offline' AFTER `longitude`;
+
 CREATE TABLE IF NOT EXISTS `events`
 (
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
@@ -105,3 +133,22 @@ CREATE TABLE IF NOT EXISTS `event_tickets`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='活动票券表';
+
+CREATE TABLE IF NOT EXISTS `admin`
+(
+    `id`         int unsigned NOT NULL AUTO_INCREMENT COMMENT '管理员ID',
+    `username`   varchar(50)  NOT NULL COMMENT '用户名',
+    `password`   varchar(255) NOT NULL COMMENT '密码(bcrypt)',
+    `avatar`     varchar(255) NOT NULL DEFAULT '' COMMENT '头像',
+    `gender`     tinyint      NOT NULL DEFAULT 3 COMMENT '性别 1:男 2:女 3:未知',
+    `mobile`     varchar(11)  NOT NULL DEFAULT '' COMMENT '手机号',
+    `email`      varchar(50)  NOT NULL DEFAULT '' COMMENT '邮箱',
+    `motto`      varchar(500) NOT NULL DEFAULT '' COMMENT '座右铭',
+    `status`     tinyint      NOT NULL DEFAULT 1 COMMENT '状态 1:正常 2:停用',
+    `created_at` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_username` (`username`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='管理员表';
