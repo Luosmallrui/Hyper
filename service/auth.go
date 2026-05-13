@@ -173,7 +173,11 @@ func (s *UserService) UpdatePassword(uid int, oldPassword string, password strin
 		return errors.New("密码验证不正确！")
 	}
 
-	return err
+	hashed := encrypt.HashPassword(password)
+	return s.UsersRepo.UpdateById(context.TODO(), int64(uid), map[string]any{
+		"password":   hashed,
+		"updated_at": time.Now(),
+	})
 }
 
 // SetPassword 为用户设置密码（首次设置或重置）
@@ -280,7 +284,7 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 	//校验
 	cachedCode, err := s.Redis.Get(ctx, "sms:bind"+mobile).Result()
 	if err != nil {
-		errors.New("验证码已过期或未发送")
+		return errors.New("验证码已过期或未发送")
 	}
 	if cachedCode != inputCode {
 		return errors.New("验证码错误")
