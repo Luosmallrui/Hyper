@@ -60,7 +60,7 @@ func (f *OrderService) GetOrderList(ctx context.Context, UserId int, cursor int6
 		return make([]*types.Order, 0), 0, false, nil
 	}
 
-	nextCursor := orders[len(orders)-1].CreatedAt.UnixNano()
+	nextCursor := int64(orders[len(orders)-1].ID)
 
 	// --- 下面是之前的详情填充逻辑 ---
 	resp := make([]*types.Order, len(orders))

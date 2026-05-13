@@ -27,8 +27,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// PrepayRequest 预支付请求参数
-
 type Pay struct {
 	WechatPayConfig *config.WechatPayConfig
 	Config          *config.Config
@@ -43,19 +41,20 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 	pay := r.Group("/v1/pay")
 	{
 		pay.POST("/prepay", authorize, context.Wrap(p.Prepay))
-		pay.POST("/notify", context.Wrap(p.PayNotify)) // 支付回调
+		pay.POST("/notify", context.Wrap(p.PayNotify))
 
-		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))     // 查询订单
-		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt)) // 获取订单电子回执
-		pay.GET("/detail", authorize, context.Wrap(p.Detail))           //查询订单详情
+		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))
+		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt))
+		pay.GET("/detail", authorize, context.Wrap(p.Detail))
 	}
 }
 
 // Detail 根据订单编号查询订单详情
 func (p *Pay) Detail(c *gin.Context) error {
-
-	OrderSN := c.Query("out_trade_no") //获取订单号
-	fmt.Println(OrderSN)
+	OrderSN := c.Query("out_trade_no")
+	if OrderSN == "" {
+		return response.NewError(400, "订单号不能为空")
+	}
 
 	resp, err := p.PayService.OrderDetail(c, OrderSN)
 	if err != nil {
@@ -91,6 +90,19 @@ func (p *Pay) initWechatClient() error {
 		return fmt.Errorf("加载商户私钥失败: %w", err)
 	}
 	p.MchPrivateKey = mchPrivateKey
+
+	// 注册证书下载器（用于支付回调验签）
+	err = downloader.MgrInstance().RegisterDownloaderWithPrivateKey(
+		base.Background(),
+		mchPrivateKey,
+		p.WechatPayConfig.MchCertificateSerialNumber,
+		p.WechatPayConfig.MchID,
+		p.WechatPayConfig.MchAPIv3Key,
+	)
+	if err != nil {
+		log.L.Warn("注册微信证书下载器失败", zap.Error(err))
+	}
+
 	// 创建微信支付客户端
 	opts := []core.ClientOption{
 		option.WithWechatPayAutoAuthCipher(
@@ -117,7 +129,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 	ctx := c.Request.Context()
 	var req types.PrepayRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		//return response.NewError(400, "参数错误: "+err.Error())
+		return response.NewError(400, "参数错误: "+err.Error())
 	}
 
 	userId := c.GetInt("user_id")
@@ -148,24 +160,12 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	}
 
 	transaction := new(payments.Transaction)
-	notifyReq, err := handler.ParseNotifyRequest(ctx, c.Request, transaction)
+	_, err = handler.ParseNotifyRequest(ctx, c.Request, transaction)
 	if err != nil {
 		log.L.Error("微信支付回调验签或解密失败", zap.Error(err))
 		return response.NewError(500, err.Error())
 	}
-	log.L.Info("pay notify", zap.Any("notifyReq", notifyReq), zap.Any("transaction", transaction))
-	// --- ✅ 临时方案：直接解析 JSON 模拟 transaction 对象 ---
-	//transaction := new(payments.Transaction)
-	//if err := c.ShouldBindJSON(transaction); err != nil {
-	//	log.L.Error("模拟回调解析 JSON 失败", zap.Error(err))
-	//	return response.NewError(400, "参数格式错误")
-	//}
-	//
-	//// 记录模拟数据日志
-	//log.L.Info("收到模拟支付回调信号",
-	//	zap.String("order_sn", *transaction.OutTradeNo),
-	//	zap.String("tran_id", *transaction.TransactionId),
-	//)
+	log.L.Info("pay notify", zap.Any("transaction", transaction))
 
 	err = p.PayService.ProcessOrderPaySuccess(ctx, transaction)
 	if err != nil {
@@ -173,8 +173,11 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 		return response.NewError(500, "process failed")
 	}
 
-	response.Success(c, notifyReq)
-	//response.Success(c, gin.H{"status": "SUCCESS", "message": "模拟核销成功"})
+	// 微信要求回调返回 HTTP 200 + {"code":"SUCCESS","message":"成功"}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    "SUCCESS",
+		"message": "成功",
+	})
 	return nil
 }
 
@@ -205,20 +208,13 @@ func (p *Pay) QueryOrder(c *gin.Context) error {
 	return nil
 }
 
-// 在 RegisterRouter 中增加
-// prod.GET("/receipt", auth, context.Wrap(p.GetOrderReceipt))
-
 func (p *Pay) GetOrderReceipt(c *gin.Context) error {
 	orderSn := c.Query("order_sn")
 	if orderSn == "" {
 		return response.NewError(http.StatusBadRequest, "订单号不能为空")
 	}
 
-	// 从中间件获取当前登录用户的 ID
-	userId := c.GetInt("userID")
-	//c.Set("user_id", 1)
-	//// 这里会读取到你上面 Set 的 6
-	//userId := c.GetInt("user_id")
+	userId := c.GetInt("user_id")
 	res, err := p.PayService.GetOrderReceipt(c.Request.Context(), orderSn, userId)
 	if err != nil {
 		return response.NewError(http.StatusNotFound, err.Error())

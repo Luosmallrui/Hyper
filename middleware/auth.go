@@ -20,12 +20,6 @@ func Auth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, "缺少 Authorization")
 			return
 		}
-		if authHeader == "Bearer debug-mode" {
-			c.Set("user_id", 1)
-			c.Set("openid", "debug_openid")
-			c.Next()
-			return
-		}
 		log.L.Info("auth header", zap.String("authHeader", authHeader))
 
 		parts := strings.SplitN(authHeader, " ", 2)

@@ -22,10 +22,9 @@ func (o *Order) RegisterRouter(r gin.IRouter) {
 	order := r.Group("/v1/order")
 	order.Use(authorize)
 	order.GET("/list", context.Wrap(o.GetOrder))
-	order.POST("/create-viewer", authorize, context.Wrap(o.CreateViewer))
-	order.POST("/delete-viewer", authorize, context.Wrap(o.DeleteViewer))
-	order.GET("/list-viewer", authorize, context.Wrap(o.GetViewerList))
-
+	order.POST("/create-viewer", context.Wrap(o.CreateViewer))
+	order.POST("/delete-viewer", context.Wrap(o.DeleteViewer))
+	order.GET("/list-viewer", context.Wrap(o.GetViewerList))
 }
 
 func (o *Order) GetOrder(c *gin.Context) error {
@@ -53,13 +52,7 @@ func (o *Order) CreateViewer(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误")
 	}
-	var userId int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userId = 6 // Debug 模式下使用固定用户ID
-	} else {
-		userId = c.GetInt("user_id")
-	}
+	userId := c.GetInt("user_id")
 	err := o.OrderService.AddViewers(c.Request.Context(), userId, req)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
@@ -73,13 +66,7 @@ func (o *Order) DeleteViewer(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误")
 	}
-	var userId int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userId = 6 // Debug 模式下使用固定用户ID
-	} else {
-		userId = c.GetInt("user_id")
-	}
+	userId := c.GetInt("user_id")
 	err := o.OrderService.DeleteViewer(c.Request.Context(), userId, req)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
@@ -89,13 +76,7 @@ func (o *Order) DeleteViewer(c *gin.Context) error {
 }
 
 func (o *Order) GetViewerList(c *gin.Context) error {
-	var userId int
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "Bearer debug-mode" {
-		userId = 6 // Debug 模式下使用固定用户ID
-	} else {
-		userId = c.GetInt("user_id")
-	}
+	userId := c.GetInt("user_id")
 	viewers_list, err := o.OrderService.GetViewerList(c.Request.Context(), userId)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
@@ -103,5 +84,4 @@ func (o *Order) GetViewerList(c *gin.Context) error {
 
 	response.Success(c, viewers_list)
 	return nil
-
 }
