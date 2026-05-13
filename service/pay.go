@@ -16,6 +16,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var _ IPayService = (*PayService)(nil)
@@ -44,11 +45,12 @@ func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.Or
 		Price:      int64(orderItems.ProductPrice),
 		Quantity:   int(orderItems.Quantity),
 		Status:     order.Status,
-		PayedAt:    *order.PaidAt,
 		OutTradeNo: order.OrderSn,
 	}
+	if order.PaidAt != nil {
+		resq.PayedAt = *order.PaidAt
+	}
 	if orderItems.ConsumeType == "ticket" {
-		// 把活动开始时间作为附加信息返回给前端(先固定了，后续加上活动时间字段)
 		resq.Attach = map[string]string{
 			"event_time": "2024-12-31 19:00:00",
 		}
@@ -89,8 +91,43 @@ func (p *PayService) PreWeChatPay(
 	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var product models.Product
 		if err := tx.Where("id = ? AND status = 1", req.ProductId).First(&product).Error; err != nil {
-			return fmt.Errorf("订单不存在或已下架")
+			return fmt.Errorf("商品不存在或已下架")
 		}
+
+		// 服务端金额校验：确保前端传的金额 = 商品单价 × 数量
+		expectedAmount := int64(product.Price) * int64(req.Quantity)
+		if req.Amount != expectedAmount {
+			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
+		}
+
+		// 幂等检查：同一个用户对同一个商品，如果已有未支付订单，直接复用
+		var existingOrder models.Order
+		if err := tx.Where("user_id = ? AND status = 10 AND order_sn LIKE ?",
+			req.UserId, fmt.Sprintf("%%_%d", req.UserId)).
+			First(&existingOrder).Error; err == nil && existingOrder.ID > 0 {
+			// 检查是否超过5分钟，超过则不算幂等
+			if time.Since(existingOrder.CreatedAt) < 5*time.Minute {
+				// 查找对应的 order item 确认是同一商品
+				var existingItem models.OrderItem
+				if err := tx.Where("order_sn = ? AND product_id = ?", existingOrder.OrderSn, req.ProductId).
+					First(&existingItem).Error; err == nil {
+					orderSn = existingOrder.OrderSn
+					return nil // 复用已有订单
+				}
+			}
+		}
+
+		// 库存预扣减（下单时锁定库存）
+		res := tx.Model(&models.Product{}).
+			Where("id = ? AND stock >= ?", product.ID, req.Quantity).
+			UpdateColumn("stock", gorm.Expr("stock - ?", req.Quantity))
+		if res.Error != nil {
+			return fmt.Errorf("扣减库存失败: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("库存不足")
+		}
+
 		// A. 创建订单
 		order := &models.Order{
 			UserID:      req.UserId,
@@ -195,20 +232,20 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 幂等检查：查询流水表并锁定行（SELECT FOR UPDATE）
 		var record models.PayRecord
-		err := tx.Set("gorm:query_option", "FOR UPDATE").
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("order_sn = ?", orderSn).First(&record).Error
 		if err != nil {
 			return err
 		}
 
-		// 如果流水状态已经是“已支付”，直接返回，不再执行后续逻辑
+		// 如果流水状态已经是"已支付"，直接返回，不再执行后续逻辑
 		if record.PayStatus == 2 { // 2 代表已支付
 			log.L.Info("订单已处理过，跳过", zap.String("order_sn", orderSn))
 			return nil
 		}
 
 		// 2. 更新支付流水表
-		rawJson, _ := json.Marshal(notify) // 将整个回调原始数据存入JSON字段
+		rawJson, _ := json.Marshal(notify)
 		updateRecord := map[string]interface{}{
 			"transaction_id":  transactionId,
 			"pay_status":      2,
@@ -227,7 +264,7 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		}
 		// 3. 更新主订单状态
 		result := tx.Model(&models.Order{}).
-			Where("order_sn = ? AND status = ?", orderSn, 10). // 只有待支付状态才能变更为已支付
+			Where("order_sn = ? AND status = ?", orderSn, 10).
 			Updates(map[string]interface{}{
 				"status":  20, // 已支付
 				"paid_at": time.Now(),
@@ -240,27 +277,19 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 			return fmt.Errorf("更新订单状态失败或订单状态已改变")
 		}
 		var items []models.OrderItem
-		if err := tx.Where("order_sn = ?", order.ID).Find(&items).Error; err != nil {
+		if err := tx.Where("order_sn = ?", orderSn).Find(&items).Error; err != nil {
 			return fmt.Errorf("获取订单明细失败: %w", err)
 		}
+		// 库存在下单时已预扣减，这里只做销量更新和自动下架检测
 		for _, item := range items {
-			res := tx.Model(&models.Product{}).
-				Where("id = ? AND stock >= ?", item.ProductID, item.Quantity).
-				UpdateColumn("stock", gorm.Expr("stock - ?", item.Quantity))
-			if res.Error != nil {
-				return fmt.Errorf("商品 [%s] 扣减库存失败: %w", item.ProductName, res.Error)
-			}
-			if res.RowsAffected == 0 {
-				return fmt.Errorf("商品 [%s] 库存不足，无法完成支付回调业务", item.ProductName)
-			}
-			// B. 增加商品销量
+			// A. 增加商品销量
 			if err := tx.Model(&models.Product{}).
 				Where("id = ?", item.ProductID).
 				UpdateColumn("sales_volume", gorm.Expr("sales_volume + ?", item.Quantity)).Error; err != nil {
 				return fmt.Errorf("更新商品销量失败: %w", err)
 			}
 
-			// C. 自动下架检测：如果库存扣减后变为 0，自动将状态设为下架 (0)
+			// B. 自动下架检测：如果库存为0，自动将状态设为下架 (0)
 			var prod models.Product
 			if err := tx.Select("stock").First(&prod, item.ProductID).Error; err == nil {
 				if prod.Stock == 0 {
@@ -269,11 +298,6 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 				}
 			}
 		}
-		// 4. 【关键】执行后续业务逻辑
-		// 例如：给用户账户加钱、增加积分、如果是商品则通知仓库发货
-		// if err := s.AccountService.AddBalance(record.UserID, record.AmountTotal); err != nil {
-		//     return err
-		// }
 
 		return nil
 	})
@@ -291,7 +315,7 @@ func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId
 	//2、获取支付流水信息
 	p.DB.WithContext(ctx).Where("order_sn = ?", orderSn).First(&payRecord)
 	//3、获取订单明细
-	if err := p.DB.WithContext(ctx).Where("order_sn", order.ID).Find(&items).Error; err != nil {
+	if err := p.DB.WithContext(ctx).Where("order_sn = ?", orderSn).Find(&items).Error; err != nil {
 		return nil, fmt.Errorf("获取订单明细失败: %w", err)
 	}
 	//4、组装响应体
@@ -299,7 +323,7 @@ func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId
 		OrderSn:       order.OrderSn,
 		TransactionId: payRecord.TransactionId,
 		Status:        order.Status,
-		StatusText:    "支付成功", // 可根据 order.Status 进一步判断
+		StatusText:    "支付成功",
 		PayTime:       "",
 		TotalAmount:   float64(order.TotalAmount) / 100.0,
 	}
@@ -317,4 +341,62 @@ func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId
 		})
 	}
 	return resp, nil
+}
+
+// CancelExpiredOrders 取消超过指定分钟数未支付的订单，并回滚库存
+func (p *PayService) CancelExpiredOrders(ctx context.Context, expireMinutes int) (int64, error) {
+	deadline := time.Now().Add(-time.Duration(expireMinutes) * time.Minute)
+
+	var expiredOrders []models.Order
+	if err := p.DB.WithContext(ctx).
+		Where("status = 10 AND created_at < ?", deadline).
+		Find(&expiredOrders).Error; err != nil {
+		return 0, fmt.Errorf("查询过期订单失败: %w", err)
+	}
+
+	if len(expiredOrders) == 0 {
+		return 0, nil
+	}
+
+	var cancelled int64
+	for _, order := range expiredOrders {
+		err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// 更新订单状态为已取消(30)
+			result := tx.Model(&models.Order{}).
+				Where("order_sn = ? AND status = 10", order.OrderSn).
+				Update("status", 30)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return nil // 已被其他goroutine处理
+			}
+
+			// 回滚库存
+			var items []models.OrderItem
+			if err := tx.Where("order_sn = ?", order.OrderSn).Find(&items).Error; err != nil {
+				return err
+			}
+			for _, item := range items {
+				if err := tx.Model(&models.Product{}).
+					Where("id = ?", item.ProductID).
+					UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
+					return fmt.Errorf("回滚库存失败: %w", err)
+				}
+			}
+
+			// 更新支付流水状态
+			tx.Model(&models.PayRecord{}).
+				Where("order_sn = ? AND pay_status = 0", order.OrderSn).
+				Update("pay_status", 4) // 4: 已关闭
+
+			cancelled++
+			return nil
+		})
+		if err != nil {
+			log.L.Error("取消过期订单失败", zap.String("order_sn", order.OrderSn), zap.Error(err))
+		}
+	}
+
+	return cancelled, nil
 }

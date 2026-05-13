@@ -311,14 +311,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		EventService: eventService,
 		OssService:   iOssService,
 	}
-	adminDAO := dao.NewAdmin(db)
-	jwtSecret := []byte(cfg.Jwt.Secret)
+	admin := dao.NewAdmin(db)
+	v := provideJwtSecret(cfg)
 	adminService := &service.AdminService{
-		AdminDAO: adminDAO,
+		AdminDAO: admin,
 		DB:       db,
-		Secret:   jwtSecret,
+		Secret:   v,
 	}
-	admin := &handler.Admin{
+	handlerAdmin := &handler.Admin{
 		Config:       cfg,
 		AdminService: adminService,
 	}
@@ -342,7 +342,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Points:          pointHandler,
 		Serch:           searchHandler,
 		Event:           event,
-		Admin:           admin,
+		Admin:           handlerAdmin,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{
@@ -350,4 +350,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Engine: engine,
 	}
 	return appProvider
+}
+
+// wire.go:
+
+func provideJwtSecret(cfg *config.Config) []byte {
+	return []byte(cfg.Jwt.Secret)
 }
