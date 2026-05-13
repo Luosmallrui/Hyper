@@ -17,9 +17,14 @@ import (
 	"github.com/google/wire"
 )
 
+func provideJwtSecret(cfg *config.Config) []byte {
+	return []byte(cfg.Jwt.Secret)
+}
+
 func InitServer(cfg *config.Config) *server.AppProvider {
 	wire.Build(
 
+		provideJwtSecret,
 		client.NewRedisClient,
 		config.ProvideOssConfig,
 		config.ProvideRocketMQConfig,

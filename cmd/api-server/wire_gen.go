@@ -312,10 +312,11 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		OssService:   iOssService,
 	}
 	adminDAO := dao.NewAdmin(db)
+	jwtSecret := []byte(cfg.Jwt.Secret)
 	adminService := &service.AdminService{
 		AdminDAO: adminDAO,
 		DB:       db,
-		Secret:   []byte(cfg.Jwt.Secret),
+		Secret:   jwtSecret,
 	}
 	admin := &handler.Admin{
 		Config:       cfg,
