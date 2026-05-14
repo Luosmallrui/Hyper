@@ -8,15 +8,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// BackgroundTasks 后台任务管理器，用于 Wire 依赖注入
-type BackgroundTasks struct{}
-
-// NewBackgroundTasks 创建并启动后台任务
-func NewBackgroundTasks(db *gorm.DB) *BackgroundTasks {
-	StartOrderCancelTask(db, 30) // 30分钟未支付自动取消
-	return &BackgroundTasks{}
-}
-
 // StartOrderCancelTask 启动定时取消超时未支付订单的后台任务
 // 每分钟检查一次，取消超过 expireMinutes 分钟未支付的订单并回滚库存
 func StartOrderCancelTask(db *gorm.DB, expireMinutes int) {
