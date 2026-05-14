@@ -151,8 +151,11 @@ func (f *OrderService) AddViewers(ctx context.Context, UserId int, req types.Cre
 		}
 
 		var existViewer models.Viewer
-		if err := tx.Where("id_card = ? AND user_id = ?", req.IDCard, UserId).First(&existViewer).Error; err == nil {
-			return errors.New(fmt.Sprintf("%d:该观影人已存在", http.StatusBadRequest))
+		if err := tx.Where("id_card = ?", req.IDCard).First(&existViewer).Error; err == nil {
+			if existViewer.UserID == UserId {
+				return errors.New(fmt.Sprintf("%d:该观影人已存在", http.StatusBadRequest))
+			}
+			return errors.New(fmt.Sprintf("%d:该身份证已被其他用户绑定", http.StatusBadRequest))
 		}
 
 		viewer := models.Viewer{

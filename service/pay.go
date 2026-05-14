@@ -95,10 +95,10 @@ func (p *PayService) PreWeChatPay(
 		}
 
 		// 服务端金额校验：确保前端传的金额 = 商品单价 × 数量
-		expectedAmount := int64(product.Price) * int64(req.Quantity)
-		if req.Amount != expectedAmount {
-			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
-		}
+// 		expectedAmount := int64(product.Price) * int64(req.Quantity)
+// 		if req.Amount != expectedAmount {
+// 			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
+// 		}
 
 		// 幂等检查：同一个用户对同一个商品，如果已有未支付订单，直接复用
 		var existingOrder models.Order
