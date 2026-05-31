@@ -542,6 +542,47 @@ POST /api/v1/order/create
 - 开启实名模式时，必须传 `buyer_name` 和 `buyer_id_card`
 - 开启未成年人校验时，18 岁以下不可购票
 
+### 发起微信支付
+
+票务订单创建成功后，直接使用现有支付接口：
+
+```http
+POST /api/v1/pay/prepay
+```
+
+请求：
+
+```json
+{
+  "order_no": "T2026053114300012ab34cd"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "prepay_id": "wx201410272009395522657a690389285100",
+    "appId": "wx8888888888888888",
+    "timeStamp": "1414561699",
+    "nonceStr": "5K8264ILTKCH16CQ2502SI8ZNMTM67VS",
+    "package": "prepay_id=wx201410272009395522657a690389285100",
+    "signType": "RSA",
+    "paySign": "xxx",
+    "out_trade_no": "T2026053114300012ab34cd"
+  }
+}
+```
+
+说明：
+
+- 票务支付只需要传 `order_no`
+- 后端会从 `ticket_orders` 读取金额，前端不需要传 `amount`
+- 微信支付成功回调后，后端会把 `ticket_orders.status` 从 `0` 更新为 `1`
+- `pay_method` 会写入微信回调里的交易类型，`pay_time` 写入回调处理时间
+
 ### 获取订单详情
 
 ```http
@@ -809,7 +850,7 @@ X-Verifier-Id: <verifier_id>
 
 1. `GET /api/v1/activity/:id`
 2. `POST /api/v1/order/create`
-3. 后续接支付接口后，用 `order_no` 发起微信支付
+3. `POST /api/v1/pay/prepay`，只传 `order_no` 发起微信支付
 4. `GET /api/v1/order/:order_no` 查询订单和二维码
 
 ### 核销
@@ -823,6 +864,7 @@ X-Verifier-Id: <verifier_id>
 
 ## 10. 当前实现边界
 
-- 新票务订单使用 `ticket_orders`，暂未和旧 `orders/products/pay` 商品支付链路混用。
-- 微信支付和微信退款的资金流需要下一步单独接 `ticket_orders`，建议新增 `/api/v1/pay/ticket-prepay`，不要复用旧的 `product_id` 商品下单接口。
+- 新票务订单使用 `ticket_orders`，旧商品订单仍使用 `orders/products/pay`。
+- 微信支付已支持通过 `/api/v1/pay/prepay` + `order_no` 支付 `ticket_orders`。
+- 微信退款资金流暂未接入微信退款 API，目前实现的是退款申请和状态流转。
 - 核销员当前临时使用 `X-Verifier-Id`，后续可升级为独立核销员 token。
