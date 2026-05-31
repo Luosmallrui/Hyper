@@ -260,6 +260,8 @@ CREATE TABLE IF NOT EXISTS `refunds`
     `deduct_amount`      bigint          NOT NULL DEFAULT 0 COMMENT '扣除金额(分)',
     `reason`             varchar(200)    NOT NULL DEFAULT '',
     `status`             tinyint         NOT NULL DEFAULT 0 COMMENT '0审核中 1退款中 2成功 3拒绝',
+    `wechat_refund_id`   varchar(64)     NOT NULL DEFAULT '' COMMENT '微信支付退款号',
+    `wechat_status`      varchar(32)     NOT NULL DEFAULT '' COMMENT '微信退款状态',
     `reject_reason`      varchar(500)    NOT NULL DEFAULT '',
     `expect_arrive_date` date            NULL,
     `created_at`         datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,

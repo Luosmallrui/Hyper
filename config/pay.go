@@ -9,6 +9,7 @@ type WechatPayConfig struct {
 	MchPrivateKeyPath          string `yaml:"mch_private_key_path"`          // 商户私钥文件路径
 	WechatPayPublicKeyPath     string `yaml:"wechat_pay_public_key_path"`    // 微信支付公钥文件路径
 	NotifyURL                  string `yaml:"notify_url"`                    // 支付回调URL
+	RefundNotifyURL            string `yaml:"refund_notify_url"`             // 退款回调URL
 }
 
 func ProvideWechatPayConfig(cfg *Config) *WechatPayConfig {
