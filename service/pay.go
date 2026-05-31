@@ -8,7 +8,9 @@ import (
 	"Hyper/types"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
@@ -77,11 +79,20 @@ func (p *PayService) PreWeChatPay(
 	var respData types.PrepayWithRequestPaymentResponse
 
 	// 0. 参数校验
-	if req.Amount <= 0 {
-		return respData, fmt.Errorf("invalid pay amount")
-	}
 	if req.Openid == "" {
 		return respData, fmt.Errorf("openid is required")
+	}
+	if req.OrderNo != "" {
+		return p.prepayTicketOrder(ctx, weChatClient, req)
+	}
+	if req.ProductId == 0 {
+		return respData, fmt.Errorf("product_id is required")
+	}
+	if req.Quantity == 0 {
+		return respData, fmt.Errorf("quantity is required")
+	}
+	if req.Amount <= 0 {
+		return respData, fmt.Errorf("invalid pay amount")
 	}
 
 	wechatCfg := p.Config.WechatPayConfig
@@ -95,10 +106,10 @@ func (p *PayService) PreWeChatPay(
 		}
 
 		// 服务端金额校验：确保前端传的金额 = 商品单价 × 数量
-// 		expectedAmount := int64(product.Price) * int64(req.Quantity)
-// 		if req.Amount != expectedAmount {
-// 			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
-// 		}
+		expectedAmount := int64(product.Price) * int64(req.Quantity)
+		if req.Amount != expectedAmount {
+			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
+		}
 
 		// 幂等检查：同一个用户对同一个商品，如果已有未支付订单，直接复用
 		var existingOrder models.Order
@@ -212,6 +223,102 @@ func (p *PayService) PreWeChatPay(
 	return respData, nil
 }
 
+func (p *PayService) prepayTicketOrder(
+	ctx context.Context,
+	weChatClient *core.Client,
+	req types.PrepayRequest,
+) (types.PrepayWithRequestPaymentResponse, error) {
+	var respData types.PrepayWithRequestPaymentResponse
+	var order models.TicketOrder
+	var activity models.Activity
+	var ticketSpec models.TicketSpec
+
+	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ? AND user_id = ?", req.OrderNo, req.UserId).
+			First(&order).Error; err != nil {
+			return fmt.Errorf("票务订单不存在: %w", err)
+		}
+		if order.Status != models.TicketOrderStatusPending {
+			return fmt.Errorf("当前订单状态不可支付")
+		}
+		if !order.ExpireTime.IsZero() && time.Now().After(order.ExpireTime) {
+			return fmt.Errorf("订单已过期")
+		}
+		if err := tx.First(&activity, order.ActivityID).Error; err != nil {
+			return fmt.Errorf("活动不存在: %w", err)
+		}
+		if err := tx.First(&ticketSpec, order.TicketSpecID).Error; err != nil {
+			return fmt.Errorf("票券不存在: %w", err)
+		}
+		req.Amount = order.ActualPrice
+		req.Description = activity.Name + " - " + ticketSpec.Name
+		var record models.PayRecord
+		err := tx.Where("order_sn = ?", order.OrderNo).First(&record).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tx.Create(&models.PayRecord{
+				OrderSn:     order.OrderNo,
+				PayPlatform: 1,
+				AmountTotal: uint64(order.ActualPrice),
+				PayStatus:   0,
+			}).Error
+		}
+		if err != nil {
+			return err
+		}
+		if record.PayStatus == 2 {
+			return fmt.Errorf("订单已支付")
+		}
+		if record.AmountTotal != uint64(order.ActualPrice) {
+			return tx.Model(&record).Updates(map[string]any{
+				"amount_total": order.ActualPrice,
+				"pay_status":   0,
+			}).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return respData, err
+	}
+
+	wechatCfg := p.Config.WechatPayConfig
+	svc := jsapi.JsapiApiService{Client: weChatClient}
+	wxResp, _, err := svc.PrepayWithRequestPayment(ctx, jsapi.PrepayRequest{
+		Appid:       core.String(wechatCfg.AppID),
+		Mchid:       core.String(wechatCfg.MchID),
+		Description: core.String(req.Description),
+		OutTradeNo:  core.String(order.OrderNo),
+		NotifyUrl:   core.String(wechatCfg.NotifyURL),
+		Amount: &jsapi.Amount{
+			Total: core.Int64(order.ActualPrice),
+		},
+		Payer: &jsapi.Payer{
+			Openid: core.String(req.Openid),
+		},
+	})
+	if err != nil {
+		return respData, fmt.Errorf("wechat prepay failed: %w", err)
+	}
+
+	if err := p.DB.WithContext(ctx).
+		Model(&models.PayRecord{}).
+		Where("order_sn = ?", order.OrderNo).
+		Update("out_request_no", *wxResp.PrepayId).Error; err != nil {
+		return respData, err
+	}
+
+	return types.PrepayWithRequestPaymentResponse{
+		Appid:      *wxResp.Appid,
+		TimeStamp:  *wxResp.TimeStamp,
+		NonceStr:   *wxResp.NonceStr,
+		Package:    *wxResp.Package,
+		SignType:   *wxResp.SignType,
+		PaySign:    *wxResp.PaySign,
+		PrepayId:   *wxResp.PrepayId,
+		OutTradeNo: order.OrderNo,
+	}, nil
+}
+
 func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error {
 	// 获取微信的订单号和支付状态
 	orderSn := *notify.OutTradeNo
@@ -258,6 +365,9 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		if err := tx.Model(&record).Updates(updateRecord).Error; err != nil {
 			return err
 		}
+		if strings.HasPrefix(orderSn, "T") {
+			return p.processTicketOrderPaySuccess(tx, orderSn, tradeType)
+		}
 		var order models.Order
 		if err := tx.Where("order_sn = ? AND status = ?", orderSn, 10).First(&order).Error; err != nil {
 			return fmt.Errorf("获取订单失败: %w", err)
@@ -301,6 +411,31 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 
 		return nil
 	})
+}
+
+func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, tradeType string) error {
+	now := time.Now()
+	result := tx.Model(&models.TicketOrder{}).
+		Where("order_no = ? AND status = ?", orderNo, models.TicketOrderStatusPending).
+		Updates(map[string]any{
+			"status":     models.TicketOrderStatusUsable,
+			"pay_method": tradeType,
+			"pay_time":   now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var order models.TicketOrder
+		if err := tx.Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			return fmt.Errorf("获取票务订单失败: %w", err)
+		}
+		if order.Status == models.TicketOrderStatusUsable || order.Status == models.TicketOrderStatusUsed {
+			return nil
+		}
+		return fmt.Errorf("票务订单状态不可支付: %d", order.Status)
+	}
+	return nil
 }
 
 func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error) {

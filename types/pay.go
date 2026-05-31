@@ -3,14 +3,15 @@ package types
 import "time"
 
 type PrepayRequest struct {
-	Description string `json:"description" binding:"required"`  // 商品描述
-	OutTradeNo  string `json:"out_trade_no" binding:"required"` // 商户订单号
-	Amount      int64  `json:"amount" binding:"required,min=1"` // 金额（分）
-	Openid      string `json:"openid" binding:"required"`       // 用户openid
+	Description string `json:"description"`  // 商品/票券描述
+	OutTradeNo  string `json:"out_trade_no"` // 商户订单号
+	OrderNo     string `json:"order_no"`     // 票务订单号，传这个时走 ticket_orders 支付
+	Amount      int64  `json:"amount"`       // 金额（分），商品支付必传；票务支付由后端读取订单金额
+	Openid      string `json:"openid"`       // 用户openid，由后端从 token 写入
 	UserId      int    `json:"user_id"`
-	Attach      string `json:"attach"`                               // 附加数据（可选）
-	ProductId   uint64 `json:"product_id,string" binding:"required"` // 购买的商品ID
-	Quantity    uint32 `json:"quantity" binding:"required,min=1"`    // 购买数量
+	Attach      string `json:"attach"`     // 附加数据（可选）
+	ProductId   uint64 `json:"product_id"` // 购买的商品ID，旧商品支付使用
+	Quantity    uint32 `json:"quantity"`   // 购买数量，旧商品支付使用
 }
 
 type PrepayWithRequestPaymentResponse struct {
