@@ -152,3 +152,186 @@ CREATE TABLE IF NOT EXISTS `admin`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='管理员表';
+
+CREATE TABLE IF NOT EXISTS `organizers`
+(
+    `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主办方ID',
+    `user_id`           bigint unsigned NOT NULL COMMENT '用户ID',
+    `name`              varchar(100)    NOT NULL COMMENT '主办方名称',
+    `logo`              varchar(255)    NOT NULL DEFAULT '' COMMENT 'Logo',
+    `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1审核中 2已认证 3未通过',
+    `reject_reason`     varchar(500)    NOT NULL DEFAULT '' COMMENT '拒绝原因',
+    `level`             varchar(10)     NOT NULL DEFAULT 'LV1' COMMENT '等级',
+    `service_fee_rate`  decimal(5,2)    NOT NULL DEFAULT 0.00 COMMENT '服务费比例',
+    `province`          varchar(50)     NOT NULL DEFAULT '',
+    `city`              varchar(50)     NOT NULL DEFAULT '',
+    `district`          varchar(50)     NOT NULL DEFAULT '',
+    `bank_account_name` varchar(50)     NOT NULL DEFAULT '' COMMENT '收款人',
+    `bank_account_no`   varchar(50)     NOT NULL DEFAULT '' COMMENT '收款账户',
+    `bank_name`         varchar(50)     NOT NULL DEFAULT '' COMMENT '银行名称',
+    `created_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_organizer_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方表';
+
+CREATE TABLE IF NOT EXISTS `activities`
+(
+    `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
+    `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
+    `name`              varchar(80)     NOT NULL COMMENT '活动名称',
+    `share_title`       varchar(20)     NOT NULL DEFAULT '' COMMENT '分享标题',
+    `start_time`        datetime        NULL COMMENT '开始时间',
+    `end_time`          datetime        NULL COMMENT '结束时间',
+    `real_name_mode`    tinyint         NOT NULL DEFAULT 0 COMMENT '实名模式',
+    `minor_check`       tinyint         NOT NULL DEFAULT 0 COMMENT '未成年人校验',
+    `description`       text            COMMENT '活动概要',
+    `province`          varchar(50)     NOT NULL DEFAULT '',
+    `city`              varchar(50)     NOT NULL DEFAULT '',
+    `district`          varchar(50)     NOT NULL DEFAULT '',
+    `address`           varchar(200)    NOT NULL DEFAULT '',
+    `latitude`          decimal(10,6)   NOT NULL DEFAULT 0,
+    `longitude`         decimal(10,6)   NOT NULL DEFAULT 0,
+    `poster_detail`     varchar(255)    NOT NULL DEFAULT '',
+    `poster_long`       varchar(255)    NOT NULL DEFAULT '',
+    `poster_list`       varchar(255)    NOT NULL DEFAULT '',
+    `poster_wechat`     varchar(255)    NOT NULL DEFAULT '',
+    `qualification_doc` varchar(255)    NOT NULL DEFAULT '',
+    `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0草稿 1待审核 2审核中 3已上架 4未通过',
+    `reject_reason`     varchar(500)    NOT NULL DEFAULT '',
+    `created_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_activity_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_activity_status` (`status`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动表v2';
+
+CREATE TABLE IF NOT EXISTS `ticket_specs`
+(
+    `id`             bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '票券规格ID',
+    `activity_id`    bigint unsigned NOT NULL COMMENT '活动ID',
+    `name`           varchar(30)     NOT NULL COMMENT '规格名称',
+    `is_enabled`     tinyint         NOT NULL DEFAULT 1 COMMENT '启用状态',
+    `sale_start`     datetime        NULL COMMENT '开售时间',
+    `sale_end`       datetime        NULL COMMENT '停售时间',
+    `price`          bigint          NOT NULL COMMENT '价格(分)',
+    `stock`          int             NOT NULL DEFAULT 0 COMMENT '库存',
+    `sold_count`     int             NOT NULL DEFAULT 0 COMMENT '已售数量',
+    `purchase_limit` int             NOT NULL DEFAULT 1 COMMENT '限购数量',
+    `max_attendees`  int             NOT NULL DEFAULT 1 COMMENT '观演人数',
+    `created_at`     datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`     datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_ticket_spec_activity` (`activity_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票券规格表';
+
+CREATE TABLE IF NOT EXISTS `ticket_orders`
+(
+    `id`              bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单ID',
+    `order_no`        varchar(30)     NOT NULL COMMENT '订单号',
+    `user_id`         bigint unsigned NOT NULL COMMENT '用户ID',
+    `activity_id`     bigint unsigned NOT NULL COMMENT '活动ID',
+    `ticket_spec_id`  bigint unsigned NOT NULL COMMENT '票券规格ID',
+    `quantity`        int             NOT NULL COMMENT '数量',
+    `total_price`     bigint          NOT NULL COMMENT '总价(分)',
+    `actual_price`    bigint          NOT NULL COMMENT '实付(分)',
+    `pay_method`      varchar(20)     NOT NULL DEFAULT '',
+    `pay_time`        datetime        NULL,
+    `buyer_name`      varchar(50)     NOT NULL DEFAULT '',
+    `buyer_id_card`   varchar(20)     NOT NULL DEFAULT '',
+    `status`          tinyint         NOT NULL DEFAULT 0 COMMENT '0待支付 1待使用 2已使用 3取消 4退款中 5退款成功 6退款拒绝',
+    `expire_time`     datetime        NULL,
+    `qr_code`         varchar(255)    NOT NULL DEFAULT '',
+    `cancel_reason`   varchar(100)    NOT NULL DEFAULT '',
+    `created_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_ticket_order_no` (`order_no`) USING BTREE,
+    KEY `idx_ticket_order_user` (`user_id`) USING BTREE,
+    KEY `idx_ticket_order_activity` (`activity_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票务订单表';
+
+CREATE TABLE IF NOT EXISTS `refunds`
+(
+    `id`                 bigint unsigned NOT NULL AUTO_INCREMENT,
+    `order_id`           bigint unsigned NOT NULL,
+    `refund_no`          varchar(30)     NOT NULL,
+    `refund_amount`      bigint          NOT NULL COMMENT '退款金额(分)',
+    `deduct_amount`      bigint          NOT NULL DEFAULT 0 COMMENT '扣除金额(分)',
+    `reason`             varchar(200)    NOT NULL DEFAULT '',
+    `status`             tinyint         NOT NULL DEFAULT 0 COMMENT '0审核中 1退款中 2成功 3拒绝',
+    `reject_reason`      varchar(500)    NOT NULL DEFAULT '',
+    `expect_arrive_date` date            NULL,
+    `created_at`         datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`         datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_refund_no` (`refund_no`) USING BTREE,
+    KEY `idx_refund_order` (`order_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='退款表';
+
+CREATE TABLE IF NOT EXISTS `refund_logs`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT,
+    `refund_id`   bigint unsigned NOT NULL,
+    `status`      varchar(50)     NOT NULL,
+    `description` varchar(200)    NOT NULL,
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_refund_log_refund` (`refund_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='退款进度表';
+
+CREATE TABLE IF NOT EXISTS `verifiers`
+(
+    `id`               bigint unsigned NOT NULL AUTO_INCREMENT,
+    `organizer_id`     bigint unsigned NOT NULL,
+    `name`             varchar(50)     NOT NULL,
+    `phone`            varchar(20)     NOT NULL,
+    `status`           tinyint         NOT NULL DEFAULT 0 COMMENT '0未激活 1已激活',
+    `permission_scope` varchar(20)     NOT NULL DEFAULT '活动',
+    `channel`          varchar(20)     NOT NULL DEFAULT '',
+    `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_verifier_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_verifier_phone` (`phone`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='核销员表';
+
+CREATE TABLE IF NOT EXISTS `verification_records`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT,
+    `order_id`    bigint unsigned NOT NULL,
+    `verifier_id` bigint unsigned NOT NULL,
+    `activity_id` bigint unsigned NOT NULL,
+    `verified_at` datetime        NOT NULL,
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_verify_order` (`order_id`) USING BTREE,
+    KEY `idx_verify_verifier` (`verifier_id`) USING BTREE,
+    KEY `idx_verify_activity` (`activity_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='核销记录表';
+
+CREATE TABLE IF NOT EXISTS `cancel_reasons`
+(
+    `id`     bigint unsigned NOT NULL AUTO_INCREMENT,
+    `reason` varchar(100)    NOT NULL,
+    `sort`   int             NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='取消原因表';
+
+CREATE TABLE IF NOT EXISTS `refund_reasons`
+(
+    `id`     bigint unsigned NOT NULL AUTO_INCREMENT,
+    `reason` varchar(100)    NOT NULL,
+    `sort`   int             NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='退款原因表';
+
+INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
+    (1, '计划有变', 1),
+    (2, '买错票券', 2),
+    (3, '其他原因', 99);
+
+INSERT IGNORE INTO `refund_reasons` (`id`, `reason`, `sort`) VALUES
+    (1, '行程冲突', 1),
+    (2, '重复购买', 2),
+    (3, '其他原因', 99);

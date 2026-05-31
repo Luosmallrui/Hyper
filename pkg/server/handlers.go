@@ -25,4 +25,5 @@ type Handlers struct {
 	Serch           *handler.SearchHandler
 	Event           *handler.Event
 	Admin           *handler.Admin
+	Ticketing       *handler.Ticketing
 }

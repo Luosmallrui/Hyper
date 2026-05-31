@@ -1,0 +1,211 @@
+package models
+
+import "time"
+
+const (
+	OrganizerStatusPending  int8 = 0
+	OrganizerStatusAuditing int8 = 1
+	OrganizerStatusApproved int8 = 2
+	OrganizerStatusRejected int8 = 3
+
+	ActivityStatusDraft    int8 = 0
+	ActivityStatusPending  int8 = 1
+	ActivityStatusAuditing int8 = 2
+	ActivityStatusOnline   int8 = 3
+	ActivityStatusRejected int8 = 4
+
+	TicketOrderStatusPending       int8 = 0
+	TicketOrderStatusUsable        int8 = 1
+	TicketOrderStatusUsed          int8 = 2
+	TicketOrderStatusCancelled     int8 = 3
+	TicketOrderStatusRefunding     int8 = 4
+	TicketOrderStatusRefundSuccess int8 = 5
+	TicketOrderStatusRefundReject  int8 = 6
+
+	RefundStatusAuditing int8 = 0
+	RefundStatusRunning  int8 = 1
+	RefundStatusSuccess  int8 = 2
+	RefundStatusRejected int8 = 3
+
+	VerifierStatusInactive int8 = 0
+	VerifierStatusActive   int8 = 1
+)
+
+type Organizer struct {
+	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID          int64     `gorm:"column:user_id;not null;uniqueIndex:uk_organizer_user" json:"user_id"`
+	Name            string    `gorm:"column:name;size:100;not null" json:"name"`
+	Logo            string    `gorm:"column:logo;size:255" json:"logo"`
+	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
+	RejectReason    string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
+	Level           string    `gorm:"column:level;size:10;default:LV1" json:"level"`
+	ServiceFeeRate  float64   `gorm:"column:service_fee_rate;type:decimal(5,2);default:0" json:"service_fee_rate"`
+	JoinDays        int       `gorm:"-" json:"join_days"`
+	Province        string    `gorm:"column:province;size:50" json:"province"`
+	City            string    `gorm:"column:city;size:50" json:"city"`
+	District        string    `gorm:"column:district;size:50" json:"district"`
+	BankAccountName string    `gorm:"column:bank_account_name;size:50" json:"bank_account_name"`
+	BankAccountNo   string    `gorm:"column:bank_account_no;size:50" json:"bank_account_no"`
+	BankName        string    `gorm:"column:bank_name;size:50" json:"bank_name"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (Organizer) TableName() string {
+	return "organizers"
+}
+
+type Activity struct {
+	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID      int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Name             string    `gorm:"column:name;size:80;not null" json:"name"`
+	ShareTitle       string    `gorm:"column:share_title;size:20" json:"share_title"`
+	StartTime        time.Time `gorm:"column:start_time" json:"start_time"`
+	EndTime          time.Time `gorm:"column:end_time" json:"end_time"`
+	RealNameMode     int8      `gorm:"column:real_name_mode;default:0" json:"real_name_mode"`
+	MinorCheck       int8      `gorm:"column:minor_check;default:0" json:"minor_check"`
+	Description      string    `gorm:"column:description;type:text" json:"description"`
+	Province         string    `gorm:"column:province;size:50" json:"province"`
+	City             string    `gorm:"column:city;size:50" json:"city"`
+	District         string    `gorm:"column:district;size:50" json:"district"`
+	Address          string    `gorm:"column:address;size:200" json:"address"`
+	Latitude         float64   `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
+	Longitude        float64   `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
+	PosterDetail     string    `gorm:"column:poster_detail;size:255" json:"poster_detail"`
+	PosterLong       string    `gorm:"column:poster_long;size:255" json:"poster_long"`
+	PosterList       string    `gorm:"column:poster_list;size:255" json:"poster_list"`
+	PosterWechat     string    `gorm:"column:poster_wechat;size:255" json:"poster_wechat"`
+	QualificationDoc string    `gorm:"column:qualification_doc;size:255" json:"qualification_doc"`
+	Status           int8      `gorm:"column:status;not null;default:0;index" json:"status"`
+	RejectReason     string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (Activity) TableName() string {
+	return "activities"
+}
+
+type TicketSpec struct {
+	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ActivityID    int64     `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	Name          string    `gorm:"column:name;size:30;not null" json:"name"`
+	IsEnabled     int8      `gorm:"column:is_enabled;not null;default:1" json:"is_enabled"`
+	SaleStart     time.Time `gorm:"column:sale_start" json:"sale_start"`
+	SaleEnd       time.Time `gorm:"column:sale_end" json:"sale_end"`
+	Price         int64     `gorm:"column:price;not null" json:"price"` // 分
+	Stock         int       `gorm:"column:stock;not null;default:0" json:"stock"`
+	SoldCount     int       `gorm:"column:sold_count;not null;default:0" json:"sold_count"`
+	PurchaseLimit int       `gorm:"column:purchase_limit;not null;default:1" json:"purchase_limit"`
+	MaxAttendees  int       `gorm:"column:max_attendees;not null;default:1" json:"max_attendees"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (TicketSpec) TableName() string {
+	return "ticket_specs"
+}
+
+type TicketOrder struct {
+	ID            int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderNo       string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
+	UserID        int64      `gorm:"column:user_id;not null;index" json:"user_id"`
+	ActivityID    int64      `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	TicketSpecID  int64      `gorm:"column:ticket_spec_id;not null;index" json:"ticket_spec_id"`
+	Quantity      int        `gorm:"column:quantity;not null" json:"quantity"`
+	TotalPrice    int64      `gorm:"column:total_price;not null" json:"total_price"`   // 分
+	ActualPrice   int64      `gorm:"column:actual_price;not null" json:"actual_price"` // 分
+	PayMethod     string     `gorm:"column:pay_method;size:20" json:"pay_method"`
+	PayTime       *time.Time `gorm:"column:pay_time" json:"pay_time"`
+	BuyerName     string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
+	BuyerIDCard   string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
+	Status        int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	ExpireTime    time.Time  `gorm:"column:expire_time" json:"expire_time"`
+	QRCode        string     `gorm:"column:qr_code;size:255" json:"qr_code"`
+	CancelReason  string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
+	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (TicketOrder) TableName() string {
+	return "ticket_orders"
+}
+
+type Refund struct {
+	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID          int64     `gorm:"column:order_id;not null;index" json:"order_id"`
+	RefundNo         string    `gorm:"column:refund_no;size:30;not null;uniqueIndex" json:"refund_no"`
+	RefundAmount     int64     `gorm:"column:refund_amount;not null" json:"refund_amount"`
+	DeductAmount     int64     `gorm:"column:deduct_amount;not null;default:0" json:"deduct_amount"`
+	Reason           string    `gorm:"column:reason;size:200" json:"reason"`
+	Status           int8      `gorm:"column:status;not null;default:0;index" json:"status"`
+	RejectReason     string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
+	ExpectArriveDate string    `gorm:"column:expect_arrive_date;type:date" json:"expect_arrive_date"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (Refund) TableName() string {
+	return "refunds"
+}
+
+type RefundLog struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	RefundID    int64     `gorm:"column:refund_id;not null;index" json:"refund_id"`
+	Status      string    `gorm:"column:status;size:50;not null" json:"status"`
+	Description string    `gorm:"column:description;size:200;not null" json:"description"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (RefundLog) TableName() string {
+	return "refund_logs"
+}
+
+type Verifier struct {
+	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID     int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Name            string    `gorm:"column:name;size:50;not null" json:"name"`
+	Phone           string    `gorm:"column:phone;size:20;not null;index" json:"phone"`
+	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
+	PermissionScope string    `gorm:"column:permission_scope;size:20;default:活动" json:"permission_scope"`
+	Channel         string    `gorm:"column:channel;size:20" json:"channel"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (Verifier) TableName() string {
+	return "verifiers"
+}
+
+type VerificationRecord struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID    int64     `gorm:"column:order_id;not null;index" json:"order_id"`
+	VerifierID int64     `gorm:"column:verifier_id;not null;index" json:"verifier_id"`
+	ActivityID int64     `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	VerifiedAt time.Time `gorm:"column:verified_at;not null" json:"verified_at"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (VerificationRecord) TableName() string {
+	return "verification_records"
+}
+
+type CancelReason struct {
+	ID     int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	Reason string `gorm:"column:reason;size:100;not null" json:"reason"`
+	Sort   int    `gorm:"column:sort;not null;default:0" json:"sort"`
+}
+
+func (CancelReason) TableName() string {
+	return "cancel_reasons"
+}
+
+type RefundReason struct {
+	ID     int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	Reason string `gorm:"column:reason;size:100;not null" json:"reason"`
+	Sort   int    `gorm:"column:sort;not null;default:0" json:"sort"`
+}
+
+func (RefundReason) TableName() string {
+	return "refund_reasons"
+}
