@@ -678,6 +678,45 @@ POST /api/v1/refund/apply
 }
 ```
 
+### 审核通过并发起微信退款
+
+后台审核退款通过后调用：
+
+```http
+POST /api/v1/pay/refund/:refund_no/approve
+Authorization: Bearer <access_token>
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true
+  }
+}
+```
+
+后端处理逻辑：
+
+- 校验退款单必须是 `status=0` 审核中
+- 校验对应票务订单必须是 `status=4` 退款中
+- 校验支付流水 `pay_records.pay_status=2`
+- 调用微信支付退款 API：`/v3/refund/domestic/refunds`
+- 微信受理后把 `refunds.status` 更新为 `1` 退款中
+- 微信退款成功回调后把 `refunds.status` 更新为 `2`，订单状态更新为 `5`
+
+### 微信退款回调
+
+微信商户平台退款通知地址配置为：
+
+```http
+POST /api/v1/pay/refund-notify
+```
+
+服务端会验签、解密并处理退款结果。前端不需要调用。
+
 ### 获取退款详情
 
 ```http
@@ -866,5 +905,5 @@ X-Verifier-Id: <verifier_id>
 
 - 新票务订单使用 `ticket_orders`，旧商品订单仍使用 `orders/products/pay`。
 - 微信支付已支持通过 `/api/v1/pay/prepay` + `order_no` 支付 `ticket_orders`。
-- 微信退款资金流暂未接入微信退款 API，目前实现的是退款申请和状态流转。
+- 微信退款已支持通过 `/api/v1/pay/refund/:refund_no/approve` 发起，回调地址为 `/api/v1/pay/refund-notify`。
 - 核销员当前临时使用 `X-Verifier-Id`，后续可升级为独立核销员 token。

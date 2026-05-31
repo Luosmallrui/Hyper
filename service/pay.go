@@ -16,6 +16,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -65,6 +66,8 @@ func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.Or
 
 type IPayService interface {
 	ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error
+	ApplyWechatRefund(ctx context.Context, weChatClient *core.Client, refundNo string) error
+	ProcessRefundNotify(ctx context.Context, refund *refunddomestic.Refund) error
 	PreWeChatPay(ctx context.Context, weChatClient *core.Client, req types.PrepayRequest) (types.PrepayWithRequestPaymentResponse, error)
 	GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error)
 	OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error)
@@ -436,6 +439,169 @@ func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, t
 		return fmt.Errorf("票务订单状态不可支付: %d", order.Status)
 	}
 	return nil
+}
+
+func (p *PayService) ApplyWechatRefund(ctx context.Context, weChatClient *core.Client, refundNo string) error {
+	var refund models.Refund
+	var order models.TicketOrder
+	var payRecord models.PayRecord
+
+	if err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
+			return fmt.Errorf("退款单不存在: %w", err)
+		}
+		if refund.Status != models.RefundStatusAuditing {
+			if refund.Status == models.RefundStatusRunning {
+				return nil
+			}
+			return fmt.Errorf("当前退款状态不可发起微信退款")
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", refund.OrderID).First(&order).Error; err != nil {
+			return fmt.Errorf("订单不存在: %w", err)
+		}
+		if order.Status != models.TicketOrderStatusRefunding {
+			return fmt.Errorf("订单状态不可退款")
+		}
+		if err := tx.Where("order_sn = ? AND pay_status = 2", order.OrderNo).First(&payRecord).Error; err != nil {
+			return fmt.Errorf("支付流水不存在或未支付: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	notifyURL := p.Config.WechatPayConfig.RefundNotifyURL
+	if notifyURL == "" {
+		notifyURL = strings.Replace(p.Config.WechatPayConfig.NotifyURL, "/notify", "/refund-notify", 1)
+	}
+	currency := "CNY"
+	svc := refunddomestic.RefundsApiService{Client: weChatClient}
+	wxRefund, _, err := svc.Create(ctx, refunddomestic.CreateRequest{
+		OutTradeNo:  core.String(order.OrderNo),
+		OutRefundNo: core.String(refund.RefundNo),
+		Reason:      core.String(refund.Reason),
+		NotifyUrl:   core.String(notifyURL),
+		Amount: &refunddomestic.AmountReq{
+			Refund:   core.Int64(refund.RefundAmount),
+			Total:    core.Int64(order.ActualPrice),
+			Currency: core.String(currency),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("微信退款申请失败: %w", err)
+	}
+
+	updates := map[string]any{
+		"status":        models.RefundStatusRunning,
+		"wechat_status": "PROCESSING",
+	}
+	if wxRefund != nil {
+		if wxRefund.RefundId != nil {
+			updates["wechat_refund_id"] = *wxRefund.RefundId
+		}
+		if wxRefund.Status != nil {
+			updates["wechat_status"] = string(*wxRefund.Status)
+			updates["status"] = refundStatusFromWechat(*wxRefund.Status)
+		}
+	}
+
+	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Refund{}).Where("refund_no = ?", refund.RefundNo).Updates(updates).Error; err != nil {
+			return err
+		}
+		status := updates["status"].(int8)
+		if err := tx.Model(&models.TicketOrder{}).Where("id = ?", refund.OrderID).Update("status", orderStatusFromRefund(status)).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.RefundLog{
+			RefundID:    refund.ID,
+			Status:      "退款中",
+			Description: "微信退款已受理",
+		}).Error
+	})
+}
+
+func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddomestic.Refund) error {
+	if wxRefund == nil || wxRefund.OutRefundNo == nil || wxRefund.Status == nil {
+		return fmt.Errorf("退款回调参数不完整")
+	}
+	refundNo := *wxRefund.OutRefundNo
+	status := refundStatusFromWechat(*wxRefund.Status)
+	wechatStatus := string(*wxRefund.Status)
+
+	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var refund models.Refund
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
+			return err
+		}
+		if refund.Status == models.RefundStatusSuccess {
+			return nil
+		}
+		updates := map[string]any{
+			"status":        status,
+			"wechat_status": wechatStatus,
+		}
+		if wxRefund.RefundId != nil {
+			updates["wechat_refund_id"] = *wxRefund.RefundId
+		}
+		if err := tx.Model(&refund).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.TicketOrder{}).
+			Where("id = ?", refund.OrderID).
+			Update("status", orderStatusFromRefund(status)).Error; err != nil {
+			return err
+		}
+		if status == models.RefundStatusSuccess {
+			var order models.TicketOrder
+			if err := tx.First(&order, refund.OrderID).Error; err == nil {
+				_ = tx.Model(&models.TicketSpec{}).
+					Where("id = ?", order.TicketSpecID).
+					UpdateColumn("sold_count", gorm.Expr("GREATEST(sold_count - ?, 0)", order.Quantity)).Error
+			}
+		}
+		return tx.Create(&models.RefundLog{
+			RefundID:    refund.ID,
+			Status:      refundLogStatus(status),
+			Description: "微信退款回调：" + wechatStatus,
+		}).Error
+	})
+}
+
+func refundStatusFromWechat(status refunddomestic.Status) int8 {
+	switch status {
+	case refunddomestic.STATUS_SUCCESS:
+		return models.RefundStatusSuccess
+	case refunddomestic.STATUS_CLOSED, refunddomestic.STATUS_ABNORMAL:
+		return models.RefundStatusRejected
+	default:
+		return models.RefundStatusRunning
+	}
+}
+
+func orderStatusFromRefund(status int8) int8 {
+	switch status {
+	case models.RefundStatusSuccess:
+		return models.TicketOrderStatusRefundSuccess
+	case models.RefundStatusRejected:
+		return models.TicketOrderStatusRefundReject
+	default:
+		return models.TicketOrderStatusRefunding
+	}
+}
+
+func refundLogStatus(status int8) string {
+	switch status {
+	case models.RefundStatusSuccess:
+		return "退款成功"
+	case models.RefundStatusRejected:
+		return "退款拒绝"
+	default:
+		return "退款中"
+	}
 }
 
 func (p *PayService) GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error) {

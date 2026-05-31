@@ -107,24 +107,24 @@ func (TicketSpec) TableName() string {
 }
 
 type TicketOrder struct {
-	ID            int64      `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrderNo       string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
-	UserID        int64      `gorm:"column:user_id;not null;index" json:"user_id"`
-	ActivityID    int64      `gorm:"column:activity_id;not null;index" json:"activity_id"`
-	TicketSpecID  int64      `gorm:"column:ticket_spec_id;not null;index" json:"ticket_spec_id"`
-	Quantity      int        `gorm:"column:quantity;not null" json:"quantity"`
-	TotalPrice    int64      `gorm:"column:total_price;not null" json:"total_price"`   // 分
-	ActualPrice   int64      `gorm:"column:actual_price;not null" json:"actual_price"` // 分
-	PayMethod     string     `gorm:"column:pay_method;size:20" json:"pay_method"`
-	PayTime       *time.Time `gorm:"column:pay_time" json:"pay_time"`
-	BuyerName     string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
-	BuyerIDCard   string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
-	Status        int8       `gorm:"column:status;not null;default:0;index" json:"status"`
-	ExpireTime    time.Time  `gorm:"column:expire_time" json:"expire_time"`
-	QRCode        string     `gorm:"column:qr_code;size:255" json:"qr_code"`
-	CancelReason  string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
-	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID           int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderNo      string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
+	UserID       int64      `gorm:"column:user_id;not null;index" json:"user_id"`
+	ActivityID   int64      `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	TicketSpecID int64      `gorm:"column:ticket_spec_id;not null;index" json:"ticket_spec_id"`
+	Quantity     int        `gorm:"column:quantity;not null" json:"quantity"`
+	TotalPrice   int64      `gorm:"column:total_price;not null" json:"total_price"`   // 分
+	ActualPrice  int64      `gorm:"column:actual_price;not null" json:"actual_price"` // 分
+	PayMethod    string     `gorm:"column:pay_method;size:20" json:"pay_method"`
+	PayTime      *time.Time `gorm:"column:pay_time" json:"pay_time"`
+	BuyerName    string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
+	BuyerIDCard  string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
+	Status       int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	ExpireTime   time.Time  `gorm:"column:expire_time" json:"expire_time"`
+	QRCode       string     `gorm:"column:qr_code;size:255" json:"qr_code"`
+	CancelReason string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (TicketOrder) TableName() string {
@@ -139,6 +139,8 @@ type Refund struct {
 	DeductAmount     int64     `gorm:"column:deduct_amount;not null;default:0" json:"deduct_amount"`
 	Reason           string    `gorm:"column:reason;size:200" json:"reason"`
 	Status           int8      `gorm:"column:status;not null;default:0;index" json:"status"`
+	WechatRefundID   string    `gorm:"column:wechat_refund_id;size:64" json:"wechat_refund_id"`
+	WechatStatus     string    `gorm:"column:wechat_status;size:32" json:"wechat_status"`
 	RejectReason     string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
 	ExpectArriveDate string    `gorm:"column:expect_arrive_date;type:date" json:"expect_arrive_date"`
 	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`

@@ -22,6 +22,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -42,11 +43,25 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 	{
 		pay.POST("/prepay", authorize, context.Wrap(p.Prepay))
 		pay.POST("/notify", context.Wrap(p.PayNotify))
+		pay.POST("/refund/:refund_no/approve", authorize, context.Wrap(p.ApproveRefund))
+		pay.POST("/refund-notify", context.Wrap(p.RefundNotify))
 
 		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))
 		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt))
 		pay.GET("/detail", authorize, context.Wrap(p.Detail))
 	}
+}
+
+func (p *Pay) ApproveRefund(c *gin.Context) error {
+	refundNo := c.Param("refund_no")
+	if refundNo == "" {
+		return response.NewError(http.StatusBadRequest, "退款单号不能为空")
+	}
+	if err := p.PayService.ApplyWechatRefund(c.Request.Context(), p.wechatClient, refundNo); err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
 }
 
 // Detail 根据订单编号查询订单详情
@@ -174,6 +189,35 @@ func (p *Pay) PayNotify(c *gin.Context) error {
 	}
 
 	// 微信要求回调返回 HTTP 200 + {"code":"SUCCESS","message":"成功"}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    "SUCCESS",
+		"message": "成功",
+	})
+	return nil
+}
+
+func (p *Pay) RefundNotify(c *gin.Context) error {
+	ctx := c.Request.Context()
+	certificateVisitor := downloader.MgrInstance().GetCertificateVisitor(p.WechatPayConfig.MchID)
+	handler, err := notify.NewRSANotifyHandler(p.WechatPayConfig.MchAPIv3Key, verifiers.NewSHA256WithRSAVerifier(certificateVisitor))
+	if err != nil {
+		log.L.Error("创建微信退款回调处理器失败", zap.Error(err))
+		return response.NewError(500, err.Error())
+	}
+
+	refund := new(refunddomestic.Refund)
+	_, err = handler.ParseNotifyRequest(ctx, c.Request, refund)
+	if err != nil {
+		log.L.Error("微信退款回调验签或解密失败", zap.Error(err))
+		return response.NewError(500, err.Error())
+	}
+	log.L.Info("refund notify", zap.Any("refund", refund))
+
+	if err := p.PayService.ProcessRefundNotify(ctx, refund); err != nil {
+		log.L.Error("处理退款回调业务失败", zap.Error(err))
+		return response.NewError(500, "process failed")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    "SUCCESS",
 		"message": "成功",
