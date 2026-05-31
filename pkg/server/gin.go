@@ -95,6 +95,7 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Channel.RegisterRouter(api)
 	h.Event.RegisterRouter(api)
 	h.Admin.RegisterRouter(api)
+	h.Ticketing.RegisterRouter(api)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	return r
 }

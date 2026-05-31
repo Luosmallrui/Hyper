@@ -322,6 +322,14 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:       cfg,
 		AdminService: adminService,
 	}
+	ticketingService := &service.TicketingService{
+		DB: db,
+	}
+	ticketing := &handler.Ticketing{
+		Config:           cfg,
+		TicketingService: ticketingService,
+		OssService:       iOssService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -343,6 +351,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Serch:           searchHandler,
 		Event:           event,
 		Admin:           handlerAdmin,
+		Ticketing:       ticketing,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

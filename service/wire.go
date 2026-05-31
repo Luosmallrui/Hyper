@@ -75,5 +75,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(AdminService), "*"),
 	wire.Bind(new(IAdminService), new(*AdminService)),
 
+	wire.Struct(new(TicketingService), "*"),
+	wire.Bind(new(ITicketingService), new(*TicketingService)),
+
 	NewOssService,
 )

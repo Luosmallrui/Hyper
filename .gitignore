@@ -23,3 +23,4 @@ instgo
 
 arms_cache/
 .otel-build/
+.gocache/
