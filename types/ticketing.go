@@ -54,27 +54,27 @@ type OrganizerInfoResponse struct {
 }
 
 type ActivityCreateRequest struct {
-	ActivityID       int64                  `json:"activity_id"`
-	Step             int                    `json:"step" binding:"required,min=1,max=5"`
-	Name             *string                `json:"name"`
-	ShareTitle       *string                `json:"share_title"`
-	StartTime        *string                `json:"start_time"`
-	EndTime          *string                `json:"end_time"`
-	RealNameMode     *int8                  `json:"real_name_mode"`
-	MinorCheck       *int8                  `json:"minor_check"`
-	Description      *string                `json:"description"`
-	Province         *string                `json:"province"`
-	City             *string                `json:"city"`
-	District         *string                `json:"district"`
-	Address          *string                `json:"address"`
-	Latitude         *float64               `json:"latitude"`
-	Longitude        *float64               `json:"longitude"`
-	PosterDetail     *string                `json:"poster_detail"`
-	PosterLong       *string                `json:"poster_long"`
-	PosterList       *string                `json:"poster_list"`
-	PosterWechat     *string                `json:"poster_wechat"`
-	TicketSpecs      []TicketSpecSaveItem   `json:"ticket_specs"`
-	QualificationDoc *string                `json:"qualification_doc"`
+	ActivityID       int64                `json:"activity_id"`
+	Step             int                  `json:"step" binding:"required,min=1,max=5"`
+	Name             *string              `json:"name"`
+	ShareTitle       *string              `json:"share_title"`
+	StartTime        *string              `json:"start_time"`
+	EndTime          *string              `json:"end_time"`
+	RealNameMode     *int8                `json:"real_name_mode"`
+	MinorCheck       *int8                `json:"minor_check"`
+	Description      *string              `json:"description"`
+	Province         *string              `json:"province"`
+	City             *string              `json:"city"`
+	District         *string              `json:"district"`
+	Address          *string              `json:"address"`
+	Latitude         *float64             `json:"latitude"`
+	Longitude        *float64             `json:"longitude"`
+	PosterDetail     *string              `json:"poster_detail"`
+	PosterLong       *string              `json:"poster_long"`
+	PosterList       *string              `json:"poster_list"`
+	PosterWechat     *string              `json:"poster_wechat"`
+	TicketSpecs      []TicketSpecSaveItem `json:"ticket_specs"`
+	QualificationDoc *string              `json:"qualification_doc"`
 }
 
 type ActivityDetailResponse struct {
@@ -117,11 +117,11 @@ type CreateTicketOrderRequest struct {
 }
 
 type TicketOrderDetailResponse struct {
-	OrderNo     string     `json:"order_no"`
-	Status      int8       `json:"status"`
-	TotalPrice  int64      `json:"total_price"`
-	ActualPrice int64      `json:"actual_price"`
-	Quantity    int        `json:"quantity"`
+	OrderNo     string `json:"order_no"`
+	Status      int8   `json:"status"`
+	TotalPrice  int64  `json:"total_price"`
+	ActualPrice int64  `json:"actual_price"`
+	Quantity    int    `json:"quantity"`
 	Activity    struct {
 		ID         int64     `json:"id"`
 		Name       string    `json:"name"`
@@ -132,14 +132,14 @@ type TicketOrderDetailResponse struct {
 	TicketSpec struct {
 		Name string `json:"name"`
 	} `json:"ticket_spec"`
-	BuyerName    string     `json:"buyer_name"`
-	BuyerIDCard  string     `json:"buyer_id_card"`
-	PayMethod    string     `json:"pay_method"`
-	PayTime      *time.Time `json:"pay_time"`
-	CreatedAt    time.Time  `json:"created_at"`
-	QRCode       string     `json:"qr_code"`
-	ExpireTime   time.Time  `json:"expire_time"`
-	RefundInfo   *struct {
+	BuyerName   string     `json:"buyer_name"`
+	BuyerIDCard string     `json:"buyer_id_card"`
+	PayMethod   string     `json:"pay_method"`
+	PayTime     *time.Time `json:"pay_time"`
+	CreatedAt   time.Time  `json:"created_at"`
+	QRCode      string     `json:"qr_code"`
+	ExpireTime  time.Time  `json:"expire_time"`
+	RefundInfo  *struct {
 		RefundAmount     int64  `json:"refund_amount"`
 		Status           int8   `json:"status"`
 		ExpectArriveDate string `json:"expect_arrive_date"`
@@ -153,6 +153,32 @@ type CancelOrderRequest struct {
 type ApplyRefundRequest struct {
 	OrderNo  string `json:"order_no" binding:"required"`
 	ReasonID int64  `json:"reason_id" binding:"required"`
+}
+
+type RejectRefundRequest struct {
+	RejectReason string `json:"reject_reason" binding:"required"`
+}
+
+type OrganizerRefundListItem struct {
+	RefundNo         string    `json:"refund_no"`
+	Status           int8      `json:"status"`
+	RefundAmount     int64     `json:"refund_amount"`
+	DeductAmount     int64     `json:"deduct_amount"`
+	Reason           string    `json:"reason"`
+	RejectReason     string    `json:"reject_reason"`
+	ExpectArriveDate string    `json:"expect_arrive_date"`
+	WechatRefundID   string    `json:"wechat_refund_id"`
+	WechatStatus     string    `json:"wechat_status"`
+	OrderNo          string    `json:"order_no"`
+	UserID           int64     `json:"user_id"`
+	BuyerName        string    `json:"buyer_name"`
+	BuyerIDCard      string    `json:"buyer_id_card"`
+	ActivityID       int64     `json:"activity_id"`
+	ActivityName     string    `json:"activity_name"`
+	TicketSpecID     int64     `json:"ticket_spec_id"`
+	TicketSpecName   string    `json:"ticket_spec_name"`
+	Quantity         int       `json:"quantity"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type RefundDetailResponse struct {
@@ -191,8 +217,8 @@ type ScanOrderRequest struct {
 }
 
 type ScanOrderResponse struct {
-	Success   bool    `json:"success"`
-	Order     *struct {
+	Success bool `json:"success"`
+	Order   *struct {
 		ActivityName      string `json:"activity_name"`
 		TicketSpecName    string `json:"ticket_spec_name"`
 		Quantity          int    `json:"quantity"`

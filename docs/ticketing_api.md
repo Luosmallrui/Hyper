@@ -678,6 +678,55 @@ POST /api/v1/refund/apply
 }
 ```
 
+### 主办方查看退款审核列表
+
+```http
+GET /api/v1/organizer/refunds?page=1&size=10&status=0
+Authorization: Bearer <access_token>
+```
+
+参数：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 1 |
+| size | 否 | 每页数量，默认 10 |
+| status | 否 | 退款状态，不传返回全部；`0` 表示待审核 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "refund_no": "R20260531150000abcd",
+        "status": 0,
+        "refund_amount": 8800,
+        "deduct_amount": 0,
+        "reason": "行程冲突",
+        "reject_reason": "",
+        "expect_arrive_date": "2026-06-03",
+        "wechat_refund_id": "",
+        "wechat_status": "",
+        "order_no": "T2026053114300012ab34cd",
+        "user_id": 1,
+        "buyer_name": "罗小瑞",
+        "buyer_id_card": "500101199811040817",
+        "activity_id": 1,
+        "activity_name": "周末电音派对",
+        "ticket_spec_id": 1,
+        "ticket_spec_name": "早鸟票",
+        "quantity": 1,
+        "created_at": "2026-05-31T15:00:00+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
 ### 审核通过并发起微信退款
 
 后台审核退款通过后调用：
@@ -706,6 +755,40 @@ Authorization: Bearer <access_token>
 - 调用微信支付退款 API：`/v3/refund/domestic/refunds`
 - 微信受理后把 `refunds.status` 更新为 `1` 退款中
 - 微信退款成功回调后把 `refunds.status` 更新为 `2`，订单状态更新为 `5`
+
+### 审核拒绝退款
+
+```http
+POST /api/v1/refund/:refund_no/reject
+Authorization: Bearer <access_token>
+```
+
+请求：
+
+```json
+{
+  "reject_reason": "活动开始前24小时内不可退款"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true
+  }
+}
+```
+
+后端处理逻辑：
+
+- 只允许主办方拒绝自己活动的退款
+- 退款单必须是 `status=0` 审核中
+- 拒绝后 `refunds.status=3`
+- 拒绝后 `ticket_orders.status=6`
+- 写入一条 `refund_logs`
 
 ### 微信退款回调
 

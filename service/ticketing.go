@@ -36,7 +36,9 @@ type ITicketingService interface {
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
+	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
+	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
 	CancelRefund(ctx context.Context, userID int64, refundNo string) error
 	ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.Verifier], error)
 	AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error
@@ -387,6 +389,99 @@ func (s *TicketingService) ApplyRefund(ctx context.Context, userID int64, req ty
 	return refundNo, err
 }
 
+func (s *TicketingService) ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("refunds r").
+		Joins("JOIN ticket_orders o ON o.id = r.order_id").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Joins("JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
+		Where("a.organizer_id = ?", org.ID)
+	if status != nil {
+		query = query.Where("r.status = ?", *status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		RefundNo         string
+		Status           int8
+		RefundAmount     int64
+		DeductAmount     int64
+		Reason           string
+		RejectReason     string
+		ExpectArriveDate string
+		WechatRefundID   string
+		WechatStatus     string
+		OrderNo          string
+		UserID           int64
+		BuyerName        string
+		BuyerIDCard      string
+		ActivityID       int64
+		ActivityName     string
+		TicketSpecID     int64
+		TicketSpecName   string
+		Quantity         int
+		CreatedAt        time.Time
+	}
+	if err := query.Select(`
+			r.refund_no,
+			r.status,
+			r.refund_amount,
+			r.deduct_amount,
+			r.reason,
+			r.reject_reason,
+			r.expect_arrive_date,
+			r.wechat_refund_id,
+			r.wechat_status,
+			o.order_no,
+			o.user_id,
+			o.buyer_name,
+			o.buyer_id_card,
+			o.activity_id,
+			a.name AS activity_name,
+			o.ticket_spec_id,
+			ts.name AS ticket_spec_name,
+			o.quantity,
+			r.created_at
+		`).
+		Order("r.id desc").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.OrganizerRefundListItem, 0, len(rows))
+	for _, r := range rows {
+		list = append(list, types.OrganizerRefundListItem{
+			RefundNo:         r.RefundNo,
+			Status:           r.Status,
+			RefundAmount:     r.RefundAmount,
+			DeductAmount:     r.DeductAmount,
+			Reason:           r.Reason,
+			RejectReason:     r.RejectReason,
+			ExpectArriveDate: r.ExpectArriveDate,
+			WechatRefundID:   r.WechatRefundID,
+			WechatStatus:     r.WechatStatus,
+			OrderNo:          r.OrderNo,
+			UserID:           r.UserID,
+			BuyerName:        r.BuyerName,
+			BuyerIDCard:      r.BuyerIDCard,
+			ActivityID:       r.ActivityID,
+			ActivityName:     r.ActivityName,
+			TicketSpecID:     r.TicketSpecID,
+			TicketSpecName:   r.TicketSpecName,
+			Quantity:         r.Quantity,
+			CreatedAt:        r.CreatedAt,
+		})
+	}
+	return &types.PageResponse[types.OrganizerRefundListItem]{List: list, Total: total}, nil
+}
+
 func (s *TicketingService) GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error) {
 	var refund models.Refund
 	if err := s.DB.WithContext(ctx).Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
@@ -416,6 +511,45 @@ func (s *TicketingService) GetRefundDetail(ctx context.Context, userID int64, re
 	resp.Activity.StartTime = activity.StartTime
 	resp.Activity.EndTime = activity.EndTime
 	return resp, nil
+}
+
+func (s *TicketingService) RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var refund models.Refund
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
+			return err
+		}
+		if refund.Status != models.RefundStatusAuditing {
+			return errors.New("当前退款状态不可拒绝")
+		}
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", refund.OrderID).First(&order).Error; err != nil {
+			return err
+		}
+		var activity models.Activity
+		if err := tx.Where("id = ? AND organizer_id = ?", order.ActivityID, org.ID).First(&activity).Error; err != nil {
+			return errors.New("无权审核该退款")
+		}
+		if err := tx.Model(&refund).Updates(map[string]any{
+			"status":        models.RefundStatusRejected,
+			"reject_reason": req.RejectReason,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&order).Update("status", models.TicketOrderStatusRefundReject).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.RefundLog{
+			RefundID:    refund.ID,
+			Status:      "退款拒绝",
+			Description: req.RejectReason,
+		}).Error
+	})
 }
 
 func (s *TicketingService) CancelRefund(ctx context.Context, userID int64, refundNo string) error {
