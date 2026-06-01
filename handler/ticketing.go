@@ -37,6 +37,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
+		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
 		organizer.DELETE("/verifier/:id", h.wrap(h.DeleteVerifier))
@@ -71,6 +72,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		refund.POST("/apply", h.wrap(h.ApplyRefund))
 		refund.GET("/:refund_no", h.wrap(h.GetRefundDetail))
 		refund.POST("/:refund_no/cancel", h.wrap(h.CancelRefund))
+		refund.POST("/:refund_no/reject", h.wrap(h.RejectRefund))
 	}
 
 	verifier := v1.Group("/verifier")
@@ -330,12 +332,42 @@ func (h *Ticketing) ApplyRefund(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) ListOrganizerRefunds(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return err
+		}
+		v := int8(value)
+		status = &v
+	}
+	resp, err := h.TicketingService.ListOrganizerRefunds(c.Request.Context(), currentUserID(c), status, page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) GetRefundDetail(c *gin.Context) error {
 	resp, err := h.TicketingService.GetRefundDetail(c.Request.Context(), currentUserID(c), c.Param("refund_no"))
 	if err != nil {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) RejectRefund(c *gin.Context) error {
+	var req types.RejectRefundRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.RejectRefund(c.Request.Context(), currentUserID(c), c.Param("refund_no"), req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
 	return nil
 }
 
