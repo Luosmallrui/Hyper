@@ -17,6 +17,7 @@ type IWeChatService interface {
 	Code2Session(ctx context.Context, code string) (*types.WxLoginResponse, error)
 	GetAccessToken() (string, error)
 	GetUserPhoneNumber(code string) (string, error)
+	SendSubscribeMessage(ctx context.Context, req types.WeChatSubscribeMessageRequest) error
 }
 
 type WeChatService struct {
@@ -42,7 +43,7 @@ func (w *WeChatService) Code2Session(ctx context.Context, code string) (*types.W
 	}
 
 	if wxResp.ErrCode != 0 {
-		return nil, fmt.Errorf(wxResp.ErrMsg)
+		return nil, errors.New(wxResp.ErrMsg)
 	}
 
 	return &wxResp, nil
@@ -97,4 +98,37 @@ func (w *WeChatService) GetUserPhoneNumber(code string) (string, error) {
 		return "", errors.New("微信获取手机号失败")
 	}
 	return rep.PhoneInfo.PhoneNumber, nil
+}
+
+func (w *WeChatService) SendSubscribeMessage(ctx context.Context, req types.WeChatSubscribeMessageRequest) error {
+	accessToken, err := w.GetAccessToken()
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token=%s", accessToken)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var wxResp struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wxResp); err != nil {
+		return err
+	}
+	if wxResp.ErrCode != 0 {
+		return fmt.Errorf("微信订阅消息发送失败: %d %s", wxResp.ErrCode, wxResp.ErrMsg)
+	}
+	return nil
 }

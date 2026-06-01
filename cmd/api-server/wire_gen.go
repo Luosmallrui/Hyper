@@ -314,16 +314,19 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	admin := dao.NewAdmin(db)
 	v := provideJwtSecret(cfg)
 	adminService := &service.AdminService{
-		AdminDAO: admin,
-		DB:       db,
-		Secret:   v,
+		AdminDAO:      admin,
+		DB:            db,
+		Secret:        v,
+		WeChatService: weChatService,
 	}
 	handlerAdmin := &handler.Admin{
 		Config:       cfg,
 		AdminService: adminService,
 	}
 	ticketingService := &service.TicketingService{
-		DB: db,
+		DB:            db,
+		Config:        cfg,
+		WeChatService: weChatService,
 	}
 	ticketing := &handler.Ticketing{
 		Config:           cfg,

@@ -47,6 +47,13 @@ Content-Type: application/json
 | 2 | 已认证 |
 | 3 | 审核未通过 |
 
+### 入驻类型 `organizer.type`
+
+| 值 | 说明 |
+|---|---|
+| venue | 场地 |
+| merchant | 商家 |
+
 ### 活动状态 `activity.status`
 
 | 值 | 说明 |
@@ -132,6 +139,7 @@ GET /api/v1/organizer/info
   "code": 200,
   "data": {
     "id": 1,
+    "type": "venue",
     "name": "Hyper Club",
     "logo": "https://cdn.xxx/logo.png",
     "status": 2,
@@ -162,6 +170,7 @@ POST /api/v1/organizer/apply
 
 ```json
 {
+  "type": "venue",
   "name": "Hyper Club",
   "logo": "https://cdn.xxx/logo.png",
   "province": "北京市",
@@ -169,6 +178,17 @@ POST /api/v1/organizer/apply
   "district": "朝阳区"
 }
 ```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| type | string | 是 | `venue` 场地 / `merchant` 商家，二选一 |
+| name | string | 是 | 入驻名称 |
+| logo | string | 否 | Logo URL，可先用 `/api/v1/upload` 上传 |
+| province | string | 否 | 省份 |
+| city | string | 否 | 城市 |
+| district | string | 否 | 区县 |
 
 响应：
 
@@ -188,6 +208,7 @@ GET /api/v1/organizer/audit-status
 {
   "code": 200,
   "data": {
+    "type": "venue",
     "status": 1,
     "reject_reason": ""
   }
@@ -249,7 +270,105 @@ PUT /api/v1/organizer/withdraw-info
 
 ---
 
-## 4. 活动模块
+## 4. 管理后台入驻审核
+
+以下接口需要管理员 Token：
+
+```http
+Authorization: Bearer <admin_access_token>
+```
+
+### 入驻申请列表
+
+```http
+GET /api/v1/admin/organizers?page=1&pageSize=20&status=1&type=venue
+```
+
+Query:
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 `1` |
+| pageSize | 否 | 每页数量，默认 `20` |
+| status | 否 | 主办方状态，不传返回全部 |
+| type | 否 | `venue` / `merchant`，不传返回全部 |
+
+### 入驻申请详情
+
+```http
+GET /api/v1/admin/organizers/:id
+```
+
+### 审核入驻申请
+
+```http
+PUT /api/v1/admin/organizers/:id/audit
+```
+
+通过：
+
+```json
+{
+  "status": 2
+}
+```
+
+拒绝：
+
+```json
+{
+  "status": 3,
+  "reject_reason": "资料不完整"
+}
+```
+
+说明：
+
+- `status=2` 表示审核通过，用户入驻成功。
+- `status=3` 表示审核拒绝，必须填写 `reject_reason`。
+- 普通用户申请 `venue` 或 `merchant` 任意一个通过后，即可视为入驻成功。
+
+### 绑定管理员微信通知
+
+管理员需要先在小程序端授权订阅消息，再把 `wx.login` 得到的 `code` 传给后端绑定 openid。
+
+前端流程：
+
+```js
+await wx.requestSubscribeMessage({
+  tmplIds: ['6qWdBuY6p3EJ-rCRq7OWonTVAVlj-b6io1cDtNDlYTw']
+})
+const login = await wx.login()
+await request({
+  url: '/api/v1/admin/wechat-subscribe',
+  method: 'POST',
+  data: { code: login.code }
+})
+```
+
+后端接口：
+
+```http
+POST /api/v1/admin/wechat-subscribe
+```
+
+请求：
+
+```json
+{
+  "code": "wx.login 返回的 code"
+}
+```
+
+说明：
+
+- 绑定成功后，普通用户提交 `/api/v1/organizer/apply` 会自动给已绑定管理员发送订阅消息。
+- 模板 ID：`6qWdBuY6p3EJ-rCRq7OWonTVAVlj-b6io1cDtNDlYTw`
+- 模板字段：`thing1` 商家名称、`thing2` 申请人、`time3` 申请时间、`phrase4` 状态、`thing5` 备注。
+
+---
+
+## 5. 活动模块
 
 ### 创建/分步保存活动
 
@@ -432,7 +551,7 @@ POST /api/v1/activity/:id/submit-audit
 
 ---
 
-## 5. 票券配置模块
+## 6. 票券配置模块
 
 ### 获取活动票券列表
 
@@ -503,7 +622,7 @@ DELETE /api/v1/ticket-spec/:id
 
 ---
 
-## 6. 订单模块
+## 7. 订单模块
 
 ### 创建票务订单
 
@@ -643,7 +762,7 @@ POST /api/v1/order/:order_no/cancel
 
 ---
 
-## 7. 退款模块
+## 8. 退款模块
 
 ### 获取退款原因列表
 
@@ -814,7 +933,7 @@ POST /api/v1/refund/:refund_no/cancel
 
 ---
 
-## 8. 核销模块
+## 9. 核销模块
 
 ### 核销员列表
 
@@ -958,7 +1077,7 @@ X-Verifier-Id: <verifier_id>
 
 ---
 
-## 9. 前端推荐流程
+## 10. 前端推荐流程
 
 ### 活动发布
 
@@ -984,7 +1103,7 @@ X-Verifier-Id: <verifier_id>
 
 ---
 
-## 10. 当前实现边界
+## 11. 当前实现边界
 
 - 新票务订单使用 `ticket_orders`，旧商品订单仍使用 `orders/products/pay`。
 - 微信支付已支持通过 `/api/v1/pay/prepay` + `order_no` 支付 `ticket_orders`。

@@ -12,6 +12,7 @@ type PageResponse[T any] struct {
 
 type OrganizerApplyRequest struct {
 	Name     string `json:"name" binding:"required"`
+	Type     string `json:"type" binding:"required,oneof=venue merchant"`
 	Logo     string `json:"logo"`
 	Province string `json:"province"`
 	City     string `json:"city"`
@@ -34,6 +35,7 @@ type OrganizerWithdrawRequest struct {
 
 type OrganizerInfoResponse struct {
 	ID             int64   `json:"id"`
+	Type           string  `json:"type"`
 	Name           string  `json:"name"`
 	Logo           string  `json:"logo"`
 	Status         int8    `json:"status"`

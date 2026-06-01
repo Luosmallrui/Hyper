@@ -11,10 +11,15 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type IAdminService interface {
 	Login(ctx context.Context, username, password string) (string, string, error)
+	GetOrganizerList(ctx context.Context, page, pageSize int, status *int8, organizerType string) (*types.AdminOrganizerListResponse, error)
+	GetOrganizerDetail(ctx context.Context, organizerID int64) (*types.AdminOrganizerDetail, error)
+	AuditOrganizer(ctx context.Context, organizerID int64, req types.AdminAuditOrganizerRequest) error
+	BindAdminWechatSubscriber(ctx context.Context, adminID int64, code string) error
 	GetPartyList(ctx context.Context, page, pageSize int, keyword, partyType string) (*types.AdminPartyListResponse, error)
 	GetPartyDetail(ctx context.Context, partyID int64) (*types.AdminPartyDetail, error)
 	UpdatePartyStatus(ctx context.Context, partyID int64, status string) error
@@ -25,9 +30,10 @@ type IAdminService interface {
 }
 
 type AdminService struct {
-	AdminDAO *dao.Admin
-	DB       *gorm.DB
-	Secret   []byte
+	AdminDAO      *dao.Admin
+	DB            *gorm.DB
+	Secret        []byte
+	WeChatService IWeChatService
 }
 
 var _ IAdminService = (*AdminService)(nil)
@@ -59,6 +65,139 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (st
 	}
 
 	return accessToken, refreshToken, nil
+}
+
+func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int, status *int8, organizerType string) (*types.AdminOrganizerListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := s.DB.WithContext(ctx).Model(&models.Organizer{})
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	if organizerType != "" {
+		if organizerType != models.OrganizerTypeVenue && organizerType != models.OrganizerTypeMerchant {
+			return nil, errors.New("入驻类型无效，仅支持 venue 或 merchant")
+		}
+		query = query.Where("type = ?", organizerType)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var organizers []models.Organizer
+	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&organizers).Error; err != nil {
+		return nil, err
+	}
+	userIDs := make([]int, 0, len(organizers))
+	for _, org := range organizers {
+		userIDs = append(userIDs, int(org.UserID))
+	}
+	userMap := make(map[int]*models.Users)
+	if len(userIDs) > 0 {
+		var users []models.Users
+		s.DB.WithContext(ctx).Where("id IN ?", userIDs).Find(&users)
+		for i := range users {
+			userMap[users[i].Id] = &users[i]
+		}
+	}
+	list := make([]types.AdminOrganizerItem, 0, len(organizers))
+	for _, org := range organizers {
+		item := types.AdminOrganizerItem{
+			ID:             org.ID,
+			UserID:         org.UserID,
+			Type:           org.Type,
+			Name:           org.Name,
+			Logo:           org.Logo,
+			Status:         org.Status,
+			RejectReason:   org.RejectReason,
+			Level:          org.Level,
+			ServiceFeeRate: org.ServiceFeeRate,
+			Province:       org.Province,
+			City:           org.City,
+			District:       org.District,
+			CreatedAt:      org.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:      org.UpdatedAt.Format("2006-01-02 15:04:05"),
+		}
+		if u, ok := userMap[int(org.UserID)]; ok {
+			item.UserName = u.Nickname
+			item.UserAvatar = u.Avatar
+			item.UserMobile = u.Mobile
+		}
+		list = append(list, item)
+	}
+	return &types.AdminOrganizerListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64) (*types.AdminOrganizerDetail, error) {
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).Where("id = ?", organizerID).First(&org).Error; err != nil {
+		return nil, err
+	}
+	detail := &types.AdminOrganizerDetail{Organizer: org}
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("id = ?", org.UserID).First(&user).Error; err == nil {
+		detail.UserName = user.Nickname
+		detail.UserAvatar = user.Avatar
+		detail.UserMobile = user.Mobile
+	}
+	return detail, nil
+}
+
+func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, req types.AdminAuditOrganizerRequest) error {
+	if req.Status != models.OrganizerStatusApproved && req.Status != models.OrganizerStatusRejected {
+		return errors.New("审核状态无效，仅支持 2通过 或 3拒绝")
+	}
+	if req.Status == models.OrganizerStatusRejected && req.RejectReason == "" {
+		return errors.New("拒绝时必须填写 reject_reason")
+	}
+	updates := map[string]any{
+		"status":        req.Status,
+		"reject_reason": "",
+		"updated_at":    time.Now(),
+	}
+	if req.Status == models.OrganizerStatusRejected {
+		updates["reject_reason"] = req.RejectReason
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Organizer{}).Where("id = ?", organizerID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("入驻申请不存在")
+	}
+	return nil
+}
+
+func (s *AdminService) BindAdminWechatSubscriber(ctx context.Context, adminID int64, code string) error {
+	if s.WeChatService == nil {
+		return errors.New("微信服务未初始化")
+	}
+	wxResp, err := s.WeChatService.Code2Session(ctx, code)
+	if err != nil {
+		return err
+	}
+	if wxResp.OpenID == "" {
+		return errors.New("微信 openid 为空")
+	}
+	record := models.AdminWechatSubscriber{
+		AdminID: adminID,
+		OpenID:  wxResp.OpenID,
+		Enabled: 1,
+	}
+	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "admin_id"}, {Name: "open_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"enabled":    1,
+			"updated_at": time.Now(),
+		}),
+	}).Create(&record).Error
 }
 
 func (s *AdminService) GetPartyList(ctx context.Context, page, pageSize int, keyword, partyType string) (*types.AdminPartyListResponse, error) {
