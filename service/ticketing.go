@@ -1,7 +1,9 @@
 package service
 
 import (
+	"Hyper/config"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/types"
 	"context"
 	"crypto/rand"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -51,7 +54,9 @@ type ITicketingService interface {
 }
 
 type TicketingService struct {
-	DB *gorm.DB
+	DB            *gorm.DB
+	Config        *config.Config
+	WeChatService IWeChatService
 }
 
 var _ ITicketingService = (*TicketingService)(nil)
@@ -65,6 +70,9 @@ func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (
 }
 
 func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) error {
+	if req.Type != models.OrganizerTypeVenue && req.Type != models.OrganizerTypeMerchant {
+		return errors.New("入驻类型无效，仅支持 venue 或 merchant")
+	}
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -72,6 +80,7 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 	}
 	data := models.Organizer{
 		UserID:   userID,
+		Type:     req.Type,
 		Name:     req.Name,
 		Logo:     req.Logo,
 		Status:   models.OrganizerStatusAuditing,
@@ -81,9 +90,31 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 		District: req.District,
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return s.DB.WithContext(ctx).Create(&data).Error
+		if err := s.DB.WithContext(ctx).Create(&data).Error; err != nil {
+			return err
+		}
+		s.notifyOrganizerApply(ctx, data, userID)
+		return nil
 	}
-	return s.DB.WithContext(ctx).Model(&org).Updates(data).Error
+	if org.Status == models.OrganizerStatusApproved {
+		return errors.New("入驻申请已通过，无需重复提交")
+	}
+	if err := s.DB.WithContext(ctx).Model(&org).Updates(map[string]any{
+		"type":          req.Type,
+		"name":          req.Name,
+		"logo":          req.Logo,
+		"status":        models.OrganizerStatusAuditing,
+		"reject_reason": "",
+		"level":         "LV1",
+		"province":      req.Province,
+		"city":          req.City,
+		"district":      req.District,
+	}).Error; err != nil {
+		return err
+	}
+	data.ID = org.ID
+	s.notifyOrganizerApply(ctx, data, userID)
+	return nil
 }
 
 func (s *TicketingService) UpdateOrganizerBasic(ctx context.Context, userID int64, req types.OrganizerBasicRequest) error {
@@ -748,7 +779,7 @@ func (s *TicketingService) ensureOrganizer(ctx context.Context, userID int64) (*
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	org = &models.Organizer{UserID: userID, Name: "未命名主办方", Status: models.OrganizerStatusPending, Level: "LV1"}
+	org = &models.Organizer{UserID: userID, Type: models.OrganizerTypeVenue, Name: "未命名主办方", Status: models.OrganizerStatusPending, Level: "LV1"}
 	if err := s.DB.WithContext(ctx).Create(org).Error; err != nil {
 		return nil, err
 	}
@@ -815,6 +846,7 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 	resp := &types.OrganizerInfoResponse{
 		ID:             org.ID,
+		Type:           org.Type,
 		Name:           org.Name,
 		Logo:           org.Logo,
 		Status:         org.Status,
@@ -830,6 +862,59 @@ func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 	resp.AccountInfo.BankAccountNo = org.BankAccountNo
 	resp.AccountInfo.BankName = org.BankName
 	return resp
+}
+
+func (s *TicketingService) notifyOrganizerApply(ctx context.Context, org models.Organizer, applicantUserID int64) {
+	if s.Config == nil || s.Config.App == nil || s.Config.App.OrganizerApplyTemplateID == "" || s.WeChatService == nil {
+		return
+	}
+	var subscribers []models.AdminWechatSubscriber
+	if err := s.DB.WithContext(ctx).Where("enabled = ?", 1).Find(&subscribers).Error; err != nil {
+		log.L.Warn("query admin wechat subscribers failed", zap.Error(err))
+		return
+	}
+	if len(subscribers) == 0 {
+		return
+	}
+	applicant := fmt.Sprintf("用户%d", applicantUserID)
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("id = ?", applicantUserID).First(&user).Error; err == nil {
+		if user.Nickname != "" {
+			applicant = user.Nickname
+		} else if user.Mobile != "" {
+			applicant = user.Mobile
+		}
+	}
+	applyType := "商家入驻"
+	if org.Type == models.OrganizerTypeVenue {
+		applyType = "场地入驻"
+	}
+	for _, sub := range subscribers {
+		req := types.WeChatSubscribeMessageRequest{
+			ToUser:     sub.OpenID,
+			TemplateID: s.Config.App.OrganizerApplyTemplateID,
+			Page:       fmt.Sprintf("pages/admin/organizer/detail?id=%d", org.ID),
+			Data: map[string]types.WeChatMessageItem{
+				"thing1":  {Value: limitWeChatField(org.Name, 20)},
+				"thing2":  {Value: limitWeChatField(applicant, 20)},
+				"time3":   {Value: time.Now().Format("2006-01-02 15:04:05")},
+				"phrase4": {Value: "待审核"},
+				"thing5":  {Value: limitWeChatField(applyType+"申请，请及时处理", 20)},
+			},
+			Lang: "zh_CN",
+		}
+		if err := s.WeChatService.SendSubscribeMessage(ctx, req); err != nil {
+			log.L.Warn("send organizer apply subscribe message failed", zap.Int64("admin_id", sub.AdminID), zap.Error(err))
+		}
+	}
+}
+
+func limitWeChatField(value string, max int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= max {
+		return string(runes)
+	}
+	return string(runes[:max])
 }
 
 func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {

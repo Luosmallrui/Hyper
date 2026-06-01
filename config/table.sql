@@ -153,10 +153,24 @@ CREATE TABLE IF NOT EXISTS `admin`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='管理员表';
 
+CREATE TABLE IF NOT EXISTS `admin_wechat_subscribers`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `admin_id`   bigint unsigned NOT NULL COMMENT '管理员ID',
+    `open_id`    varchar(64)     NOT NULL COMMENT '管理员微信openid',
+    `enabled`    tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_admin_openid` (`admin_id`, `open_id`) USING BTREE,
+    KEY `idx_enabled` (`enabled`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='管理员微信订阅通知表';
+
 CREATE TABLE IF NOT EXISTS `organizers`
 (
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主办方ID',
     `user_id`           bigint unsigned NOT NULL COMMENT '用户ID',
+    `type`              varchar(20)     NOT NULL DEFAULT 'venue' COMMENT '入驻类型: venue场地 merchant商家',
     `name`              varchar(100)    NOT NULL COMMENT '主办方名称',
     `logo`              varchar(255)    NOT NULL DEFAULT '' COMMENT 'Logo',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1审核中 2已认证 3未通过',
@@ -174,6 +188,9 @@ CREATE TABLE IF NOT EXISTS `organizers`
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `uk_organizer_user` (`user_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方表';
+
+-- 如已有 organizers 表，执行以下 ALTER 添加 type 字段:
+-- ALTER TABLE `organizers` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'venue' COMMENT '入驻类型: venue场地 merchant商家' AFTER `user_id`;
 
 CREATE TABLE IF NOT EXISTS `activities`
 (

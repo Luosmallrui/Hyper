@@ -3,6 +3,9 @@ package models
 import "time"
 
 const (
+	OrganizerTypeVenue    = "venue"
+	OrganizerTypeMerchant = "merchant"
+
 	OrganizerStatusPending  int8 = 0
 	OrganizerStatusAuditing int8 = 1
 	OrganizerStatusApproved int8 = 2
@@ -34,6 +37,7 @@ const (
 type Organizer struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID          int64     `gorm:"column:user_id;not null;uniqueIndex:uk_organizer_user" json:"user_id"`
+	Type            string    `gorm:"column:type;size:20;not null;default:venue" json:"type"`
 	Name            string    `gorm:"column:name;size:100;not null" json:"name"`
 	Logo            string    `gorm:"column:logo;size:255" json:"logo"`
 	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`

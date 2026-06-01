@@ -27,6 +27,12 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 	authorized := g.Group("")
 	authorized.Use(adminAuth)
 	{
+		// 入驻申请管理
+		authorized.GET("/organizers", context.Wrap(a.GetOrganizerList))
+		authorized.GET("/organizers/:id", context.Wrap(a.GetOrganizerDetail))
+		authorized.PUT("/organizers/:id/audit", context.Wrap(a.AuditOrganizer))
+		authorized.POST("/wechat-subscribe", context.Wrap(a.BindWechatSubscribe))
+
 		// 派对/场地管理
 		authorized.GET("/parties", context.Wrap(a.GetPartyList))
 		authorized.GET("/parties/:id", context.Wrap(a.GetPartyDetail))
@@ -63,6 +69,80 @@ func (a *Admin) Login(c *gin.Context) error {
 		AccessExpire:  time.Now().Add(2 * time.Hour).Unix(),
 		RefreshExpire: time.Now().Add(7 * 24 * time.Hour).Unix(),
 	})
+	return nil
+}
+
+// BindWechatSubscribe 绑定管理员微信订阅通知
+// POST /api/v1/admin/wechat-subscribe
+func (a *Admin) BindWechatSubscribe(c *gin.Context) error {
+	var req types.AdminWechatSubscribeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	adminID := int64(c.GetInt("admin_id"))
+	if adminID == 0 {
+		return response.NewError(401, "管理员身份无效")
+	}
+	if err := a.AdminService.BindAdminWechatSubscriber(c.Request.Context(), adminID, req.Code); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+// GetOrganizerList 获取入驻申请列表
+// GET /api/v1/admin/organizers?page=1&pageSize=20&status=1&type=venue
+func (a *Admin) GetOrganizerList(c *gin.Context) error {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	organizerType := c.Query("type")
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "无效的状态")
+		}
+		s := int8(v)
+		status = &s
+	}
+	result, err := a.AdminService.GetOrganizerList(c.Request.Context(), page, pageSize, status, organizerType)
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, result)
+	return nil
+}
+
+// GetOrganizerDetail 获取入驻申请详情
+// GET /api/v1/admin/organizers/:id
+func (a *Admin) GetOrganizerDetail(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的ID")
+	}
+	detail, err := a.AdminService.GetOrganizerDetail(c.Request.Context(), id)
+	if err != nil {
+		return response.NewError(404, "入驻申请不存在")
+	}
+	response.Success(c, detail)
+	return nil
+}
+
+// AuditOrganizer 审核入驻申请
+// PUT /api/v1/admin/organizers/:id/audit
+func (a *Admin) AuditOrganizer(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的ID")
+	}
+	var req types.AdminAuditOrganizerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.AuditOrganizer(c.Request.Context(), id, req); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, "审核完成")
 	return nil
 }
 
