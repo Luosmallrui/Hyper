@@ -92,11 +92,11 @@ type UserProfileResp struct {
 }
 
 type UserToken struct {
-	AccessToken      string `json:"access_token"`
-	RefreshToken     string `json:"refresh_token"`
-	AccessExpire     int64  `json:"access_expire"`
-	RefreshExpire    int64  `json:"refresh_expire"`
-	NeedSetPassword  bool   `json:"need_set_password,omitempty"`
+	AccessToken     string `json:"access_token"`
+	RefreshToken    string `json:"refresh_token"`
+	AccessExpire    int64  `json:"access_expire"`
+	RefreshExpire   int64  `json:"refresh_expire"`
+	NeedSetPassword bool   `json:"need_set_password,omitempty"`
 }
 type UserBasicInfo struct {
 	Id          int       `json:"id"`
@@ -145,9 +145,10 @@ type GetFollowingListResponse struct {
 }
 
 type UpdateUserProfileRequest struct {
-	Username *string `json:"username" binding:"omitempty,min=2,max=20"`
-	Avatar   *string `json:"avatar" binding:"omitempty,url"`
-	Motto    *string `json:"motto" binding:"omitempty,max=100"`
-	Email    *string `json:"email" binding:"omitempty,email"`
-	Birthday *string `json:"birthday" binding:"omitempty,datetime=2006-01-02"`
+	Username  *string `json:"username" binding:"omitempty,min=2,max=20"`
+	Avatar    *string `json:"avatar" binding:"omitempty,url"`
+	Motto     *string `json:"motto" binding:"omitempty,max=100"`
+	Signature *string `json:"signature" binding:"omitempty,max=100"`
+	Email     *string `json:"email" binding:"omitempty,email"`
+	Birthday  *string `json:"birthday" binding:"omitempty,datetime=2006-01-02"`
 }

@@ -118,6 +118,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 			Nickname:    userInfo.Nickname,
 			PhoneNumber: userInfo.Mobile,
 			AvatarURL:   userInfo.Avatar,
+			Signature:   userInfo.Motto,
 			CreatedAt:   userInfo.CreatedAt,
 		},
 		Stats: types.UserStats{

@@ -89,7 +89,7 @@ func (d *UserFollowDAO) GetFollowingFeed(ctx context.Context, userID uint64, cur
 
 	db := d.Db.WithContext(ctx).
 		Table("user_follow uf").
-		Select("u.id as user_id, u.nickname, u.avatar, uf.created_at as follow_time").
+		Select("u.id as user_id, u.nickname, u.avatar, u.motto as signature, uf.created_at as follow_time").
 		Joins("LEFT JOIN users u ON uf.followee_id = u.id").
 		Where("uf.follower_id = ? AND uf.status = 1", userID)
 
@@ -158,8 +158,8 @@ func (d *UserFollowDAO) GetFollowerFeed(ctx context.Context, userID uint64, curs
             uf.follower_id AS user_id,
             u.nickname,
             u.avatar AS avatar,
-            u.signature,
-            uf.updated_at
+            u.motto AS signature,
+            uf.updated_at AS follow_time
         `).
 		Joins("LEFT JOIN users AS u ON uf.follower_id = u.id").
 		Where("uf.followee_id = ? AND uf.status = 1", userID).

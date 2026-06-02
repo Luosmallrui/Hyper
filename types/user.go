@@ -12,11 +12,12 @@ type User struct {
 }
 
 type UpdateUserReq struct {
-	Nickname *string `json:"nickname"`
-	Avatar   *string `json:"avatar"`
-	Gender   *int    `json:"gender"`
-	Motto    *string `json:"motto"`
-	Birthday *string `json:"birthday"`
+	Nickname  *string `json:"nickname"`
+	Avatar    *string `json:"avatar"`
+	Gender    *int    `json:"gender"`
+	Motto     *string `json:"motto"`
+	Signature *string `json:"signature"`
+	Birthday  *string `json:"birthday"`
 	// 手机号、邮箱、密码通常通过专门的修改接口（需验证码或旧密码）
 }
 
