@@ -275,9 +275,15 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Redis: redisClient,
 		DB:    db,
 	}
+	ticketingService := &service.TicketingService{
+		DB:            db,
+		Config:        cfg,
+		WeChatService: weChatService,
+	}
 	order := &handler.Order{
-		Config:       cfg,
-		OrderService: orderService,
+		Config:           cfg,
+		OrderService:     orderService,
+		TicketingService: ticketingService,
 	}
 	point := dao.NewPoint(db)
 	pointService := &service.PointService{
@@ -322,11 +328,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	handlerAdmin := &handler.Admin{
 		Config:       cfg,
 		AdminService: adminService,
-	}
-	ticketingService := &service.TicketingService{
-		DB:            db,
-		Config:        cfg,
-		WeChatService: weChatService,
 	}
 	ticketing := &handler.Ticketing{
 		Config:           cfg,

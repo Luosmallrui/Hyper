@@ -148,6 +148,30 @@ type TicketOrderDetailResponse struct {
 	} `json:"refund_info,omitempty"`
 }
 
+type TicketOrderListItem struct {
+	OrderNo     string `json:"order_no"`
+	Status      int8   `json:"status"`
+	TotalPrice  int64  `json:"total_price"`
+	ActualPrice int64  `json:"actual_price"`
+	Quantity    int    `json:"quantity"`
+	Activity    struct {
+		ID         int64     `json:"id"`
+		Name       string    `json:"name"`
+		StartTime  time.Time `json:"start_time"`
+		EndTime    time.Time `json:"end_time"`
+		PosterList string    `json:"poster_list"`
+	} `json:"activity"`
+	TicketSpec struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	} `json:"ticket_spec"`
+	BuyerName   string     `json:"buyer_name"`
+	BuyerIDCard string     `json:"buyer_id_card"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpireTime  time.Time  `json:"expire_time"`
+	PayTime     *time.Time `json:"pay_time"`
+}
+
 type CancelOrderRequest struct {
 	ReasonID int64 `json:"reason_id" binding:"required"`
 }
@@ -241,4 +265,14 @@ type VerifiedListItem struct {
 	BuyerNameMasked   string    `json:"buyer_name_masked"`
 	BuyerIDCardMasked string    `json:"buyer_id_card_masked"`
 	VerifiedAt        time.Time `json:"verified_at"`
+}
+
+type ViewerItem struct {
+	ID        int64     `json:"id"`
+	RealName  string    `json:"real_name"`
+	IDCard    string    `json:"id_card"`
+	Phone     string    `json:"phone"`
+	Type      int8      `json:"type"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

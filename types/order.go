@@ -37,7 +37,7 @@ type CreateViewerReq struct {
 }
 
 type UpdateViewerReq struct {
-	ID       int64  `json:"id" binding:"required"`
+	ID       int64  `json:"id"`
 	RealName string `json:"real_name" binding:"omitempty,min=2,max=20"`
 	Phone    string `json:"phone" binding:"omitempty,len=11"`
 }

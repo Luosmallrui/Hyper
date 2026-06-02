@@ -624,6 +624,91 @@ DELETE /api/v1/ticket-spec/:id
 
 ## 7. 订单模块
 
+### 观演人列表
+
+```http
+GET /api/v1/viewers
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "real_name": "罗小瑞",
+        "id_card": "5001**********0817",
+        "phone": "138****8000",
+        "type": 2,
+        "created_at": "2026-06-02T12:00:00+08:00",
+        "updated_at": "2026-06-02T12:00:00+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+### 创建观演人
+
+```http
+POST /api/v1/viewers
+```
+
+请求：
+
+```json
+{
+  "real_name": "罗小瑞",
+  "id_card": "500101199811040817",
+  "phone": "13800138000"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true,
+    "id": 1
+  }
+}
+```
+
+说明：
+
+- 单个用户最多 5 个常用观演人。
+- 身份证号必须通过校验码校验。
+- 返回列表时身份证号、手机号会脱敏。
+
+### 更新观演人
+
+```http
+PUT /api/v1/viewers/:id
+```
+
+请求：
+
+```json
+{
+  "real_name": "罗小瑞",
+  "phone": "13800138000"
+}
+```
+
+### 删除观演人
+
+```http
+DELETE /api/v1/viewers/:id
+```
+
+说明：如果观演人已关联未完成票务订单，暂不可删除。
+
 ### 创建票务订单
 
 ```http
@@ -736,6 +821,57 @@ GET /api/v1/order/:order_no
     "created_at": "2026-05-31T14:30:00+08:00",
     "qr_code": "TICKET:T2026053114300012ab34cd:xxxx",
     "expire_time": "2026-05-31T14:45:00+08:00"
+  }
+}
+```
+
+### 我的票务订单列表
+
+```http
+GET /api/v1/order/list?page=1&size=10&status=1
+```
+
+查询参数：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 1 |
+| size | 否 | 每页数量，默认 10 |
+| status | 否 | 订单状态；不传返回全部 |
+| legacy | 否 | 传 `1` 时返回旧商品订单列表；不传时返回票务订单列表 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "order_no": "T2026053114300012ab34cd",
+        "status": 1,
+        "total_price": 8800,
+        "actual_price": 8800,
+        "quantity": 1,
+        "activity": {
+          "id": 1,
+          "name": "周末电音派对",
+          "start_time": "2026-06-12T20:00:00+08:00",
+          "end_time": "2026-06-13T02:00:00+08:00",
+          "poster_list": "https://cdn.xxx/list.jpg"
+        },
+        "ticket_spec": {
+          "id": 1,
+          "name": "早鸟票"
+        },
+        "buyer_name": "罗小瑞",
+        "buyer_id_card": "5001**********0817",
+        "created_at": "2026-05-31T14:30:00+08:00",
+        "expire_time": "2026-05-31T14:45:00+08:00",
+        "pay_time": "2026-05-31T14:32:00+08:00"
+      }
+    ],
+    "total": 1
   }
 }
 ```
