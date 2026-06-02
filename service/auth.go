@@ -204,6 +204,9 @@ func (s *UserService) Update(ctx context.Context, userID int, req *types.UpdateU
 	if req.Motto != nil {
 		updates["motto"] = *req.Motto
 	}
+	if req.Signature != nil {
+		updates["motto"] = *req.Signature
+	}
 	if req.Birthday != nil {
 		updates["birthday"] = *req.Birthday
 	}
@@ -320,6 +323,9 @@ func (s *UserService) UpdateUserProfile(ctx context.Context, userId int, req *ty
 	}
 	if req.Motto != nil {
 		updates["motto"] = *req.Motto
+	}
+	if req.Signature != nil {
+		updates["motto"] = *req.Signature
 	}
 	if req.Email != nil {
 		updates["email"] = *req.Email

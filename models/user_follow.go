@@ -24,5 +24,5 @@ type FollowingQueryResult struct {
 	FollowTime  time.Time `gorm:"column:follow_time" json:"follow_time"`
 	IsFollowing bool      `gorm:"-" json:"is_following"` // 我是否关注了他
 	IsMutual    bool      `gorm:"-" json:"is_mutual"`    // 是否互相关注
-	Signature   string    `gorm:"-" json:"signature"`
+	Signature   string    `gorm:"column:signature" json:"signature"`
 }

@@ -29,7 +29,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	auth := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	v1 := r.Group("/v1")
 
-	organizer := v1.Group("/organizer")
+	organizer := v1.Group("/organizer", auth)
 	{
 		organizer.GET("/info", h.wrap(h.GetOrganizerInfo))
 		organizer.PUT("/basic", h.wrap(h.UpdateOrganizerBasic))
@@ -117,7 +117,7 @@ func (h *Ticketing) ApplyOrganizer(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	if err := h.TicketingService.ApplyOrganizer(c.Request.Context(), 1, req); err != nil {
+	if err := h.TicketingService.ApplyOrganizer(c.Request.Context(), currentUserID(c), req); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
