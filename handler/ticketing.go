@@ -83,6 +83,14 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		verifier.GET("/verified-list", h.wrap(h.ListVerified))
 	}
 
+	viewers := v1.Group("/viewers", auth)
+	{
+		viewers.GET("", h.wrap(h.ListViewers))
+		viewers.POST("", h.wrap(h.CreateViewer))
+		viewers.PUT("/:id", h.wrap(h.UpdateViewer))
+		viewers.DELETE("/:id", h.wrap(h.DeleteViewer))
+	}
+
 	v1.POST("/upload", auth, h.wrap(h.UploadFile))
 }
 
@@ -304,6 +312,56 @@ func (h *Ticketing) CancelTicketOrder(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.CancelTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no"), req.ReasonID); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListViewers(c *gin.Context) error {
+	resp, err := h.TicketingService.ListViewers(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateViewer(c *gin.Context) error {
+	var req types.CreateViewerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.CreateViewer(c.Request.Context(), currentUserID(c), req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true, "id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateViewer(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.UpdateViewerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.UpdateViewer(c.Request.Context(), currentUserID(c), id, req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) DeleteViewer(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteViewer(c.Request.Context(), currentUserID(c), id); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

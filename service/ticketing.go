@@ -34,6 +34,7 @@ type ITicketingService interface {
 	SaveTicketSpecs(ctx context.Context, userID, activityID int64, specs []types.TicketSpecSaveItem) error
 	DeleteTicketSpec(ctx context.Context, userID, specID int64) error
 	CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (string, error)
+	ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error)
 	GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error)
 	ListCancelReasons(ctx context.Context) ([]models.CancelReason, error)
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
@@ -51,6 +52,10 @@ type ITicketingService interface {
 	ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error)
 	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error
 	ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
+	ListViewers(ctx context.Context, userID int64) (*types.PageResponse[types.ViewerItem], error)
+	CreateViewer(ctx context.Context, userID int64, req types.CreateViewerReq) (int64, error)
+	UpdateViewer(ctx context.Context, userID, viewerID int64, req types.UpdateViewerReq) error
+	DeleteViewer(ctx context.Context, userID, viewerID int64) error
 }
 
 type TicketingService struct {
@@ -349,6 +354,90 @@ func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int6
 		return nil, err
 	}
 	return s.buildOrderDetail(ctx, order)
+}
+
+func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ?", userID)
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var rows []struct {
+		OrderNo        string
+		Status         int8
+		TotalPrice     int64
+		ActualPrice    int64
+		Quantity       int
+		ActivityID     int64
+		ActivityName   string
+		StartTime      time.Time
+		EndTime        time.Time
+		PosterList     string
+		TicketSpecID   int64
+		TicketSpecName string
+		BuyerName      string
+		BuyerIDCard    string
+		CreatedAt      time.Time
+		ExpireTime     time.Time
+		PayTime        *time.Time
+	}
+	err := query.
+		Select(`ticket_orders.order_no,
+			ticket_orders.status,
+			ticket_orders.total_price,
+			ticket_orders.actual_price,
+			ticket_orders.quantity,
+			ticket_orders.activity_id,
+			activities.name AS activity_name,
+			activities.start_time,
+			activities.end_time,
+			activities.poster_list,
+			ticket_orders.ticket_spec_id,
+			ticket_specs.name AS ticket_spec_name,
+			ticket_orders.buyer_name,
+			ticket_orders.buyer_id_card,
+			ticket_orders.created_at,
+			ticket_orders.expire_time,
+			ticket_orders.pay_time`).
+		Joins("LEFT JOIN activities ON activities.id = ticket_orders.activity_id").
+		Joins("LEFT JOIN ticket_specs ON ticket_specs.id = ticket_orders.ticket_spec_id").
+		Order("ticket_orders.created_at desc").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]types.TicketOrderListItem, 0, len(rows))
+	for _, r := range rows {
+		item := types.TicketOrderListItem{
+			OrderNo:     r.OrderNo,
+			Status:      r.Status,
+			TotalPrice:  r.TotalPrice,
+			ActualPrice: r.ActualPrice,
+			Quantity:    r.Quantity,
+			BuyerName:   r.BuyerName,
+			BuyerIDCard: maskIDCard(r.BuyerIDCard),
+			CreatedAt:   r.CreatedAt,
+			ExpireTime:  r.ExpireTime,
+			PayTime:     r.PayTime,
+		}
+		item.Activity.ID = r.ActivityID
+		item.Activity.Name = r.ActivityName
+		item.Activity.StartTime = r.StartTime
+		item.Activity.EndTime = r.EndTime
+		item.Activity.PosterList = r.PosterList
+		item.TicketSpec.ID = r.TicketSpecID
+		item.TicketSpec.Name = r.TicketSpecName
+		list = append(list, item)
+	}
+	return &types.PageResponse[types.TicketOrderListItem]{List: list, Total: total}, nil
 }
 
 func (s *TicketingService) ListCancelReasons(ctx context.Context) ([]models.CancelReason, error) {
@@ -765,6 +854,120 @@ func (s *TicketingService) ListVerified(ctx context.Context, verifierID int64, p
 	return &types.PageResponse[types.VerifiedListItem]{List: list, Total: total}, nil
 }
 
+func (s *TicketingService) ListViewers(ctx context.Context, userID int64) (*types.PageResponse[types.ViewerItem], error) {
+	var viewers []models.Viewer
+	if err := s.DB.WithContext(ctx).Where("user_id = ?", userID).Order("created_at desc").Find(&viewers).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.ViewerItem, 0, len(viewers))
+	for _, viewer := range viewers {
+		list = append(list, types.ViewerItem{
+			ID:        viewer.ID,
+			RealName:  viewer.RealName,
+			IDCard:    maskIDCard(viewer.IDCard),
+			Phone:     maskPhone(viewer.Phone),
+			Type:      viewer.Type,
+			CreatedAt: viewer.CreatedAt,
+			UpdatedAt: viewer.UpdatedAt,
+		})
+	}
+	return &types.PageResponse[types.ViewerItem]{List: list, Total: int64(len(list))}, nil
+}
+
+func (s *TicketingService) CreateViewer(ctx context.Context, userID int64, req types.CreateViewerReq) (int64, error) {
+	var viewerID int64
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		viewerType, err := GetAgeTypeByIDCard(req.IDCard)
+		if err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&models.Viewer{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= 5 {
+			return errors.New("常用观演人已达上限")
+		}
+		var exists models.Viewer
+		if err := tx.Where("id_card = ?", req.IDCard).First(&exists).Error; err == nil {
+			if int64(exists.UserID) == userID {
+				return errors.New("该观演人已存在")
+			}
+			return errors.New("该身份证已被其他用户绑定")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Where("phone = ? AND user_id <> ?", req.Phone, userID).First(&exists).Error; err == nil {
+			return errors.New("该手机号已被其他用户绑定")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		viewer := models.Viewer{
+			UserID:   int(userID),
+			RealName: req.RealName,
+			IDCard:   req.IDCard,
+			Phone:    req.Phone,
+			Type:     viewerType,
+		}
+		if err := tx.Create(&viewer).Error; err != nil {
+			return err
+		}
+		viewerID = viewer.ID
+		return nil
+	})
+	return viewerID, err
+}
+
+func (s *TicketingService) UpdateViewer(ctx context.Context, userID, viewerID int64, req types.UpdateViewerReq) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var viewer models.Viewer
+		if err := tx.Where("id = ? AND user_id = ?", viewerID, userID).First(&viewer).Error; err != nil {
+			return err
+		}
+		updates := make(map[string]any)
+		if req.RealName != "" {
+			updates["real_name"] = req.RealName
+		}
+		if req.Phone != "" {
+			var exists models.Viewer
+			if err := tx.Where("phone = ? AND id <> ?", req.Phone, viewerID).First(&exists).Error; err == nil {
+				return errors.New("该手机号已被其他观演人绑定")
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			updates["phone"] = req.Phone
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		return tx.Model(&viewer).Updates(updates).Error
+	})
+}
+
+func (s *TicketingService) DeleteViewer(ctx context.Context, userID, viewerID int64) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var viewer models.Viewer
+		if err := tx.Where("id = ? AND user_id = ?", viewerID, userID).First(&viewer).Error; err != nil {
+			return err
+		}
+		var activeOrders int64
+		if err := tx.Model(&models.TicketOrder{}).
+			Where("user_id = ? AND buyer_id_card = ? AND status IN ?", userID, viewer.IDCard, []int8{
+				models.TicketOrderStatusPending,
+				models.TicketOrderStatusUsable,
+				models.TicketOrderStatusRefunding,
+				models.TicketOrderStatusRefundReject,
+			}).
+			Count(&activeOrders).Error; err != nil {
+			return err
+		}
+		if activeOrders > 0 {
+			return errors.New("观演人已关联未完成订单，暂不可删除")
+		}
+		return tx.Delete(&viewer).Error
+	})
+}
+
 func (s *TicketingService) findOrganizerByUser(ctx context.Context, userID int64) (*models.Organizer, error) {
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
@@ -1063,4 +1266,11 @@ func maskIDCard(card string) string {
 		return card
 	}
 	return card[:4] + strings.Repeat("*", len(card)-8) + card[len(card)-4:]
+}
+
+func maskPhone(phone string) string {
+	if len(phone) != 11 {
+		return phone
+	}
+	return phone[:3] + "****" + phone[7:]
 }

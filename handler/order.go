@@ -8,13 +8,15 @@ import (
 	"Hyper/service"
 	"Hyper/types"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Order struct {
-	Config       *config.Config
-	OrderService service.IOrderService
+	Config           *config.Config
+	OrderService     service.IOrderService
+	TicketingService service.ITicketingService
 }
 
 func (o *Order) RegisterRouter(r gin.IRouter) {
@@ -28,6 +30,25 @@ func (o *Order) RegisterRouter(r gin.IRouter) {
 }
 
 func (o *Order) GetOrder(c *gin.Context) error {
+	if c.Query("legacy") != "1" && o.TicketingService != nil {
+		var status *int8
+		if rawStatus := c.Query("status"); rawStatus != "" {
+			v, err := strconv.ParseInt(rawStatus, 10, 8)
+			if err != nil {
+				return response.NewError(http.StatusBadRequest, "订单状态参数错误")
+			}
+			parsed := int8(v)
+			status = &parsed
+		}
+		userID := int64(c.GetInt("user_id"))
+		orders, err := o.TicketingService.ListTicketOrders(c.Request.Context(), userID, status, orderPage(c), orderSize(c))
+		if err != nil {
+			return response.NewError(500, err.Error())
+		}
+		response.Success(c, orders)
+		return nil
+	}
+
 	var req types.FeedRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, "参数错误")
@@ -84,4 +105,14 @@ func (o *Order) GetViewerList(c *gin.Context) error {
 
 	response.Success(c, viewers_list)
 	return nil
+}
+
+func orderPage(c *gin.Context) int {
+	v, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	return v
+}
+
+func orderSize(c *gin.Context) int {
+	v, _ := strconv.Atoi(c.DefaultQuery("size", c.DefaultQuery("pageSize", "10")))
+	return v
 }
