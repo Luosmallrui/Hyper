@@ -49,11 +49,14 @@ type ConsumePointsReq struct {
 }
 
 type PointsAccountResp struct {
-	Balance       int64 `json:"balance"`        // 当前可用余额
-	TotalEarned   int64 `json:"total_earned"`   // 历史累计获得
-	TotalUsed     int64 `json:"total_used"`     // 历史累计消耗
-	PendingCount  int   `json:"pending_count"`  // 待入账笔数 (Status=0)
-	PendingAmount int64 `json:"pending_amount"` // 待入账总额
+	Balance       int64 `json:"balance"`          // 当前可用余额
+	Points        int64 `json:"points"`           // 兼容客户端余额字段
+	Available     int64 `json:"available"`        // 兼容客户端余额字段
+	AvailablePts  int64 `json:"available_points"` // 兼容客户端余额字段
+	TotalEarned   int64 `json:"total_earned"`     // 历史累计获得
+	TotalUsed     int64 `json:"total_used"`       // 历史累计消耗
+	PendingCount  int   `json:"pending_count"`    // 待入账笔数 (Status=0)
+	PendingAmount int64 `json:"pending_amount"`   // 待入账总额
 }
 
 // PointRecordItem 单条流水记录详情

@@ -25,10 +25,11 @@ const (
 	TicketOrderStatusRefundSuccess int8 = 5
 	TicketOrderStatusRefundReject  int8 = 6
 
-	RefundStatusAuditing int8 = 0
-	RefundStatusRunning  int8 = 1
-	RefundStatusSuccess  int8 = 2
-	RefundStatusRejected int8 = 3
+	RefundStatusAuditing  int8 = 0
+	RefundStatusRunning   int8 = 1
+	RefundStatusSuccess   int8 = 2
+	RefundStatusRejected  int8 = 3
+	RefundStatusCancelled int8 = 4
 
 	VerifierStatusInactive int8 = 0
 	VerifierStatusActive   int8 = 1
@@ -111,24 +112,26 @@ func (TicketSpec) TableName() string {
 }
 
 type TicketOrder struct {
-	ID           int64      `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrderNo      string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
-	UserID       int64      `gorm:"column:user_id;not null;index" json:"user_id"`
-	ActivityID   int64      `gorm:"column:activity_id;not null;index" json:"activity_id"`
-	TicketSpecID int64      `gorm:"column:ticket_spec_id;not null;index" json:"ticket_spec_id"`
-	Quantity     int        `gorm:"column:quantity;not null" json:"quantity"`
-	TotalPrice   int64      `gorm:"column:total_price;not null" json:"total_price"`   // 分
-	ActualPrice  int64      `gorm:"column:actual_price;not null" json:"actual_price"` // 分
-	PayMethod    string     `gorm:"column:pay_method;size:20" json:"pay_method"`
-	PayTime      *time.Time `gorm:"column:pay_time" json:"pay_time"`
-	BuyerName    string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
-	BuyerIDCard  string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
-	Status       int8       `gorm:"column:status;not null;default:0;index" json:"status"`
-	ExpireTime   time.Time  `gorm:"column:expire_time" json:"expire_time"`
-	QRCode       string     `gorm:"column:qr_code;size:255" json:"qr_code"`
-	CancelReason string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
-	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID             int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderNo        string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
+	UserID         int64      `gorm:"column:user_id;not null;index" json:"user_id"`
+	ActivityID     int64      `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	TicketSpecID   int64      `gorm:"column:ticket_spec_id;not null;index" json:"ticket_spec_id"`
+	Quantity       int        `gorm:"column:quantity;not null" json:"quantity"`
+	TotalPrice     int64      `gorm:"column:total_price;not null" json:"total_price"`   // 分
+	ActualPrice    int64      `gorm:"column:actual_price;not null" json:"actual_price"` // 分
+	PointsAmount   int64      `gorm:"column:points_amount;not null;default:0" json:"points_amount"`
+	PointsDiscount int64      `gorm:"column:points_discount;not null;default:0" json:"points_discount"` // 分
+	PayMethod      string     `gorm:"column:pay_method;size:20" json:"pay_method"`
+	PayTime        *time.Time `gorm:"column:pay_time" json:"pay_time"`
+	BuyerName      string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
+	BuyerIDCard    string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
+	Status         int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	ExpireTime     time.Time  `gorm:"column:expire_time" json:"expire_time"`
+	QRCode         string     `gorm:"column:qr_code;size:255" json:"qr_code"`
+	CancelReason   string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
+	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (TicketOrder) TableName() string {
@@ -168,15 +171,17 @@ func (RefundLog) TableName() string {
 }
 
 type Verifier struct {
-	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrganizerID     int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
-	Name            string    `gorm:"column:name;size:50;not null" json:"name"`
-	Phone           string    `gorm:"column:phone;size:20;not null;index" json:"phone"`
-	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
-	PermissionScope string    `gorm:"column:permission_scope;size:20;default:活动" json:"permission_scope"`
-	Channel         string    `gorm:"column:channel;size:20" json:"channel"`
-	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID              int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID     int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	UserID          int64      `gorm:"column:user_id;not null;default:0;index" json:"user_id"`
+	Name            string     `gorm:"column:name;size:50;not null" json:"name"`
+	Phone           string     `gorm:"column:phone;size:20;not null;index" json:"phone"`
+	Status          int8       `gorm:"column:status;not null;default:0" json:"status"`
+	PermissionScope string     `gorm:"column:permission_scope;size:20;default:活动" json:"permission_scope"`
+	Channel         string     `gorm:"column:channel;size:20" json:"channel"`
+	BoundAt         *time.Time `gorm:"column:bound_at" json:"bound_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (Verifier) TableName() string {

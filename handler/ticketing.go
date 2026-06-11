@@ -75,6 +75,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	refund := v1.Group("/refund", auth)
 	{
 		refund.GET("/reasons", h.wrap(h.ListRefundReasons))
+		refund.GET("/list", h.wrap(h.ListUserRefunds))
 		refund.POST("/apply", h.wrap(h.ApplyRefund))
 		refund.GET("/:refund_no", h.wrap(h.GetRefundDetail))
 		refund.POST("/:refund_no/cancel", h.wrap(h.CancelRefund))
@@ -83,7 +84,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 
 	verifier := v1.Group("/verifier")
 	{
-		verifier.POST("/activate", h.wrap(h.ActivateVerifier))
+		verifier.POST("/activate", auth, h.wrap(h.ActivateVerifier))
 		verifier.POST("/scan", h.wrap(h.ScanOrder))
 		verifier.POST("/confirm", h.wrap(h.ConfirmVerify))
 		verifier.GET("/verified-list", h.wrap(h.ListVerified))
@@ -313,11 +314,18 @@ func (h *Ticketing) CreateTicketOrder(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	orderNo, err := h.TicketingService.CreateTicketOrder(c.Request.Context(), currentUserID(c), req)
+	resp, err := h.TicketingService.CreateTicketOrder(c.Request.Context(), currentUserID(c), req)
 	if err != nil {
 		return err
 	}
-	response.Success(c, gin.H{"success": true, "order_no": orderNo})
+	response.Success(c, gin.H{
+		"success":         true,
+		"order_no":        resp.OrderNo,
+		"total_price":     resp.TotalPrice,
+		"points_amount":   resp.PointsAmount,
+		"points_discount": resp.PointsDiscount,
+		"actual_price":    resp.ActualPrice,
+	})
 	return nil
 }
 
@@ -473,6 +481,24 @@ func (h *Ticketing) ApplyRefund(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) ListUserRefunds(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return err
+		}
+		v := int8(value)
+		status = &v
+	}
+	resp, err := h.TicketingService.ListUserRefunds(c.Request.Context(), currentUserID(c), status, page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) ListOrganizerRefunds(c *gin.Context) error {
 	var status *int8
 	if raw := c.Query("status"); raw != "" {
@@ -571,10 +597,11 @@ func (h *Ticketing) ActivateVerifier(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	if err := h.TicketingService.ActivateVerifier(c.Request.Context(), req); err != nil {
+	resp, err := h.TicketingService.ActivateVerifier(c.Request.Context(), currentUserID(c), req)
+	if err != nil {
 		return err
 	}
-	response.Success(c, gin.H{"success": true})
+	response.Success(c, resp)
 	return nil
 }
 

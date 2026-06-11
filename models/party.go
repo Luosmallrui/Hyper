@@ -24,6 +24,9 @@ type Merchant struct {
 	UpdatedAt    time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
 	ImagesJSON   string    `gorm:"type:json;column:images_json" json:"images"`
 	Category     int       `gorm:"column:category" json:"categories"`
+	DistrictID   int       `gorm:"column:district_id" json:"district_id"`
+	AreaID       int       `gorm:"column:area_id" json:"area_id"`
+	Tags         int       `gorm:"column:tags" json:"tags"`
 }
 
 // PartyAttendee 报名记录表
@@ -111,6 +114,10 @@ type MerchantListItem struct {
 	Icon         string    `json:"icon"`
 	IsSubscriber bool      `json:"is_subscribe"`
 	IsFollow     bool      `json:"is_follow"`
+	CategoryID   int       `json:"category_id"`
+	DistrictID   int       `json:"district_id"`
+	AreaID       int       `json:"area_id"`
+	TagIDs       []int     `json:"tag_ids"`
 }
 
 type Category struct {

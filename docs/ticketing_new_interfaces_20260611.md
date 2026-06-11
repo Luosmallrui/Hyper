@@ -359,3 +359,82 @@ PUT /api/v1/admin/settings
   ]
 }
 ```
+
+---
+
+## 8. 核销员扫码绑定
+
+本轮调整了核销员激活语义：后台添加核销员时只录入姓名和手机号，生成激活码；核销员扫码进入小程序后，先完成登录/注册，再把这条核销员邀请绑定到自己的小程序用户。
+
+### 获取核销员激活码
+
+```http
+GET /api/v1/organizer/verifier/:id/activation-qr
+```
+
+返回微信小程序码图片 URL 和小程序码参数：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "wechat_mini_program_code_url": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "wechat_qr_url": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "wechat_qr_page": "pages/user-sub/verifier-bind/index",
+    "wechat_scene": "v=1",
+    "wechat_qr": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "douyin_qr": "hyper://verifier/activate?verifier_id=1&channel=douyin"
+  }
+}
+```
+
+### 激活并绑定核销员
+
+```http
+POST /api/v1/verifier/activate
+Authorization: Bearer <access_token>
+```
+
+小程序侧流程：
+
+1. 扫码解析 `verifier_id` 和 `channel`。
+2. 如果当前用户未登录/未注册，先走现有手机号登录/注册流程。
+3. 带登录态调用本接口完成绑定。
+
+请求：
+
+```json
+{
+  "verifier_id": 1,
+  "phone": "13800138000",
+  "channel": "wechat"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true,
+    "verifier_id": 1,
+    "user_id": 10001,
+    "status": 1
+  }
+}
+```
+
+校验规则：
+
+- 登录用户 `users.mobile` 必须等于后台添加的核销员手机号。
+- 同一核销员邀请已绑定其他用户时，返回错误：`该核销员已绑定其他账号`。
+- 同一用户重复扫码绑定同一邀请时幂等成功。
+
+上线 DDL：
+
+```sql
+ALTER TABLE `verifiers` ADD COLUMN `user_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '绑定的小程序用户ID' AFTER `organizer_id`;
+ALTER TABLE `verifiers` ADD COLUMN `bound_at` datetime NULL COMMENT '绑定时间' AFTER `channel`;
+ALTER TABLE `verifiers` ADD KEY `idx_verifier_user` (`user_id`) USING BTREE;
+```

@@ -5,6 +5,7 @@ import (
 	"Hyper/models"
 	"Hyper/pkg/log"
 	"Hyper/types"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -35,13 +36,14 @@ type ITicketingService interface {
 	GetTicketSpecs(ctx context.Context, activityID int64) ([]models.TicketSpec, error)
 	SaveTicketSpecs(ctx context.Context, userID, activityID int64, specs []types.TicketSpecSaveItem) error
 	DeleteTicketSpec(ctx context.Context, userID, specID int64) error
-	CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (string, error)
+	CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error)
 	ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error)
 	GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error)
 	ListCancelReasons(ctx context.Context) ([]models.CancelReason, error)
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
+	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
 	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
@@ -50,7 +52,7 @@ type ITicketingService interface {
 	AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error
 	DeleteVerifier(ctx context.Context, userID, verifierID int64) error
 	GetVerifierActivationQR(ctx context.Context, userID, verifierID int64) (map[string]string, error)
-	ActivateVerifier(ctx context.Context, req types.ActivateVerifierRequest) error
+	ActivateVerifier(ctx context.Context, userID int64, req types.ActivateVerifierRequest) (*types.ActivateVerifierResponse, error)
 	ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error)
 	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error
 	ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
@@ -68,6 +70,7 @@ type TicketingService struct {
 	DB            *gorm.DB
 	Config        *config.Config
 	WeChatService IWeChatService
+	OssService    IOssService
 }
 
 var _ ITicketingService = (*TicketingService)(nil)
@@ -350,9 +353,10 @@ func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID 
 		Delete(&models.TicketSpec{}).Error
 }
 
-func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (string, error) {
+func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error) {
 	orderNo := "T" + time.Now().Format("20060102150405") + randomHex(4)
 	expireTime := time.Now().Add(15 * time.Minute)
+	result := &types.CreateTicketOrderResponse{OrderNo: orderNo}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var act models.Activity
 		if err := tx.First(&act, req.ActivityID).Error; err != nil {
@@ -389,23 +393,77 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		if err := tx.Model(&spec).UpdateColumn("sold_count", gorm.Expr("sold_count + ?", req.Quantity)).Error; err != nil {
 			return err
 		}
-		order := models.TicketOrder{
-			OrderNo:      orderNo,
-			UserID:       userID,
-			ActivityID:   req.ActivityID,
-			TicketSpecID: req.TicketSpecID,
-			Quantity:     req.Quantity,
-			TotalPrice:   spec.Price * int64(req.Quantity),
-			ActualPrice:  spec.Price * int64(req.Quantity),
-			BuyerName:    req.BuyerName,
-			BuyerIDCard:  req.BuyerIDCard,
-			Status:       models.TicketOrderStatusPending,
-			ExpireTime:   expireTime,
-			QRCode:       "TICKET:" + orderNo + ":" + randomHex(8),
+		totalPrice := spec.Price * int64(req.Quantity)
+		pointsAmount, pointsDiscount := int64(0), int64(0)
+		if req.UsePoints || req.PointsAmount > 0 {
+			if req.PointsAmount <= 0 {
+				return errors.New("积分抵扣数量必须大于0")
+			}
+			pointsAmount = req.PointsAmount
+			pointsDiscount = pointsAmount * 10
+			if pointsDiscount > totalPrice {
+				return errors.New("积分抵扣金额超过订单金额")
+			}
+			var account models.UserPoint
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("user_id = ?", uint64(userID)).
+				First(&account).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errors.New("积分余额不足")
+				}
+				return err
+			}
+			if account.Balance < pointsAmount {
+				return errors.New("积分余额不足")
+			}
+			newBalance := account.Balance - pointsAmount
+			if err := tx.Model(&models.UserPoint{}).
+				Where("user_id = ?", uint64(userID)).
+				Updates(map[string]any{
+					"balance":    newBalance,
+					"total_used": gorm.Expr("total_used + ?", pointsAmount),
+				}).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&models.PointsLog{
+				UserID:     uint64(userID),
+				Amount:     -pointsAmount,
+				Balance:    newBalance,
+				ChangeType: models.TypeOrderDeduct,
+				SourceID:   orderNo,
+				Remark:     "票务订单积分抵扣",
+				Status:     1,
+			}).Error; err != nil {
+				return err
+			}
 		}
-		return tx.Create(&order).Error
+		actualPrice := totalPrice - pointsDiscount
+		order := models.TicketOrder{
+			OrderNo:        orderNo,
+			UserID:         userID,
+			ActivityID:     req.ActivityID,
+			TicketSpecID:   req.TicketSpecID,
+			Quantity:       req.Quantity,
+			TotalPrice:     totalPrice,
+			ActualPrice:    actualPrice,
+			PointsAmount:   pointsAmount,
+			PointsDiscount: pointsDiscount,
+			BuyerName:      req.BuyerName,
+			BuyerIDCard:    req.BuyerIDCard,
+			Status:         models.TicketOrderStatusPending,
+			ExpireTime:     expireTime,
+			QRCode:         "TICKET:" + orderNo + ":" + randomHex(8),
+		}
+		if err := tx.Create(&order).Error; err != nil {
+			return err
+		}
+		result.TotalPrice = totalPrice
+		result.PointsAmount = pointsAmount
+		result.PointsDiscount = pointsDiscount
+		result.ActualPrice = actualPrice
+		return nil
 	})
-	return orderNo, err
+	return result, err
 }
 
 func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error) {
@@ -567,6 +625,69 @@ func (s *TicketingService) ApplyRefund(ctx context.Context, userID int64, req ty
 		return tx.Model(&order).Update("status", models.TicketOrderStatusRefunding).Error
 	})
 	return refundNo, err
+}
+
+func (s *TicketingService) ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error) {
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("refunds r").
+		Joins("JOIN ticket_orders o ON o.id = r.order_id").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("o.user_id = ?", userID)
+	if status != nil {
+		query = query.Where("r.status = ?", *status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		RefundNo     string
+		OrderNo      string
+		Status       int8
+		RefundAmount int64
+		Reason       string
+		CreatedAt    time.Time
+		UpdatedAt    time.Time
+		ActivityID   int64
+		ActivityName string
+		PosterList   string
+	}
+	if err := query.Select(`
+			r.refund_no,
+			o.order_no,
+			r.status,
+			r.refund_amount,
+			r.reason,
+			r.created_at,
+			r.updated_at,
+			a.id AS activity_id,
+			a.name AS activity_name,
+			a.poster_list
+		`).
+		Order("r.id desc").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.UserRefundListItem, 0, len(rows))
+	for _, row := range rows {
+		item := types.UserRefundListItem{
+			RefundNo:     row.RefundNo,
+			OrderNo:      row.OrderNo,
+			Status:       row.Status,
+			StatusText:   refundStatusText(row.Status),
+			RefundAmount: row.RefundAmount,
+			Reason:       row.Reason,
+			CreatedAt:    row.CreatedAt,
+			UpdatedAt:    row.UpdatedAt,
+		}
+		item.Activity.ID = row.ActivityID
+		item.Activity.Name = row.ActivityName
+		item.Activity.PosterList = row.PosterList
+		list = append(list, item)
+	}
+	return &types.PageResponse[types.UserRefundListItem]{List: list, Total: total}, nil
 }
 
 func (s *TicketingService) ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error) {
@@ -745,7 +866,7 @@ func (s *TicketingService) CancelRefund(ctx context.Context, userID int64, refun
 		if refund.Status != models.RefundStatusAuditing {
 			return errors.New("当前退款不可取消")
 		}
-		if err := tx.Model(&refund).Update("status", models.RefundStatusRejected).Error; err != nil {
+		if err := tx.Model(&refund).Update("status", models.RefundStatusCancelled).Error; err != nil {
 			return err
 		}
 		return tx.Model(&order).Update("status", models.TicketOrderStatusUsable).Error
@@ -797,16 +918,75 @@ func (s *TicketingService) GetVerifierActivationQR(ctx context.Context, userID, 
 	if err := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", verifierID, org.ID).First(&models.Verifier{}).Error; err != nil {
 		return nil, err
 	}
-	return map[string]string{
-		"wechat_qr": fmt.Sprintf("hyper://verifier/activate?id=%d&channel=wechat", verifierID),
-		"douyin_qr": fmt.Sprintf("hyper://verifier/activate?id=%d&channel=douyin", verifierID),
-	}, nil
+	resp := map[string]string{
+		"wechat_qr_page": "pages/user-sub/verifier-bind/index",
+		"wechat_scene":   fmt.Sprintf("v=%d", verifierID),
+		"douyin_qr":      fmt.Sprintf("hyper://verifier/activate?verifier_id=%d&channel=douyin", verifierID),
+	}
+	if s.WeChatService == nil {
+		return nil, errors.New("微信服务未初始化")
+	}
+	if s.OssService == nil {
+		return nil, errors.New("OSS 服务未初始化")
+	}
+	if len(resp["wechat_scene"]) > 32 {
+		return nil, errors.New("微信小程序码 scene 超过 32 个字符")
+	}
+	qrBytes, err := s.WeChatService.GenerateUnlimitedQRCode(ctx, resp["wechat_scene"], resp["wechat_qr_page"])
+	if err != nil {
+		return nil, err
+	}
+	objectKey := fmt.Sprintf("verifier/qrcode/%s/%d.png", time.Now().Format("2006/01/02"), verifierID)
+	if err := s.OssService.UploadRaw(ctx, bytes.NewReader(qrBytes), objectKey); err != nil {
+		return nil, err
+	}
+	qrURL := "https://cdn.hypercn.cn/" + objectKey
+	resp["wechat_qr"] = qrURL
+	resp["wechat_qr_url"] = qrURL
+	resp["wechat_mini_program_code_url"] = qrURL
+	return resp, nil
 }
 
-func (s *TicketingService) ActivateVerifier(ctx context.Context, req types.ActivateVerifierRequest) error {
-	return s.DB.WithContext(ctx).Model(&models.Verifier{}).
-		Where("phone = ?", req.Phone).
-		Updates(map[string]any{"status": models.VerifierStatusActive, "channel": req.Channel}).Error
+func (s *TicketingService) ActivateVerifier(ctx context.Context, userID int64, req types.ActivateVerifierRequest) (*types.ActivateVerifierResponse, error) {
+	var user models.Users
+	if err := s.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(user.Mobile) == "" {
+		return nil, errors.New("请先绑定手机号")
+	}
+	if strings.TrimSpace(user.Mobile) != strings.TrimSpace(req.Phone) {
+		return nil, errors.New("登录手机号与核销员手机号不一致")
+	}
+
+	var verifier models.Verifier
+	if err := s.DB.WithContext(ctx).Where("id = ? AND phone = ?", req.VerifierID, req.Phone).First(&verifier).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("核销员邀请不存在")
+		}
+		return nil, err
+	}
+	if verifier.UserID != 0 && verifier.UserID != userID {
+		return nil, errors.New("该核销员已绑定其他账号")
+	}
+
+	now := time.Now()
+	if err := s.DB.WithContext(ctx).Model(&models.Verifier{}).
+		Where("id = ?", verifier.ID).
+		Updates(map[string]any{
+			"user_id":  userID,
+			"status":   models.VerifierStatusActive,
+			"channel":  req.Channel,
+			"bound_at": now,
+		}).Error; err != nil {
+		return nil, err
+	}
+	return &types.ActivateVerifierResponse{
+		Success:    true,
+		VerifierID: verifier.ID,
+		UserID:     userID,
+		Status:     models.VerifierStatusActive,
+	}, nil
 }
 
 func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error) {
@@ -1171,18 +1351,20 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		return nil, err
 	}
 	resp := &types.TicketOrderDetailResponse{
-		OrderNo:     order.OrderNo,
-		Status:      order.Status,
-		TotalPrice:  order.TotalPrice,
-		ActualPrice: order.ActualPrice,
-		Quantity:    order.Quantity,
-		BuyerName:   order.BuyerName,
-		BuyerIDCard: order.BuyerIDCard,
-		PayMethod:   order.PayMethod,
-		PayTime:     order.PayTime,
-		CreatedAt:   order.CreatedAt,
-		QRCode:      order.QRCode,
-		ExpireTime:  order.ExpireTime,
+		OrderNo:        order.OrderNo,
+		Status:         order.Status,
+		TotalPrice:     order.TotalPrice,
+		ActualPrice:    order.ActualPrice,
+		PointsAmount:   order.PointsAmount,
+		PointsDiscount: order.PointsDiscount,
+		Quantity:       order.Quantity,
+		BuyerName:      order.BuyerName,
+		BuyerIDCard:    order.BuyerIDCard,
+		PayMethod:      order.PayMethod,
+		PayTime:        order.PayTime,
+		CreatedAt:      order.CreatedAt,
+		QRCode:         order.QRCode,
+		ExpireTime:     order.ExpireTime,
 	}
 	resp.Activity.ID = act.ID
 	resp.Activity.Name = act.Name
@@ -1192,13 +1374,39 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 	resp.TicketSpec.Name = spec.Name
 	var refund models.Refund
 	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id desc").First(&refund).Error; err == nil {
+		statusText := refundStatusText(refund.Status)
+		resp.RefundNo = refund.RefundNo
 		resp.RefundInfo = &struct {
+			RefundNo         string `json:"refund_no"`
 			RefundAmount     int64  `json:"refund_amount"`
 			Status           int8   `json:"status"`
+			StatusText       string `json:"status_text"`
 			ExpectArriveDate string `json:"expect_arrive_date"`
-		}{RefundAmount: refund.RefundAmount, Status: refund.Status, ExpectArriveDate: refund.ExpectArriveDate}
+		}{RefundNo: refund.RefundNo, RefundAmount: refund.RefundAmount, Status: refund.Status, StatusText: statusText, ExpectArriveDate: refund.ExpectArriveDate}
+		resp.Refund = &struct {
+			RefundNo   string `json:"refund_no"`
+			Status     int8   `json:"status"`
+			StatusText string `json:"status_text"`
+		}{RefundNo: refund.RefundNo, Status: refund.Status, StatusText: statusText}
 	}
 	return resp, nil
+}
+
+func refundStatusText(status int8) string {
+	switch status {
+	case models.RefundStatusAuditing:
+		return "待审核"
+	case models.RefundStatusRunning:
+		return "退款中"
+	case models.RefundStatusSuccess:
+		return "已退款"
+	case models.RefundStatusRejected:
+		return "已驳回"
+	case models.RefundStatusCancelled:
+		return "已取消"
+	default:
+		return "未知"
+	}
 }
 
 func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {

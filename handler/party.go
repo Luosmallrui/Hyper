@@ -177,6 +177,10 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	if districtIdNum > 0 {
 		query = query.Where("district_id = ?", districtIdNum)
 	}
+	areaID, _ := strconv.Atoi(c.Query("area_id"))
+	if areaID > 0 {
+		query = query.Where("area_id = ?", areaID)
+	}
 	categoryParam := c.Query("category")
 	if categoryParam != "" {
 		categoryStrings := strings.Split(categoryParam, ",")
@@ -191,7 +195,10 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			query = query.Where("category IN ?", filtered)
 		}
 	}
-	tagsParam := c.Query("tags") // 假设前端传 "1,2,4"
+	tagsParam := c.Query("tag_ids")
+	if tagsParam == "" {
+		tagsParam = c.Query("tags")
+	}
 	tagStrings := strings.Split(tagsParam, ",")
 	var requiredTags int
 	for _, s := range tagStrings {
@@ -289,6 +296,10 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			Icon:         icon,
 			IsFollow:     isFollow,
 			IsSubscriber: isSubcribe[int(m.ID)],
+			CategoryID:   m.Category,
+			DistrictID:   m.DistrictID,
+			AreaID:       m.AreaID,
+			TagIDs:       tagBitsToIDs(m.Tags),
 		})
 	}
 
