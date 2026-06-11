@@ -30,6 +30,8 @@ type ITicketingService interface {
 	SearchActivities(ctx context.Context, keyword string) ([]types.ActivityListItem, error)
 	DeleteActivity(ctx context.Context, userID, activityID int64) error
 	SubmitActivityAudit(ctx context.Context, userID, activityID int64) error
+	GetActivityStatistics(ctx context.Context, userID, activityID int64) (*types.ActivityStatisticsResponse, error)
+	GetActivityDailyStatistics(ctx context.Context, userID, activityID int64, days int) (*types.PageResponse[types.ActivityDailyStatisticsItem], error)
 	GetTicketSpecs(ctx context.Context, activityID int64) ([]models.TicketSpec, error)
 	SaveTicketSpecs(ctx context.Context, userID, activityID int64, specs []types.TicketSpecSaveItem) error
 	DeleteTicketSpec(ctx context.Context, userID, specID int64) error
@@ -56,6 +58,10 @@ type ITicketingService interface {
 	CreateViewer(ctx context.Context, userID int64, req types.CreateViewerReq) (int64, error)
 	UpdateViewer(ctx context.Context, userID, viewerID int64, req types.UpdateViewerReq) error
 	DeleteViewer(ctx context.Context, userID, viewerID int64) error
+	ListStores(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[models.OrganizerStore], error)
+	CreateStore(ctx context.Context, userID int64, req types.StoreRequest) (int64, error)
+	UpdateStore(ctx context.Context, userID, storeID int64, req types.StoreRequest) error
+	DeleteStore(ctx context.Context, userID, storeID int64) error
 }
 
 type TicketingService struct {
@@ -244,6 +250,60 @@ func (s *TicketingService) SubmitActivityAudit(ctx context.Context, userID, acti
 	return s.DB.WithContext(ctx).Model(&models.Activity{}).
 		Where("id = ? AND organizer_id = ? AND status IN ?", activityID, org.ID, []int8{models.ActivityStatusDraft, models.ActivityStatusRejected}).
 		Update("status", models.ActivityStatusPending).Error
+}
+
+func (s *TicketingService) GetActivityStatistics(ctx context.Context, userID, activityID int64) (*types.ActivityStatisticsResponse, error) {
+	if err := s.ensureActivityOwner(ctx, userID, activityID); err != nil {
+		return nil, err
+	}
+	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
+	resp := &types.ActivityStatisticsResponse{}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("activity_id = ? AND status IN ?", activityID, paidStatuses).
+		Select("COALESCE(SUM(quantity),0), COALESCE(SUM(actual_price),0), COUNT(DISTINCT user_id), COUNT(*)").
+		Row().Scan(&resp.TicketCount, &resp.GrossAmount, &resp.BuyerCount, new(int64)); err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("activity_id = ? AND status = ?", activityID, models.TicketOrderStatusUsed).
+		Select("COALESCE(SUM(quantity),0)").Scan(&resp.VerifiedCount).Error; err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Table("refunds r").
+		Joins("JOIN ticket_orders o ON o.id = r.order_id").
+		Where("o.activity_id = ? AND r.status = ?", activityID, models.RefundStatusSuccess).
+		Select("COALESCE(SUM(r.refund_amount),0)").Scan(&resp.RefundAmount).Error; err != nil {
+		return nil, err
+	}
+	resp.NetAmount = resp.GrossAmount - resp.RefundAmount
+	if resp.TicketCount > 0 {
+		resp.AverageTicketPrice = resp.GrossAmount / resp.TicketCount
+		resp.VerifyRate = float64(resp.VerifiedCount) / float64(resp.TicketCount)
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) GetActivityDailyStatistics(ctx context.Context, userID, activityID int64, days int) (*types.PageResponse[types.ActivityDailyStatisticsItem], error) {
+	if err := s.ensureActivityOwner(ctx, userID, activityID); err != nil {
+		return nil, err
+	}
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+	start := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")
+	var rows []types.ActivityDailyStatisticsItem
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Select("DATE(created_at) AS date, COALESCE(SUM(actual_price),0) AS amount, COALESCE(SUM(quantity),0) AS ticket_count, COUNT(*) AS order_count").
+		Where("activity_id = ? AND status IN ? AND created_at >= ?", activityID, []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}, start).
+		Group("DATE(created_at)").
+		Order("date ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return &types.PageResponse[types.ActivityDailyStatisticsItem]{List: rows, Total: int64(len(rows))}, nil
 }
 
 func (s *TicketingService) GetTicketSpecs(ctx context.Context, activityID int64) ([]models.TicketSpec, error) {
@@ -968,10 +1028,105 @@ func (s *TicketingService) DeleteViewer(ctx context.Context, userID, viewerID in
 	})
 }
 
+func (s *TicketingService) ListStores(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[models.OrganizerStore], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.OrganizerStore{}).Where("organizer_id = ?", org.ID)
+	if keyword != "" {
+		query = query.Where("name LIKE ? OR address LIKE ? OR phone LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var stores []models.OrganizerStore
+	if err := query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&stores).Error; err != nil {
+		return nil, err
+	}
+	return &types.PageResponse[models.OrganizerStore]{List: stores, Total: total}, nil
+}
+
+func (s *TicketingService) CreateStore(ctx context.Context, userID int64, req types.StoreRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	store := models.OrganizerStore{
+		OrganizerID: org.ID,
+		Name:        req.Name,
+		Logo:        req.Logo,
+		Address:     req.Address,
+		Latitude:    req.Latitude,
+		Longitude:   req.Longitude,
+		Phone:       req.Phone,
+	}
+	if err := s.DB.WithContext(ctx).Create(&store).Error; err != nil {
+		return 0, err
+	}
+	return store.ID, nil
+}
+
+func (s *TicketingService) UpdateStore(ctx context.Context, userID, storeID int64, req types.StoreRequest) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	updates := map[string]any{
+		"name":       req.Name,
+		"logo":       req.Logo,
+		"address":    req.Address,
+		"latitude":   req.Latitude,
+		"longitude":  req.Longitude,
+		"phone":      req.Phone,
+		"updated_at": time.Now(),
+	}
+	result := s.DB.WithContext(ctx).Model(&models.OrganizerStore{}).Where("id = ? AND organizer_id = ?", storeID, org.ID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("门店不存在")
+	}
+	return nil
+}
+
+func (s *TicketingService) DeleteStore(ctx context.Context, userID, storeID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	result := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", storeID, org.ID).Delete(&models.OrganizerStore{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("门店不存在")
+	}
+	return nil
+}
+
 func (s *TicketingService) findOrganizerByUser(ctx context.Context, userID int64) (*models.Organizer, error) {
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	return &org, err
+}
+
+func (s *TicketingService) ensureActivityOwner(ctx context.Context, userID, activityID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ? AND organizer_id = ?", activityID, org.ID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("活动不存在或无权限")
+	}
+	return nil
 }
 
 func (s *TicketingService) ensureOrganizer(ctx context.Context, userID int64) (*models.Organizer, error) {
