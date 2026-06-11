@@ -23,9 +23,27 @@ type IAdminService interface {
 	GetPartyList(ctx context.Context, page, pageSize int, keyword, partyType string) (*types.AdminPartyListResponse, error)
 	GetPartyDetail(ctx context.Context, partyID int64) (*types.AdminPartyDetail, error)
 	UpdatePartyStatus(ctx context.Context, partyID int64, status string) error
+	GetActivityList(ctx context.Context, page, pageSize int, status *int8, keyword string, organizerID int64) (*types.AdminActivityListResponse, error)
+	GetActivityDetail(ctx context.Context, activityID int64) (*types.AdminActivityDetail, error)
+	AuditActivity(ctx context.Context, activityID int64, req types.AdminAuditActivityRequest) error
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
 	GetAllTickets(ctx context.Context, page, pageSize int, keyword string) (*types.AdminTicketListResponse, error)
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
+	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status *int8, keyword string) (*types.AdminTicketOrderListResponse, error)
+	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
+	ApproveOrderRefund(ctx context.Context, orderNo string) error
+	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
+	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
+	GetFinanceSettlements(ctx context.Context, page, pageSize int, organizerID int64) (*types.AdminSettlementListResponse, error)
+	GetUserList(ctx context.Context, page, pageSize int, keyword string) (*types.AdminUserListResponse, error)
+	UpdateUserStatus(ctx context.Context, userID int, status int8) error
+	ListBanners(ctx context.Context) ([]models.PlatformBanner, error)
+	CreateBanner(ctx context.Context, req types.AdminBannerRequest) (int64, error)
+	UpdateBanner(ctx context.Context, id int64, req types.AdminBannerRequest) error
+	DeleteBanner(ctx context.Context, id int64) error
+	SortBanners(ctx context.Context, req types.AdminBannerSortRequest) error
+	GetSettings(ctx context.Context) ([]types.AdminSettingItem, error)
+	UpdateSettings(ctx context.Context, settings []types.AdminSettingItem) error
 	GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error)
 }
 
@@ -307,6 +325,159 @@ func (s *AdminService) UpdatePartyStatus(ctx context.Context, partyID int64, sta
 	return nil
 }
 
+func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, status *int8, keyword string, organizerID int64) (*types.AdminActivityListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	query := s.DB.WithContext(ctx).Model(&models.Activity{})
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	} else {
+		query = query.Where("status <> ?", models.ActivityStatusDraft)
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR address LIKE ?", like, like)
+	}
+	if organizerID > 0 {
+		query = query.Where("organizer_id = ?", organizerID)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var activities []models.Activity
+	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&activities).Error; err != nil {
+		return nil, err
+	}
+
+	organizerIDs := make([]int64, 0, len(activities))
+	activityIDs := make([]int64, 0, len(activities))
+	for _, activity := range activities {
+		organizerIDs = append(organizerIDs, activity.OrganizerID)
+		activityIDs = append(activityIDs, activity.ID)
+	}
+
+	organizerMap := make(map[int64]models.Organizer)
+	if len(organizerIDs) > 0 {
+		var organizers []models.Organizer
+		if err := s.DB.WithContext(ctx).Where("id IN ?", organizerIDs).Find(&organizers).Error; err != nil {
+			return nil, err
+		}
+		for _, organizer := range organizers {
+			organizerMap[organizer.ID] = organizer
+		}
+	}
+
+	ticketSpecCountMap := make(map[int64]int)
+	if len(activityIDs) > 0 {
+		var rows []struct {
+			ActivityID int64
+			Count      int
+		}
+		if err := s.DB.WithContext(ctx).Model(&models.TicketSpec{}).
+			Select("activity_id, COUNT(*) AS count").
+			Where("activity_id IN ?", activityIDs).
+			Group("activity_id").
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			ticketSpecCountMap[row.ActivityID] = row.Count
+		}
+	}
+
+	list := make([]types.AdminActivityItem, 0, len(activities))
+	for _, activity := range activities {
+		item := types.AdminActivityItem{
+			ID:               activity.ID,
+			OrganizerID:      activity.OrganizerID,
+			Name:             activity.Name,
+			ShareTitle:       activity.ShareTitle,
+			StartTime:        formatAdminTime(activity.StartTime),
+			EndTime:          formatAdminTime(activity.EndTime),
+			RealNameMode:     activity.RealNameMode,
+			MinorCheck:       activity.MinorCheck,
+			Description:      activity.Description,
+			Province:         activity.Province,
+			City:             activity.City,
+			District:         activity.District,
+			Address:          activity.Address,
+			Latitude:         activity.Latitude,
+			Longitude:        activity.Longitude,
+			PosterDetail:     activity.PosterDetail,
+			PosterLong:       activity.PosterLong,
+			PosterList:       activity.PosterList,
+			PosterWechat:     activity.PosterWechat,
+			QualificationDoc: activity.QualificationDoc,
+			Status:           activity.Status,
+			RejectReason:     activity.RejectReason,
+			TicketSpecCount:  ticketSpecCountMap[activity.ID],
+			CreatedAt:        activity.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:        activity.UpdatedAt.Format("2006-01-02 15:04:05"),
+		}
+		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
+			item.OrganizerName = organizer.Name
+			item.OrganizerType = organizer.Type
+		}
+		list = append(list, item)
+	}
+
+	return &types.AdminActivityListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) GetActivityDetail(ctx context.Context, activityID int64) (*types.AdminActivityDetail, error) {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+		return nil, err
+	}
+
+	detail := &types.AdminActivityDetail{Activity: activity}
+	var organizer models.Organizer
+	if err := s.DB.WithContext(ctx).Where("id = ?", activity.OrganizerID).First(&organizer).Error; err == nil {
+		detail.Organizer = &organizer
+	}
+	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activity.ID).Order("id ASC").Find(&detail.TicketSpecs).Error; err != nil {
+		return nil, err
+	}
+	return detail, nil
+}
+
+func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req types.AdminAuditActivityRequest) error {
+	if req.Status != models.ActivityStatusOnline && req.Status != models.ActivityStatusRejected {
+		return errors.New("审核状态无效，仅支持 3通过上架 或 4拒绝")
+	}
+	if req.Status == models.ActivityStatusRejected && req.RejectReason == "" {
+		return errors.New("拒绝时必须填写 reject_reason")
+	}
+
+	updates := map[string]any{
+		"status":        req.Status,
+		"reject_reason": "",
+		"updated_at":    time.Now(),
+	}
+	if req.Status == models.ActivityStatusRejected {
+		updates["reject_reason"] = req.RejectReason
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ?", activityID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("活动不存在")
+	}
+	return nil
+}
+
 func (s *AdminService) GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error) {
 	query := s.DB.WithContext(ctx).Model(&models.EventTicket{}).Where("event_id = ?", eventID)
 
@@ -446,6 +617,356 @@ func (s *AdminService) GetOrderList(ctx context.Context, page, pageSize int, eve
 	}, nil
 }
 
+func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status *int8, keyword string) (*types.AdminTicketOrderListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{})
+	if activityID > 0 {
+		query = query.Where("activity_id = ?", activityID)
+	}
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("order_no LIKE ? OR buyer_name LIKE ? OR buyer_id_card LIKE ?", like, like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var orders []models.TicketOrder
+	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&orders).Error; err != nil {
+		return nil, err
+	}
+	list, err := s.buildAdminTicketOrderItems(ctx, orders)
+	if err != nil {
+		return nil, err
+	}
+	return &types.AdminTicketOrderListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error) {
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+		return nil, err
+	}
+	items, err := s.buildAdminTicketOrderItems(ctx, []models.TicketOrder{order})
+	if err != nil {
+		return nil, err
+	}
+	var refunds []models.Refund
+	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id DESC").Find(&refunds).Error; err != nil {
+		return nil, err
+	}
+	refundIDs := make([]int64, 0, len(refunds))
+	for _, refund := range refunds {
+		refundIDs = append(refundIDs, refund.ID)
+	}
+	var logs []models.RefundLog
+	if len(refundIDs) > 0 {
+		if err := s.DB.WithContext(ctx).Where("refund_id IN ?", refundIDs).Order("id ASC").Find(&logs).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &types.AdminTicketOrderDetail{Order: items[0], Refunds: refunds, RefundLogs: logs}, nil
+}
+
+func (s *AdminService) ApproveOrderRefund(ctx context.Context, orderNo string) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			return err
+		}
+		var refund models.Refund
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id = ?", order.ID).Order("id DESC").First(&refund).Error; err != nil {
+			return err
+		}
+		if refund.Status != models.RefundStatusAuditing {
+			return errors.New("退款单状态不可审核通过")
+		}
+		if err := tx.Model(&refund).Updates(map[string]any{"status": models.RefundStatusRunning, "wechat_status": "ADMIN_APPROVED"}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&order).Update("status", models.TicketOrderStatusRefunding).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.RefundLog{RefundID: refund.ID, Status: "退款中", Description: "管理员审核通过，等待退款处理"}).Error
+	})
+}
+
+func (s *AdminService) RejectOrderRefund(ctx context.Context, orderNo string, reason string) error {
+	if reason == "" {
+		return errors.New("拒绝原因不能为空")
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+			return err
+		}
+		var refund models.Refund
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id = ?", order.ID).Order("id DESC").First(&refund).Error; err != nil {
+			return err
+		}
+		if refund.Status != models.RefundStatusAuditing {
+			return errors.New("退款单状态不可拒绝")
+		}
+		if err := tx.Model(&refund).Updates(map[string]any{"status": models.RefundStatusRejected, "reject_reason": reason}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&order).Update("status", models.TicketOrderStatusRefundReject).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.RefundLog{RefundID: refund.ID, Status: "退款拒绝", Description: reason}).Error
+	})
+}
+
+func (s *AdminService) GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error) {
+	resp := &types.AdminFinanceSummary{}
+	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("status IN ?", paidStatuses).
+		Select("COALESCE(SUM(actual_price),0), COUNT(*)").Row().Scan(&resp.TotalRevenue, &resp.OrderCount); err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.Refund{}).Where("status = ?", models.RefundStatusSuccess).
+		Select("COALESCE(SUM(refund_amount),0)").Scan(&resp.RefundAmount).Error; err != nil {
+		return nil, err
+	}
+	resp.PendingSettle = resp.TotalRevenue - resp.RefundAmount
+	resp.SettledAmount = 0
+	return resp, nil
+}
+
+func (s *AdminService) GetFinanceSettlements(ctx context.Context, page, pageSize int, organizerID int64) (*types.AdminSettlementListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	base := s.DB.WithContext(ctx).Table("organizers org").
+		Joins("LEFT JOIN activities a ON a.organizer_id = org.id").
+		Joins("LEFT JOIN ticket_orders o ON o.activity_id = a.id AND o.status IN ?", []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}).
+		Joins("LEFT JOIN refunds r ON r.order_id = o.id AND r.status = ?", models.RefundStatusSuccess)
+	if organizerID > 0 {
+		base = base.Where("org.id = ?", organizerID)
+	}
+	var total int64
+	countQuery := s.DB.WithContext(ctx).Model(&models.Organizer{})
+	if organizerID > 0 {
+		countQuery = countQuery.Where("id = ?", organizerID)
+	}
+	if err := countQuery.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []types.AdminSettlementItem
+	if err := base.Select("org.id AS organizer_id, org.name AS organizer_name, COALESCE(SUM(o.actual_price),0) AS gross_amount, COALESCE(SUM(r.refund_amount),0) AS refund_amount, COALESCE(SUM(o.actual_price),0) - COALESCE(SUM(r.refund_amount),0) AS settle_amount, COUNT(o.id) AS order_count").
+		Group("org.id, org.name").
+		Order("org.id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return &types.AdminSettlementListResponse{List: rows, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) GetUserList(ctx context.Context, page, pageSize int, keyword string) (*types.AdminUserListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	query := s.DB.WithContext(ctx).Model(&models.Users{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("nickname LIKE ? OR mobile LIKE ?", like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var users []models.Users
+	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	userIDs := make([]int, 0, len(users))
+	for _, user := range users {
+		userIDs = append(userIDs, user.Id)
+	}
+	stats := map[int]struct {
+		Amount int64
+		Count  int64
+	}{}
+	if len(userIDs) > 0 {
+		var rows []struct {
+			UserID int
+			Amount int64
+			Count  int64
+		}
+		_ = s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Select("user_id, COALESCE(SUM(actual_price),0) AS amount, COUNT(*) AS count").Where("user_id IN ?", userIDs).Group("user_id").Scan(&rows).Error
+		for _, row := range rows {
+			stats[row.UserID] = struct {
+				Amount int64
+				Count  int64
+			}{Amount: row.Amount, Count: row.Count}
+		}
+	}
+	list := make([]types.AdminUserItem, 0, len(users))
+	for _, user := range users {
+		item := types.AdminUserItem{ID: user.Id, Nickname: user.Nickname, Avatar: user.Avatar, Mobile: user.Mobile, Status: user.Status, CreatedAt: user.CreatedAt.Format("2006-01-02 15:04:05"), UpdatedAt: user.UpdatedAt.Format("2006-01-02 15:04:05")}
+		if stat, ok := stats[user.Id]; ok {
+			item.TotalAmount = stat.Amount
+			item.OrderCount = stat.Count
+		}
+		list = append(list, item)
+	}
+	return &types.AdminUserListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) UpdateUserStatus(ctx context.Context, userID int, status int8) error {
+	result := s.DB.WithContext(ctx).Model(&models.Users{}).Where("id = ?", userID).Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("用户不存在")
+	}
+	return nil
+}
+
+func (s *AdminService) ListBanners(ctx context.Context) ([]models.PlatformBanner, error) {
+	var banners []models.PlatformBanner
+	err := s.DB.WithContext(ctx).Order("sort ASC,id DESC").Find(&banners).Error
+	return banners, err
+}
+
+func (s *AdminService) CreateBanner(ctx context.Context, req types.AdminBannerRequest) (int64, error) {
+	banner := models.PlatformBanner{Title: req.Title, Image: req.Image, Link: req.Link, Position: req.Position, Sort: req.Sort, Status: req.Status}
+	if banner.Position == "" {
+		banner.Position = "home"
+	}
+	if banner.Status == 0 {
+		banner.Status = 1
+	}
+	if err := s.DB.WithContext(ctx).Create(&banner).Error; err != nil {
+		return 0, err
+	}
+	return banner.ID, nil
+}
+
+func (s *AdminService) UpdateBanner(ctx context.Context, id int64, req types.AdminBannerRequest) error {
+	updates := map[string]any{"title": req.Title, "image": req.Image, "link": req.Link, "position": req.Position, "sort": req.Sort, "status": req.Status, "updated_at": time.Now()}
+	if updates["position"] == "" {
+		updates["position"] = "home"
+	}
+	return s.DB.WithContext(ctx).Model(&models.PlatformBanner{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (s *AdminService) DeleteBanner(ctx context.Context, id int64) error {
+	return s.DB.WithContext(ctx).Delete(&models.PlatformBanner{}, id).Error
+}
+
+func (s *AdminService) SortBanners(ctx context.Context, req types.AdminBannerSortRequest) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range req.List {
+			if err := tx.Model(&models.PlatformBanner{}).Where("id = ?", item.ID).Update("sort", item.Sort).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *AdminService) GetSettings(ctx context.Context) ([]types.AdminSettingItem, error) {
+	var rows []models.PlatformSetting
+	if err := s.DB.WithContext(ctx).Order("setting_key ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	resp := make([]types.AdminSettingItem, 0, len(rows))
+	for _, row := range rows {
+		resp = append(resp, types.AdminSettingItem{Key: row.Key, Value: row.Value, Remark: row.Remark})
+	}
+	return resp, nil
+}
+
+func (s *AdminService) UpdateSettings(ctx context.Context, settings []types.AdminSettingItem) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range settings {
+			row := models.PlatformSetting{Key: item.Key, Value: item.Value, Remark: item.Remark}
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "setting_key"}}, DoUpdates: clause.Assignments(map[string]any{"setting_value": item.Value, "remark": item.Remark, "updated_at": time.Now()})}).Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []models.TicketOrder) ([]types.AdminTicketOrderItem, error) {
+	userIDs := make([]int, 0, len(orders))
+	activityIDs := make([]int64, 0, len(orders))
+	specIDs := make([]int64, 0, len(orders))
+	for _, order := range orders {
+		userIDs = append(userIDs, int(order.UserID))
+		activityIDs = append(activityIDs, order.ActivityID)
+		specIDs = append(specIDs, order.TicketSpecID)
+	}
+	userMap := map[int]models.Users{}
+	if len(userIDs) > 0 {
+		var users []models.Users
+		if err := s.DB.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+			return nil, err
+		}
+		for _, user := range users {
+			userMap[user.Id] = user
+		}
+	}
+	activityMap := map[int64]models.Activity{}
+	if len(activityIDs) > 0 {
+		var activities []models.Activity
+		if err := s.DB.WithContext(ctx).Where("id IN ?", activityIDs).Find(&activities).Error; err != nil {
+			return nil, err
+		}
+		for _, activity := range activities {
+			activityMap[activity.ID] = activity
+		}
+	}
+	specMap := map[int64]models.TicketSpec{}
+	if len(specIDs) > 0 {
+		var specs []models.TicketSpec
+		if err := s.DB.WithContext(ctx).Where("id IN ?", specIDs).Find(&specs).Error; err != nil {
+			return nil, err
+		}
+		for _, spec := range specs {
+			specMap[spec.ID] = spec
+		}
+	}
+	list := make([]types.AdminTicketOrderItem, 0, len(orders))
+	for _, order := range orders {
+		item := types.AdminTicketOrderItem{OrderNo: order.OrderNo, Status: order.Status, TotalPrice: order.TotalPrice, ActualPrice: order.ActualPrice, Quantity: order.Quantity, UserID: order.UserID, BuyerName: order.BuyerName, BuyerIDCard: order.BuyerIDCard, ActivityID: order.ActivityID, TicketSpecID: order.TicketSpecID, PayMethod: order.PayMethod, PayTime: formatAdminPtrTime(order.PayTime), CreatedAt: order.CreatedAt.Format("2006-01-02 15:04:05")}
+		if user, ok := userMap[int(order.UserID)]; ok {
+			item.UserName = user.Nickname
+			item.UserMobile = user.Mobile
+		}
+		if activity, ok := activityMap[order.ActivityID]; ok {
+			item.ActivityName = activity.Name
+		}
+		if spec, ok := specMap[order.TicketSpecID]; ok {
+			item.TicketSpecName = spec.Name
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
 func (s *AdminService) GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error) {
 	stats := &types.AdminDashboardStats{}
 	db := s.DB.WithContext(ctx)
@@ -473,4 +994,18 @@ func (s *AdminService) GetDashboardStats(ctx context.Context) (*types.AdminDashb
 	}
 
 	return stats, nil
+}
+
+func formatAdminTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+func formatAdminPtrTime(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
 }

@@ -38,12 +38,41 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/parties/:id", context.Wrap(a.GetPartyDetail))
 		authorized.PUT("/parties/:id/status", context.Wrap(a.UpdatePartyStatus))
 
+		// 活动审核管理
+		authorized.GET("/activities", context.Wrap(a.GetActivityList))
+		authorized.GET("/activities/:id", context.Wrap(a.GetActivityDetail))
+		authorized.PUT("/activities/:id/audit", context.Wrap(a.AuditActivity))
+
 		// 票券管理
 		authorized.GET("/tickets", context.Wrap(a.GetAllTickets))
 		authorized.GET("/events/:id/tickets", context.Wrap(a.GetEventTickets))
 
 		// 订单管理
 		authorized.GET("/orders", context.Wrap(a.GetOrderList))
+		authorized.GET("/orders/:order_no", context.Wrap(a.GetOrderDetail))
+		authorized.POST("/orders/:order_no/refund/approve", context.Wrap(a.ApproveOrderRefund))
+		authorized.POST("/orders/:order_no/refund/reject", context.Wrap(a.RejectOrderRefund))
+
+		// 财务结算
+		authorized.GET("/finance/summary", context.Wrap(a.GetFinanceSummary))
+		authorized.GET("/finance/settlements", context.Wrap(a.GetFinanceSettlements))
+		authorized.GET("/finance/settlements/:organizer_id", context.Wrap(a.GetFinanceSettlementDetail))
+		authorized.GET("/finance/settlements/:organizer_id/export", context.Wrap(a.ExportFinanceSettlement))
+
+		// 用户管理
+		authorized.GET("/users", context.Wrap(a.GetUserList))
+		authorized.PUT("/users/:id/status", context.Wrap(a.UpdateUserStatus))
+
+		// 内容管理
+		authorized.GET("/banners", context.Wrap(a.ListBanners))
+		authorized.POST("/banners", context.Wrap(a.CreateBanner))
+		authorized.PUT("/banners/sort", context.Wrap(a.SortBanners))
+		authorized.PUT("/banners/:id", context.Wrap(a.UpdateBanner))
+		authorized.DELETE("/banners/:id", context.Wrap(a.DeleteBanner))
+
+		// 平台设置
+		authorized.GET("/settings", context.Wrap(a.GetSettings))
+		authorized.PUT("/settings", context.Wrap(a.UpdateSettings))
 
 		// 数据概览
 		authorized.GET("/dashboard", context.Wrap(a.GetDashboard))
@@ -201,6 +230,73 @@ func (a *Admin) UpdatePartyStatus(c *gin.Context) error {
 	return nil
 }
 
+// GetActivityList 获取活动审核列表
+// GET /api/v1/admin/activities?page=1&pageSize=20&status=1&keyword=xxx&organizer_id=1
+func (a *Admin) GetActivityList(c *gin.Context) error {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	keyword := c.Query("keyword")
+
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "无效的状态")
+		}
+		s := int8(v)
+		status = &s
+	}
+
+	var organizerID int64
+	if raw := c.Query("organizer_id"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return response.NewError(400, "无效的主办方ID")
+		}
+		organizerID = v
+	}
+
+	result, err := a.AdminService.GetActivityList(c.Request.Context(), page, pageSize, status, keyword, organizerID)
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, result)
+	return nil
+}
+
+// GetActivityDetail 获取活动审核详情
+// GET /api/v1/admin/activities/:id
+func (a *Admin) GetActivityDetail(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的活动ID")
+	}
+	detail, err := a.AdminService.GetActivityDetail(c.Request.Context(), id)
+	if err != nil {
+		return response.NewError(404, "活动不存在")
+	}
+	response.Success(c, detail)
+	return nil
+}
+
+// AuditActivity 审核活动
+// PUT /api/v1/admin/activities/:id/audit
+func (a *Admin) AuditActivity(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的活动ID")
+	}
+	var req types.AdminAuditActivityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.AuditActivity(c.Request.Context(), id, req); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, "审核完成")
+	return nil
+}
+
 // GetAllTickets 获取所有票券列表
 // GET /api/v1/admin/tickets?page=1&pageSize=20&keyword=xxx
 func (a *Admin) GetAllTickets(c *gin.Context) error {
@@ -241,13 +337,209 @@ func (a *Admin) GetEventTickets(c *gin.Context) error {
 func (a *Admin) GetOrderList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	activityID, _ := strconv.ParseInt(c.Query("activity_id"), 10, 64)
+	keyword := c.Query("keyword")
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "无效的订单状态")
+		}
+		s := int8(v)
+		status = &s
+	}
 
-	result, err := a.AdminService.GetOrderList(c.Request.Context(), page, pageSize, 0)
+	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, keyword)
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}
 
 	response.Success(c, result)
+	return nil
+}
+
+func (a *Admin) GetOrderDetail(c *gin.Context) error {
+	resp, err := a.AdminService.GetTicketOrderDetail(c.Request.Context(), c.Param("order_no"))
+	if err != nil {
+		return response.NewError(404, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) ApproveOrderRefund(c *gin.Context) error {
+	if err := a.AdminService.ApproveOrderRefund(c.Request.Context(), c.Param("order_no")); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) RejectOrderRefund(c *gin.Context) error {
+	var req types.RejectRefundRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.RejectOrderRefund(c.Request.Context(), c.Param("order_no"), req.RejectReason); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) GetFinanceSummary(c *gin.Context) error {
+	resp, err := a.AdminService.GetFinanceSummary(c.Request.Context())
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetFinanceSettlements(c *gin.Context) error {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	resp, err := a.AdminService.GetFinanceSettlements(c.Request.Context(), page, pageSize, 0)
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetFinanceSettlementDetail(c *gin.Context) error {
+	organizerID, err := strconv.ParseInt(c.Param("organizer_id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的主办方ID")
+	}
+	resp, err := a.AdminService.GetFinanceSettlements(c.Request.Context(), 1, 1, organizerID)
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) ExportFinanceSettlement(c *gin.Context) error {
+	organizerID, err := strconv.ParseInt(c.Param("organizer_id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的主办方ID")
+	}
+	resp, err := a.AdminService.GetFinanceSettlements(c.Request.Context(), 1, 1, organizerID)
+	if err != nil {
+		return response.NewError(500, "导出失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetUserList(c *gin.Context) error {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	resp, err := a.AdminService.GetUserList(c.Request.Context(), page, pageSize, c.Query("keyword"))
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) UpdateUserStatus(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的用户ID")
+	}
+	var req types.AdminUpdateUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.UpdateUserStatus(c.Request.Context(), int(id), req.Status); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) ListBanners(c *gin.Context) error {
+	resp, err := a.AdminService.ListBanners(c.Request.Context())
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"list": resp})
+	return nil
+}
+
+func (a *Admin) CreateBanner(c *gin.Context) error {
+	var req types.AdminBannerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	id, err := a.AdminService.CreateBanner(c.Request.Context(), req)
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true, "id": id})
+	return nil
+}
+
+func (a *Admin) UpdateBanner(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的Banner ID")
+	}
+	var req types.AdminBannerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.UpdateBanner(c.Request.Context(), id, req); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) DeleteBanner(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的Banner ID")
+	}
+	if err := a.AdminService.DeleteBanner(c.Request.Context(), id); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) SortBanners(c *gin.Context) error {
+	var req types.AdminBannerSortRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.SortBanners(c.Request.Context(), req); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) GetSettings(c *gin.Context) error {
+	resp, err := a.AdminService.GetSettings(c.Request.Context())
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"settings": resp})
+	return nil
+}
+
+func (a *Admin) UpdateSettings(c *gin.Context) error {
+	var req types.AdminSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.UpdateSettings(c.Request.Context(), req.Settings); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
 	return nil
 }
 

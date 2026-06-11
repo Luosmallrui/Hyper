@@ -42,6 +42,10 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
 		organizer.DELETE("/verifier/:id", h.wrap(h.DeleteVerifier))
 		organizer.GET("/verifier/:id/activation-qr", h.wrap(h.GetVerifierActivationQR))
+		organizer.GET("/stores", h.wrap(h.ListStores))
+		organizer.POST("/stores", h.wrap(h.CreateStore))
+		organizer.PUT("/stores/:id", h.wrap(h.UpdateStore))
+		organizer.DELETE("/stores/:id", h.wrap(h.DeleteStore))
 	}
 
 	activity := v1.Group("/activity", auth)
@@ -49,6 +53,8 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		activity.POST("/create", h.wrap(h.SaveActivityStep))
 		activity.GET("/my-list", h.wrap(h.GetMyActivities))
 		activity.GET("/search", h.wrap(h.SearchActivities))
+		activity.GET("/:id/statistics", h.wrap(h.GetActivityStatistics))
+		activity.GET("/:id/statistics/daily", h.wrap(h.GetActivityDailyStatistics))
 		activity.GET("/:id", h.wrap(h.GetActivity))
 		activity.DELETE("/:id", h.wrap(h.DeleteActivity))
 		activity.POST("/:id/submit-audit", h.wrap(h.SubmitActivityAudit))
@@ -234,6 +240,33 @@ func (h *Ticketing) SubmitActivityAudit(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) GetActivityStatistics(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.GetActivityStatistics(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetActivityDailyStatistics(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	resp, err := h.TicketingService.GetActivityDailyStatistics(c.Request.Context(), currentUserID(c), id, days)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) GetTicketSpecs(c *gin.Context) error {
 	id, err := parseID(c.Param("id"))
 	if err != nil {
@@ -312,6 +345,56 @@ func (h *Ticketing) CancelTicketOrder(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.CancelTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no"), req.ReasonID); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListStores(c *gin.Context) error {
+	resp, err := h.TicketingService.ListStores(c.Request.Context(), currentUserID(c), c.Query("keyword"), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateStore(c *gin.Context) error {
+	var req types.StoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.CreateStore(c.Request.Context(), currentUserID(c), req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true, "id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateStore(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.StoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.UpdateStore(c.Request.Context(), currentUserID(c), id, req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) DeleteStore(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteStore(c.Request.Context(), currentUserID(c), id); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

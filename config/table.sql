@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS `users`
     `nickname`   varchar(64)      NOT NULL DEFAULT '' COMMENT '用户昵称',
     `avatar`     varchar(255)     NOT NULL DEFAULT '' COMMENT '用户头像',
     `gender`     tinyint unsigned NOT NULL DEFAULT '3' COMMENT '用户性别[1:男 ;2:女;3:未知]',
+    `status`     tinyint          NOT NULL DEFAULT 1 COMMENT '用户状态: 1正常 0封禁',
     `password`   varchar(255)     NOT NULL COMMENT '用户密码',
     `motto`      varchar(500)     NOT NULL DEFAULT '' COMMENT '用户座右铭',
     `email`      varchar(30)      NOT NULL DEFAULT '' COMMENT '用户邮箱',
@@ -20,6 +21,9 @@ CREATE TABLE IF NOT EXISTS `users`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='用户表';;
+
+-- 如已有 users 表，执行以下 ALTER 添加 status 字段:
+-- ALTER TABLE `users` ADD COLUMN `status` tinyint NOT NULL DEFAULT 1 COMMENT '用户状态: 1正常 0封禁' AFTER `gender`;
 
 CREATE TABLE IF NOT EXISTS `user_follow`
 (
@@ -344,6 +348,49 @@ CREATE TABLE IF NOT EXISTS `refund_reasons`
     `sort`   int             NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='退款原因表';
+
+CREATE TABLE IF NOT EXISTS `organizer_stores`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '门店ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `name`         varchar(100)    NOT NULL COMMENT '门店名称',
+    `logo`         varchar(255)    NOT NULL DEFAULT '',
+    `address`      varchar(200)    NOT NULL DEFAULT '',
+    `latitude`     decimal(10,6)   NOT NULL DEFAULT 0,
+    `longitude`    decimal(10,6)   NOT NULL DEFAULT 0,
+    `phone`        varchar(20)     NOT NULL DEFAULT '',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_store_organizer` (`organizer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方门店表';
+
+CREATE TABLE IF NOT EXISTS `platform_banners`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'Banner ID',
+    `title`      varchar(100)    NOT NULL DEFAULT '',
+    `image`      varchar(255)    NOT NULL COMMENT '图片URL',
+    `link`       varchar(255)    NOT NULL DEFAULT '',
+    `position`   varchar(50)     NOT NULL DEFAULT 'home',
+    `sort`       int             NOT NULL DEFAULT 0,
+    `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_banner_position` (`position`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台Banner表';
+
+CREATE TABLE IF NOT EXISTS `platform_settings`
+(
+    `id`            bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '设置ID',
+    `setting_key`   varchar(100)    NOT NULL COMMENT '设置键',
+    `setting_value` text            COMMENT '设置值',
+    `remark`        varchar(255)    NOT NULL DEFAULT '',
+    `created_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_platform_setting_key` (`setting_key`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台设置表';
 
 INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '计划有变', 1),

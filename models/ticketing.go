@@ -215,3 +215,49 @@ type RefundReason struct {
 func (RefundReason) TableName() string {
 	return "refund_reasons"
 }
+
+type OrganizerStore struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Name        string    `gorm:"column:name;size:100;not null" json:"name"`
+	Logo        string    `gorm:"column:logo;size:255" json:"logo"`
+	Address     string    `gorm:"column:address;size:200" json:"address"`
+	Latitude    float64   `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
+	Longitude   float64   `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
+	Phone       string    `gorm:"column:phone;size:20" json:"phone"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerStore) TableName() string {
+	return "organizer_stores"
+}
+
+type PlatformBanner struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Title     string    `gorm:"column:title;size:100" json:"title"`
+	Image     string    `gorm:"column:image;size:255;not null" json:"image"`
+	Link      string    `gorm:"column:link;size:255" json:"link"`
+	Position  string    `gorm:"column:position;size:50;not null;default:home" json:"position"`
+	Sort      int       `gorm:"column:sort;not null;default:0" json:"sort"`
+	Status    int8      `gorm:"column:status;not null;default:1" json:"status"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (PlatformBanner) TableName() string {
+	return "platform_banners"
+}
+
+type PlatformSetting struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Key       string    `gorm:"column:setting_key;size:100;not null;uniqueIndex" json:"key"`
+	Value     string    `gorm:"column:setting_value;type:text" json:"value"`
+	Remark    string    `gorm:"column:remark;size:255" json:"remark"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (PlatformSetting) TableName() string {
+	return "platform_settings"
+}

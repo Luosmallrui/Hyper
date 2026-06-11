@@ -267,6 +267,24 @@ type VerifiedListItem struct {
 	VerifiedAt        time.Time `json:"verified_at"`
 }
 
+type ActivityStatisticsResponse struct {
+	VerifyRate         float64 `json:"verify_rate"`
+	TicketCount        int64   `json:"ticket_count"`
+	BuyerCount         int64   `json:"buyer_count"`
+	GrossAmount        int64   `json:"gross_amount"`
+	RefundAmount       int64   `json:"refund_amount"`
+	NetAmount          int64   `json:"net_amount"`
+	AverageTicketPrice int64   `json:"average_ticket_price"`
+	VerifiedCount      int64   `json:"verified_count"`
+}
+
+type ActivityDailyStatisticsItem struct {
+	Date        string `json:"date"`
+	Amount      int64  `json:"amount"`
+	TicketCount int64  `json:"ticket_count"`
+	OrderCount  int64  `json:"order_count"`
+}
+
 type ViewerItem struct {
 	ID        int64     `json:"id"`
 	RealName  string    `json:"real_name"`
@@ -275,4 +293,13 @@ type ViewerItem struct {
 	Type      int8      `json:"type"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type StoreRequest struct {
+	Name      string  `json:"name" binding:"required"`
+	Logo      string  `json:"logo"`
+	Address   string  `json:"address"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Phone     string  `json:"phone"`
 }

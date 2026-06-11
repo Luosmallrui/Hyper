@@ -124,6 +124,104 @@ FormData:
 
 ---
 
+## 2.1 首页地图点位
+
+### 获取首页地图点位
+
+该接口用于小程序首页地图，统一返回旧派对/场地点位和新票务活动点位。
+
+```http
+GET /api/v1/map/markers?source=all&limit=200
+```
+
+Query:
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| source | 否 | `all` / `party` / `activity`，默认 `all` |
+| limit | 否 | 每类最多返回数量，默认 `200`，最大 `500` |
+
+数据来源：
+
+| source | 来源表 | 条件 | 说明 |
+|---|---|---|---|
+| party | `parties` | `status=active` | 旧派对/场地 |
+| activity | `activities` | `status=3` | 新票务活动，管理员审核通过后可见 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": "party-1",
+        "source": "party",
+        "source_id": 1,
+        "user_id": 1,
+        "user": "派对主理人",
+        "username": "派对主理人",
+        "user_avatar": "https://cdn.xxx/avatar.jpg",
+        "userAvatar": "https://cdn.xxx/avatar.jpg",
+        "title": "Hyper Club",
+        "type": "场地",
+        "location": "Hyper Club",
+        "address": "朝阳区 xx 路",
+        "lat": 39.9333,
+        "lng": 116.4533,
+        "cover_image": "https://cdn.xxx/cover.jpg",
+        "created_at": "2026-06-03 12:00:00",
+        "avg_price": 7600,
+        "current_count": 9932,
+        "post_count": 372,
+        "icon": "https://cdn.hypercn.cn/icon/jiuba.png",
+        "is_subscribe": false,
+        "is_follow": false,
+        "status": "active"
+      },
+      {
+        "id": "activity-1",
+        "source": "activity",
+        "source_id": 1,
+        "user_id": 1,
+        "user": "Hyper Club",
+        "username": "Hyper Club",
+        "user_avatar": "https://cdn.xxx/logo.jpg",
+        "userAvatar": "https://cdn.xxx/logo.jpg",
+        "title": "周末电音派对",
+        "type": "activity",
+        "location": "朝阳区 xx 路",
+        "address": "朝阳区 xx 路",
+        "lat": 39.9333,
+        "lng": 116.4533,
+        "cover_image": "https://cdn.xxx/list.jpg",
+        "created_at": "2026-06-03 12:00:00",
+        "avg_price": 8800,
+        "current_count": 0,
+        "post_count": 0,
+        "icon": "https://cdn.hypercn.cn/icon/party.png",
+        "is_subscribe": false,
+        "is_follow": false,
+        "start_time": "2026-06-12 20:00:00",
+        "end_time": "2026-06-13 02:00:00",
+        "status": 3
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
+前端跳转建议：
+
+| source | 点击后跳转 |
+|---|---|
+| party | 旧派对/场地详情，使用 `source_id` |
+| activity | 新票务活动详情，使用 `source_id` 调 `/api/v1/activity/:id` |
+
+说明：为兼容旧首页地图卡片，`activity` 类型也会返回 `user`、`username`、`user_avatar`、`userAvatar`、`avg_price`、`current_count`、`post_count`、`is_subscribe`、`is_follow` 等字段。`avg_price` 使用该活动票种最低价，单位为分。
+
 ## 3. 主办方模块
 
 ### 获取主办方信息
@@ -268,6 +366,45 @@ PUT /api/v1/organizer/withdraw-info
 }
 ```
 
+### 门店列表
+
+```http
+GET /api/v1/organizer/stores?page=1&size=10&keyword=三里屯
+```
+
+### 创建门店
+
+```http
+POST /api/v1/organizer/stores
+```
+
+请求：
+
+```json
+{
+  "name": "Hyper 三里屯店",
+  "logo": "https://cdn.xxx/store.jpg",
+  "address": "北京市朝阳区三里屯",
+  "latitude": 39.9333,
+  "longitude": 116.4533,
+  "phone": "13800138000"
+}
+```
+
+### 编辑门店
+
+```http
+PUT /api/v1/organizer/stores/:id
+```
+
+请求字段同创建门店。
+
+### 删除门店
+
+```http
+DELETE /api/v1/organizer/stores/:id
+```
+
 ---
 
 ## 4. 管理后台入驻审核
@@ -327,6 +464,264 @@ PUT /api/v1/admin/organizers/:id/audit
 - `status=2` 表示审核通过，用户入驻成功。
 - `status=3` 表示审核拒绝，必须填写 `reject_reason`。
 - 普通用户申请 `venue` 或 `merchant` 任意一个通过后，即可视为入驻成功。
+
+### 活动审核列表
+
+```http
+GET /api/v1/admin/activities?page=1&pageSize=20&status=1&keyword=周末&organizer_id=1
+```
+
+Query:
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 `1` |
+| pageSize | 否 | 每页数量，默认 `20` |
+| status | 否 | 活动状态；不传返回已提交过审核的活动，不包含草稿；`1` 待审核，`2` 审核中，`3` 已上架，`4` 审核未通过 |
+| keyword | 否 | 按活动名称或地址模糊搜索 |
+| organizer_id | 否 | 按主办方 ID 筛选 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "organizer_id": 1,
+        "organizer_name": "Hyper Club",
+        "organizer_type": "venue",
+        "name": "周末电音派对",
+        "share_title": "周末见",
+        "start_time": "2026-06-12 20:00:00",
+        "end_time": "2026-06-13 02:00:00",
+        "real_name_mode": 1,
+        "minor_check": 1,
+        "description": "活动概要",
+        "province": "北京市",
+        "city": "北京市",
+        "district": "朝阳区",
+        "address": "朝阳区 xx 路",
+        "poster_list": "https://cdn.xxx/list.jpg",
+        "qualification_doc": "https://cdn.xxx/doc.jpg",
+        "status": 1,
+        "reject_reason": "",
+        "ticket_spec_count": 2,
+        "created_at": "2026-06-03 12:00:00",
+        "updated_at": "2026-06-03 12:00:00"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+### 活动审核详情
+
+```http
+GET /api/v1/admin/activities/:id
+```
+
+响应包含活动详情、主办方信息和票种列表：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 1,
+    "organizer_id": 1,
+    "name": "周末电音派对",
+    "status": 1,
+    "reject_reason": "",
+    "organizer": {
+      "id": 1,
+      "type": "venue",
+      "name": "Hyper Club"
+    },
+    "ticket_specs": [
+      {
+        "id": 1,
+        "activity_id": 1,
+        "name": "早鸟票",
+        "price": 8800,
+        "stock": 100
+      }
+    ]
+  }
+}
+```
+
+### 审核活动
+
+```http
+PUT /api/v1/admin/activities/:id/audit
+```
+
+通过并上架：
+
+```json
+{
+  "status": 3
+}
+```
+
+拒绝：
+
+```json
+{
+  "status": 4,
+  "reject_reason": "活动资质不完整"
+}
+```
+
+说明：
+
+- `status=3` 表示审核通过并上架。
+- `status=4` 表示审核拒绝，必须填写 `reject_reason`。
+
+### 后台票务订单列表
+
+```http
+GET /api/v1/admin/orders?page=1&pageSize=20&activity_id=1&status=1&keyword=罗小瑞
+```
+
+Query:
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 `1` |
+| pageSize | 否 | 每页数量，默认 `20` |
+| activity_id | 否 | 按活动筛选 |
+| status | 否 | 按票务订单状态筛选 |
+| keyword | 否 | 订单号、购票人姓名、身份证号模糊搜索 |
+
+### 后台票务订单详情
+
+```http
+GET /api/v1/admin/orders/:order_no
+```
+
+响应包含订单、退款单和退款进度：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "order": {
+      "order_no": "T2026053114300012ab34cd",
+      "status": 1,
+      "actual_price": 8800,
+      "activity_name": "周末电音派对",
+      "ticket_spec_name": "早鸟票",
+      "buyer_name": "罗小瑞"
+    },
+    "refunds": [],
+    "refund_logs": []
+  }
+}
+```
+
+### 后台退款审批
+
+```http
+POST /api/v1/admin/orders/:order_no/refund/approve
+POST /api/v1/admin/orders/:order_no/refund/reject
+```
+
+拒绝请求：
+
+```json
+{
+  "reject_reason": "不符合退款规则"
+}
+```
+
+说明：后台订单退款审批会流转退款单状态；实际微信退款仍建议使用 `/api/v1/pay/refund/:refund_no/approve` 发起。
+
+### 后台财务结算
+
+```http
+GET /api/v1/admin/finance/summary
+GET /api/v1/admin/finance/settlements?page=1&pageSize=20
+GET /api/v1/admin/finance/settlements/:organizer_id
+GET /api/v1/admin/finance/settlements/:organizer_id/export
+```
+
+### 后台用户管理
+
+```http
+GET /api/v1/admin/users?page=1&pageSize=20&keyword=13800138000
+PUT /api/v1/admin/users/:id/status
+```
+
+状态请求：
+
+```json
+{
+  "status": 0
+}
+```
+
+说明：`status=1` 正常，`status=0` 封禁。
+
+### 后台 Banner 管理
+
+```http
+GET /api/v1/admin/banners
+POST /api/v1/admin/banners
+PUT /api/v1/admin/banners/:id
+DELETE /api/v1/admin/banners/:id
+PUT /api/v1/admin/banners/sort
+```
+
+创建/更新请求：
+
+```json
+{
+  "title": "首页活动",
+  "image": "https://cdn.xxx/banner.jpg",
+  "link": "/pages/activity/detail?id=1",
+  "position": "home",
+  "sort": 1,
+  "status": 1
+}
+```
+
+排序请求：
+
+```json
+{
+  "list": [
+    { "id": 1, "sort": 1 },
+    { "id": 2, "sort": 2 }
+  ]
+}
+```
+
+### 后台平台设置
+
+```http
+GET /api/v1/admin/settings
+PUT /api/v1/admin/settings
+```
+
+更新请求：
+
+```json
+{
+  "settings": [
+    {
+      "key": "service_fee_rate",
+      "value": "0.05",
+      "remark": "平台服务费率"
+    }
+  ]
+}
+```
 
 ### 绑定管理员微信通知
 
@@ -547,6 +942,55 @@ DELETE /api/v1/activity/:id
 
 ```http
 POST /api/v1/activity/:id/submit-audit
+```
+
+### 活动统计总览
+
+```http
+GET /api/v1/activity/:id/statistics
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "verify_rate": 0.5,
+    "ticket_count": 20,
+    "buyer_count": 18,
+    "gross_amount": 176000,
+    "refund_amount": 8800,
+    "net_amount": 167200,
+    "average_ticket_price": 8800,
+    "verified_count": 10
+  }
+}
+```
+
+### 活动每日统计
+
+```http
+GET /api/v1/activity/:id/statistics/daily?days=7
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "date": "2026-06-11",
+        "amount": 8800,
+        "ticket_count": 1,
+        "order_count": 1
+      }
+    ],
+    "total": 1
+  }
+}
 ```
 
 ---
