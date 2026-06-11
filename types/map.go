@@ -44,6 +44,10 @@ type MapMarker struct {
 	StartTime       string  `json:"start_time,omitempty"`
 	EndTime         string  `json:"end_time,omitempty"`
 	Status          any     `json:"status"`
+	CategoryID      int     `json:"category_id,omitempty"`
+	DistrictID      int     `json:"district_id,omitempty"`
+	AreaID          int     `json:"area_id,omitempty"`
+	TagIDs          []int   `json:"tag_ids,omitempty"`
 }
 
 type MapMarkerResponse struct {

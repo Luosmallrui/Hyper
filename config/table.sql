@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS `parties`
     `status`        varchar(20)     NOT NULL DEFAULT 'active' COMMENT '状态: active/offline',
     `images_json`   json            COMMENT '图片列表',
     `category`      int             NOT NULL DEFAULT 0 COMMENT '分类',
+    `district_id`   int             NOT NULL DEFAULT 0 COMMENT '行政区ID',
+    `area_id`       int             NOT NULL DEFAULT 0 COMMENT '商圈/区域ID',
+    `tags`          int             NOT NULL DEFAULT 0 COMMENT '标签位图',
     `created_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`) USING BTREE,
@@ -83,6 +86,9 @@ CREATE TABLE IF NOT EXISTS `parties`
 
 -- 如已有 parties 表，执行以下 ALTER 添加 status 字段:
 -- ALTER TABLE `parties` ADD COLUMN `status` varchar(20) NOT NULL DEFAULT 'active' COMMENT '状态: active/offline' AFTER `longitude`;
+-- ALTER TABLE `parties` ADD COLUMN `district_id` int NOT NULL DEFAULT 0 COMMENT '行政区ID' AFTER `category`;
+-- ALTER TABLE `parties` ADD COLUMN `area_id` int NOT NULL DEFAULT 0 COMMENT '商圈/区域ID' AFTER `district_id`;
+-- ALTER TABLE `parties` ADD COLUMN `tags` int NOT NULL DEFAULT 0 COMMENT '标签位图' AFTER `area_id`;
 
 CREATE TABLE IF NOT EXISTS `events`
 (
@@ -256,6 +262,8 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     `quantity`        int             NOT NULL COMMENT '数量',
     `total_price`     bigint          NOT NULL COMMENT '总价(分)',
     `actual_price`    bigint          NOT NULL COMMENT '实付(分)',
+    `points_amount`   bigint          NOT NULL DEFAULT 0 COMMENT '抵扣积分数量',
+    `points_discount` bigint          NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)',
     `pay_method`      varchar(20)     NOT NULL DEFAULT '',
     `pay_time`        datetime        NULL,
     `buyer_name`      varchar(50)     NOT NULL DEFAULT '',
@@ -271,6 +279,10 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     KEY `idx_ticket_order_user` (`user_id`) USING BTREE,
     KEY `idx_ticket_order_activity` (`activity_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票务订单表';
+
+-- Existing deployments:
+-- ALTER TABLE `ticket_orders` ADD COLUMN `points_amount` bigint NOT NULL DEFAULT 0 COMMENT '抵扣积分数量' AFTER `actual_price`;
+-- ALTER TABLE `ticket_orders` ADD COLUMN `points_discount` bigint NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)' AFTER `points_amount`;
 
 CREATE TABLE IF NOT EXISTS `refunds`
 (
@@ -307,17 +319,25 @@ CREATE TABLE IF NOT EXISTS `verifiers`
 (
     `id`               bigint unsigned NOT NULL AUTO_INCREMENT,
     `organizer_id`     bigint unsigned NOT NULL,
+    `user_id`          bigint unsigned NOT NULL DEFAULT 0 COMMENT '绑定的小程序用户ID',
     `name`             varchar(50)     NOT NULL,
     `phone`            varchar(20)     NOT NULL,
     `status`           tinyint         NOT NULL DEFAULT 0 COMMENT '0未激活 1已激活',
     `permission_scope` varchar(20)     NOT NULL DEFAULT '活动',
     `channel`          varchar(20)     NOT NULL DEFAULT '',
+    `bound_at`         datetime        NULL COMMENT '绑定时间',
     `created_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`       datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_verifier_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_verifier_user` (`user_id`) USING BTREE,
     KEY `idx_verifier_phone` (`phone`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='核销员表';
+
+-- Existing deployments:
+-- ALTER TABLE `verifiers` ADD COLUMN `user_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '绑定的小程序用户ID' AFTER `organizer_id`;
+-- ALTER TABLE `verifiers` ADD COLUMN `bound_at` datetime NULL COMMENT '绑定时间' AFTER `channel`;
+-- ALTER TABLE `verifiers` ADD KEY `idx_verifier_user` (`user_id`) USING BTREE;
 
 CREATE TABLE IF NOT EXISTS `verification_records`
 (

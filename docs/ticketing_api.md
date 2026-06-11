@@ -1554,8 +1554,12 @@ GET /api/v1/organizer/verifier/:id/activation-qr
 {
   "code": 200,
   "data": {
-    "wechat_qr": "hyper://verifier/activate?id=1&channel=wechat",
-    "douyin_qr": "hyper://verifier/activate?id=1&channel=douyin"
+    "wechat_mini_program_code_url": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "wechat_qr_url": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "wechat_qr_page": "pages/user-sub/verifier-bind/index",
+    "wechat_scene": "v=1",
+    "wechat_qr": "https://cdn.hypercn.cn/verifier/qrcode/2026/06/11/1.png",
+    "douyin_qr": "hyper://verifier/activate?verifier_id=1&channel=douyin"
   }
 }
 ```
@@ -1564,14 +1568,32 @@ GET /api/v1/organizer/verifier/:id/activation-qr
 
 ```http
 POST /api/v1/verifier/activate
+Authorization: Bearer <access_token>
 ```
+
+说明：核销员激活本质是“绑定邀请记录到小程序用户”。小程序扫码进入后，应先完成登录/注册；未注册用户先走现有手机号登录/注册流程，拿到 `access_token` 后再调用本接口。后端会校验登录用户手机号和后台添加的核销员手机号一致。
 
 请求：
 
 ```json
 {
+  "verifier_id": 1,
   "phone": "13800138000",
   "channel": "wechat"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true,
+    "verifier_id": 1,
+    "user_id": 10001,
+    "status": 1
+  }
 }
 ```
 
@@ -1677,9 +1699,11 @@ X-Verifier-Id: <verifier_id>
 ### 核销
 
 1. 主办方添加核销员：`POST /api/v1/organizer/verifier`
-2. 核销员激活：`POST /api/v1/verifier/activate`
-3. 扫码识别：`POST /api/v1/verifier/scan`
-4. 确认核销：`POST /api/v1/verifier/confirm`
+2. 主办方获取激活码：`GET /api/v1/organizer/verifier/:id/activation-qr`
+3. 核销员扫码进入小程序，未注册则先登录/注册
+4. 核销员绑定邀请：`POST /api/v1/verifier/activate`
+5. 扫码识别：`POST /api/v1/verifier/scan`
+6. 确认核销：`POST /api/v1/verifier/confirm`
 
 ---
 

@@ -279,6 +279,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:            db,
 		Config:        cfg,
 		WeChatService: weChatService,
+		OssService:    iOssService,
 	}
 	order := &handler.Order{
 		Config:           cfg,

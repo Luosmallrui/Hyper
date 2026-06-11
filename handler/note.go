@@ -58,6 +58,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
+	g.DELETE("/:note_id", authorize, context.Wrap(n.DeleteNote))
 	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
 }
 
@@ -336,6 +337,38 @@ func (n *Note) GetMyCollections(c *gin.Context) error {
 		Notes: notes,
 		Total: int(total),
 	})
+	return nil
+}
+
+func (n *Note) DeleteNote(c *gin.Context) error {
+	userID := c.GetInt("user_id")
+	if userID == 0 {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	noteID, err := strconv.ParseUint(c.Param("note_id"), 10, 64)
+	if err != nil || noteID == 0 {
+		return response.NewError(http.StatusBadRequest, "笔记ID格式错误")
+	}
+	var note models.Note
+	if err := n.Db.WithContext(c.Request.Context()).Where("id = ?", noteID).First(&note).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return response.NewError(http.StatusNotFound, "动态不存在")
+		}
+		return response.NewError(http.StatusInternalServerError, "查询动态失败: "+err.Error())
+	}
+	if note.UserID != uint64(userID) {
+		return response.NewError(http.StatusForbidden, "只能删除自己的动态")
+	}
+	if note.Status == -1 {
+		return response.NewError(http.StatusBadRequest, "动态已删除")
+	}
+	if err := n.Db.WithContext(c.Request.Context()).
+		Model(&models.Note{}).
+		Where("id = ? AND user_id = ?", noteID, userID).
+		Updates(map[string]any{"status": -1}).Error; err != nil {
+		return response.NewError(http.StatusInternalServerError, "删除动态失败: "+err.Error())
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "删除成功", "data": gin.H{"success": true}})
 	return nil
 }
 

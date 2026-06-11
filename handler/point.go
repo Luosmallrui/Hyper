@@ -92,6 +92,9 @@ func (p *PointHandler) GetAccountAllPoint(c *gin.Context) error {
 
 	resp := types.PointsAccountResp{
 		Balance:       int64(data.Balance),
+		Points:        int64(data.Balance),
+		Available:     int64(data.Balance),
+		AvailablePts:  int64(data.Balance),
 		TotalEarned:   int64(data.TotalEarned),
 		TotalUsed:     int64(data.TotalUsed),
 		PendingCount:  data.PendingCount,

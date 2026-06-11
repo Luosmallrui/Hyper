@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,8 +56,8 @@ func (m *Map) GetMap(c *gin.Context) error {
 
 func (m *Map) GetMarkers(c *gin.Context) error {
 	source := c.DefaultQuery("source", "all")
-	if source != "all" && source != "party" && source != "activity" {
-		return errors.New("source 仅支持 all、party、activity")
+	if source != "all" && source != "party" && source != "activity" && source != "venue" && source != "merchant" {
+		return errors.New("source 仅支持 all、party、activity、venue、merchant")
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
 	if limit <= 0 {
@@ -67,7 +68,7 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 	}
 
 	markers := make([]types.MapMarker, 0)
-	if source == "all" || source == "party" {
+	if source == "all" || source == "party" || source == "venue" || source == "merchant" {
 		parties, err := m.getPartyMarkers(c, limit)
 		if err != nil {
 			return err
@@ -94,6 +95,18 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", "active").
 		Where("latitude <> 0 AND longitude <> 0")
+	if categoryID := queryInt(c, "category_id"); categoryID > 0 {
+		query = query.Where("category = ?", categoryID)
+	}
+	if districtID := queryInt(c, "district_id"); districtID > 0 {
+		query = query.Where("district_id = ?", districtID)
+	}
+	if areaID := queryInt(c, "area_id"); areaID > 0 {
+		query = query.Where("area_id = ?", areaID)
+	}
+	if tagBits := parseTagBits(c.Query("tag_ids")); tagBits > 0 {
+		query = query.Where("tags & ? = ?", tagBits, tagBits)
+	}
 	if err := query.Order("created_at DESC").Limit(limit).Find(&parties).Error; err != nil {
 		return nil, err
 	}
@@ -114,14 +127,23 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	}
 
 	markers := make([]types.MapMarker, 0, len(parties))
+	requestedSource := c.DefaultQuery("source", "all")
 	for _, party := range parties {
 		icon := "https://cdn.hypercn.cn/icon/party.png"
+		source := "merchant"
 		if party.Type == "场地" {
 			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
+			source = "venue"
+		}
+		if requestedSource == "venue" && source != "venue" {
+			continue
+		}
+		if requestedSource == "merchant" && source != "merchant" {
+			continue
 		}
 		marker := types.MapMarker{
 			ID:           fmt.Sprintf("party-%d", party.ID),
-			Source:       "party",
+			Source:       source,
 			SourceID:     party.ID,
 			UserID:       int64(party.UserID),
 			Title:        party.Title,
@@ -137,6 +159,10 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 			PostCount:    372,
 			Icon:         icon,
 			Status:       party.Status,
+			CategoryID:   party.Category,
+			DistrictID:   party.DistrictID,
+			AreaID:       party.AreaID,
+			TagIDs:       tagBitsToIDs(party.Tags),
 		}
 		if user, ok := userMap[party.UserID]; ok {
 			marker.User = user.Nickname
@@ -304,4 +330,34 @@ func formatMarkerTime(t time.Time) string {
 		return ""
 	}
 	return t.Format("2006-01-02 15:04:05")
+}
+
+func queryInt(c *gin.Context, key string) int {
+	value, _ := strconv.Atoi(c.Query(key))
+	return value
+}
+
+func parseTagBits(raw string) int {
+	var bits int
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		id, _ := strconv.Atoi(item)
+		if id > 0 {
+			bits |= id
+		}
+	}
+	return bits
+}
+
+func tagBitsToIDs(bits int) []int {
+	ids := make([]int, 0)
+	for bit := 1; bit <= bits; bit <<= 1 {
+		if bits&bit == bit {
+			ids = append(ids, bit)
+		}
+	}
+	return ids
 }
