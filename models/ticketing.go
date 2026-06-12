@@ -129,6 +129,7 @@ type TicketOrder struct {
 	Status         int8       `gorm:"column:status;not null;default:0;index" json:"status"`
 	ExpireTime     time.Time  `gorm:"column:expire_time" json:"expire_time"`
 	QRCode         string     `gorm:"column:qr_code;size:255" json:"qr_code"`
+	QRCodeURL      string     `gorm:"column:qr_code_url;size:255" json:"qr_code_url"`
 	CancelReason   string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
 	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`

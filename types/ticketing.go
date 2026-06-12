@@ -126,6 +126,8 @@ type CreateTicketOrderResponse struct {
 	PointsAmount   int64  `json:"points_amount"`
 	PointsDiscount int64  `json:"points_discount"`
 	ActualPrice    int64  `json:"actual_price"`
+	QRCode         string `json:"qr_code"`
+	QRCodeURL      string `json:"qr_code_url"`
 }
 
 type TicketOrderDetailResponse struct {
@@ -153,6 +155,7 @@ type TicketOrderDetailResponse struct {
 	PayTime     *time.Time `json:"pay_time"`
 	CreatedAt   time.Time  `json:"created_at"`
 	QRCode      string     `json:"qr_code"`
+	QRCodeURL   string     `json:"qr_code_url"`
 	ExpireTime  time.Time  `json:"expire_time"`
 	RefundInfo  *struct {
 		RefundNo         string `json:"refund_no"`

@@ -11,10 +11,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image/color"
 	"math"
 	"strings"
 	"time"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -357,7 +359,12 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 	orderNo := "T" + time.Now().Format("20060102150405") + randomHex(4)
 	expireTime := time.Now().Add(15 * time.Minute)
 	result := &types.CreateTicketOrderResponse{OrderNo: orderNo}
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	qrContent := "TICKET:" + orderNo + ":" + randomHex(8)
+	qrURL, err := s.generateTicketQRCodeURL(ctx, orderNo, qrContent)
+	if err != nil {
+		return nil, err
+	}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var act models.Activity
 		if err := tx.First(&act, req.ActivityID).Error; err != nil {
 			return err
@@ -452,7 +459,8 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 			BuyerIDCard:    req.BuyerIDCard,
 			Status:         models.TicketOrderStatusPending,
 			ExpireTime:     expireTime,
-			QRCode:         "TICKET:" + orderNo + ":" + randomHex(8),
+			QRCode:         qrContent,
+			QRCodeURL:      qrURL,
 		}
 		if err := tx.Create(&order).Error; err != nil {
 			return err
@@ -461,6 +469,8 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		result.PointsAmount = pointsAmount
 		result.PointsDiscount = pointsDiscount
 		result.ActualPrice = actualPrice
+		result.QRCode = qrContent
+		result.QRCodeURL = qrURL
 		return nil
 	})
 	return result, err
@@ -472,6 +482,27 @@ func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int6
 		return nil, err
 	}
 	return s.buildOrderDetail(ctx, order)
+}
+
+func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo, content string) (string, error) {
+	if s.OssService == nil {
+		return "", errors.New("OSS 服务未初始化")
+	}
+	qr, err := qrcode.New(content, qrcode.High)
+	if err != nil {
+		return "", err
+	}
+	qr.ForegroundColor = color.RGBA{R: 32, G: 18, B: 54, A: 255}
+	qr.BackgroundColor = color.RGBA{R: 248, G: 252, B: 255, A: 255}
+	png, err := qr.PNG(640)
+	if err != nil {
+		return "", err
+	}
+	objectKey := fmt.Sprintf("ticket/qrcode/%s/%s.png", time.Now().Format("2006/01/02"), orderNo)
+	if err := s.OssService.UploadRaw(ctx, bytes.NewReader(png), objectKey); err != nil {
+		return "", err
+	}
+	return "https://cdn.hypercn.cn/" + objectKey, nil
 }
 
 func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
@@ -936,7 +967,7 @@ func (s *TicketingService) GetVerifierActivationQR(ctx context.Context, userID, 
 	if err != nil {
 		return nil, err
 	}
-	objectKey := fmt.Sprintf("verifier/qrcode/%s/%d.png", time.Now().Format("2006/01/02"), verifierID)
+	objectKey := fmt.Sprintf("verifier/qrcode/%s/%d.jpg", time.Now().Format("2006/01/02"), verifierID)
 	if err := s.OssService.UploadRaw(ctx, bytes.NewReader(qrBytes), objectKey); err != nil {
 		return nil, err
 	}
@@ -944,6 +975,7 @@ func (s *TicketingService) GetVerifierActivationQR(ctx context.Context, userID, 
 	resp["wechat_qr"] = qrURL
 	resp["wechat_qr_url"] = qrURL
 	resp["wechat_mini_program_code_url"] = qrURL
+	fmt.Println(resp)
 	return resp, nil
 }
 
@@ -1364,6 +1396,7 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		PayTime:        order.PayTime,
 		CreatedAt:      order.CreatedAt,
 		QRCode:         order.QRCode,
+		QRCodeURL:      order.QRCodeURL,
 		ExpireTime:     order.ExpireTime,
 	}
 	resp.Activity.ID = act.ID
