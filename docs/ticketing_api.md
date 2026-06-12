@@ -1264,10 +1264,13 @@ GET /api/v1/order/:order_no
     "pay_time": null,
     "created_at": "2026-05-31T14:30:00+08:00",
     "qr_code": "TICKET:T2026053114300012ab34cd:xxxx",
+    "qr_code_url": "https://cdn.hypercn.cn/ticket/qrcode/2026/06/12/T2026053114300012ab34cd.png",
     "expire_time": "2026-05-31T14:45:00+08:00"
   }
 }
 ```
+
+说明：`qr_code_url` 是用户购票后的线下取票/核销二维码图片；图片内容为 `qr_code` 字符串，核销端扫码后将扫码内容传给 `/api/v1/verifier/scan`。
 
 ### 我的票务订单列表
 

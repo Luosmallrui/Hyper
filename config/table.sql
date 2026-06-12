@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     `status`          tinyint         NOT NULL DEFAULT 0 COMMENT '0待支付 1待使用 2已使用 3取消 4退款中 5退款成功 6退款拒绝',
     `expire_time`     datetime        NULL,
     `qr_code`         varchar(255)    NOT NULL DEFAULT '',
+    `qr_code_url`     varchar(255)    NOT NULL DEFAULT '' COMMENT '取票二维码图片URL',
     `cancel_reason`   varchar(100)    NOT NULL DEFAULT '',
     `created_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -283,6 +284,7 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
 -- Existing deployments:
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_amount` bigint NOT NULL DEFAULT 0 COMMENT '抵扣积分数量' AFTER `actual_price`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_discount` bigint NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)' AFTER `points_amount`;
+-- ALTER TABLE `ticket_orders` ADD COLUMN `qr_code_url` varchar(255) NOT NULL DEFAULT '' COMMENT '取票二维码图片URL' AFTER `qr_code`;
 
 CREATE TABLE IF NOT EXISTS `refunds`
 (

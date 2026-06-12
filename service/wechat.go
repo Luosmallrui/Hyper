@@ -121,12 +121,17 @@ func (w *WeChatService) GenerateUnlimitedQRCode(ctx context.Context, scene, page
 		"scene":       scene,
 		"page":        page,
 		"check_path":  false,
-		"env_version": "release",
+		"env_version": "trial",
+		"width":       430,
+		"auto_color":  true,
+		"is_hyaline":  false,
 	})
 	if err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=%s", accessToken)
+	fmt.Println(url, 55)
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
@@ -141,6 +146,7 @@ func (w *WeChatService) GenerateUnlimitedQRCode(ctx context.Context, scene, page
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("wx api resp len:%d, content head:%s\n", len(data), string(data[:min(200, len(data))]))
 	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
 		var wxResp struct {
 			ErrCode int    `json:"errcode"`
