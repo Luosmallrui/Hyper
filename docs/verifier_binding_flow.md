@@ -115,7 +115,46 @@ verifier_id = v
 channel = wechat
 ```
 
-### 4.1 激活并绑定核销员
+微信小程序码不会直接跳转到带 query 的完整链接，例如：
+
+```text
+/pages/user-sub/verifier-bind/index?organizerName=测试主办方
+```
+
+实际打开的是 `pages/user-sub/verifier-bind/index`，参数在 `options.scene` 中。由于微信 `scene` 有长度限制，且中文主办方名称编码后很容易超长，二维码中只放短参数 `v`。页面需要通过 `v` 查询确认信息。
+
+### 4.1 获取绑定确认信息
+
+```http
+GET /api/v1/verifier/activation-info?v=1
+```
+
+或：
+
+```http
+GET /api/v1/verifier/activation-info?verifier_id=1
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "verifier_id": 1,
+    "name": "核销员A",
+    "phone": "13800138000",
+    "status": 0,
+    "is_bound": false,
+    "organizer_id": 10,
+    "organizer_name": "测试主办方"
+  }
+}
+```
+
+前端绑定页可用 `organizer_name` 展示确认文案。
+
+### 4.2 激活并绑定核销员
 
 ```http
 POST /api/v1/verifier/activate

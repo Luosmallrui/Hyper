@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/snowflake"
 	"Hyper/service"
 	"Hyper/types"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -84,6 +85,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 
 	verifier := v1.Group("/verifier")
 	{
+		verifier.GET("/activation-info", h.wrap(h.GetVerifierActivationInfo))
 		verifier.POST("/activate", auth, h.wrap(h.ActivateVerifier))
 		verifier.POST("/scan", h.wrap(h.ScanOrder))
 		verifier.POST("/confirm", h.wrap(h.ConfirmVerify))
@@ -585,6 +587,23 @@ func (h *Ticketing) GetVerifierActivationQR(c *gin.Context) error {
 		return err
 	}
 	resp, err := h.TicketingService.GetVerifierActivationQR(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetVerifierActivationInfo(c *gin.Context) error {
+	raw := c.Query("verifier_id")
+	if raw == "" {
+		raw = c.Query("v")
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return errors.New("verifier_id 参数错误")
+	}
+	resp, err := h.TicketingService.GetVerifierActivationInfo(c.Request.Context(), id)
 	if err != nil {
 		return err
 	}

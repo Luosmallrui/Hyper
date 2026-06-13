@@ -209,6 +209,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		LikeService:    serviceLikeService,
 		CollectService: serviceCollectService,
 		NoteService:    noteService,
+		DB:             db,
 	}
 	session := &handler.Session{
 		SessionService: sessionService,

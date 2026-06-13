@@ -89,6 +89,9 @@ type UserProfileResp struct {
 	AccessToken  string        `json:"access_token,omitempty"`
 	RefreshToken string        `json:"refresh_token,omitempty"`
 	IsFollowing  bool          `json:"is_following"`
+	IsVerifier   bool          `json:"is_verifier"`
+	VerifierID   int64         `json:"verifier_id,omitempty"`
+	Verifier     *VerifierInfo `json:"verifier,omitempty"`
 }
 
 type UserToken struct {
@@ -99,17 +102,29 @@ type UserToken struct {
 	NeedSetPassword bool   `json:"need_set_password,omitempty"`
 }
 type UserBasicInfo struct {
-	Id          int       `json:"id"`
-	UserID      string    `json:"user_id"`    // Snowflake ID（对外）
-	Nickname    string    `json:"nickname"`   // 邪修的马路路
-	AvatarURL   string    `json:"avatar_url"` // 头像
-	VipLevel    string    `json:"vip_level"`  // gold / silver / none
-	PhoneNumber string    `json:"phone_number"`
-	Signature   string    `json:"signature"`
-	Gender      int       `json:"gender"`
-	Location    string    `json:"location,omitempty"`
-	IPAddress   string    `json:"ip_location,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	Id          int           `json:"id"`
+	UserID      string        `json:"user_id"`    // Snowflake ID（对外）
+	Nickname    string        `json:"nickname"`   // 邪修的马路路
+	AvatarURL   string        `json:"avatar_url"` // 头像
+	VipLevel    string        `json:"vip_level"`  // gold / silver / none
+	PhoneNumber string        `json:"phone_number"`
+	Signature   string        `json:"signature"`
+	Gender      int           `json:"gender"`
+	Location    string        `json:"location,omitempty"`
+	IPAddress   string        `json:"ip_location,omitempty"`
+	CreatedAt   time.Time     `json:"created_at"`
+	IsVerifier  bool          `json:"is_verifier"`
+	VerifierID  int64         `json:"verifier_id,omitempty"`
+	Verifier    *VerifierInfo `json:"verifier,omitempty"`
+}
+
+type VerifierInfo struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Phone         string `json:"phone"`
+	Status        int8   `json:"status"`
+	OrganizerID   int64  `json:"organizer_id"`
+	OrganizerName string `json:"organizer_name"`
 }
 
 type UserStats struct {

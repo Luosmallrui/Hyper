@@ -3,6 +3,7 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/middleware"
+	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/pkg/utils"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type User struct {
@@ -27,6 +29,7 @@ type User struct {
 	LikeService    service.LikeService
 	CollectService service.CollectService
 	NoteService    service.INoteService
+	DB             *gorm.DB
 }
 
 func (u *User) RegisterRouter(r gin.IRouter) {
@@ -111,6 +114,28 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 		)
 	}
 
+	var verifierInfo *types.VerifierInfo
+	if !isQueryOther && u.DB != nil {
+		var verifier models.Verifier
+		if err := u.DB.WithContext(ctx).
+			Where("user_id = ? AND status = ?", loginUID, models.VerifierStatusActive).
+			Order("id desc").
+			First(&verifier).Error; err == nil {
+			info := &types.VerifierInfo{
+				ID:          verifier.ID,
+				Name:        verifier.Name,
+				Phone:       verifier.Phone,
+				Status:      verifier.Status,
+				OrganizerID: verifier.OrganizerID,
+			}
+			var org models.Organizer
+			if err := u.DB.WithContext(ctx).First(&org, verifier.OrganizerID).Error; err == nil {
+				info.OrganizerName = org.Name
+			}
+			verifierInfo = info
+		}
+	}
+
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
 			Id:          userInfo.Id,
@@ -120,6 +145,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 			AvatarURL:   userInfo.Avatar,
 			Signature:   userInfo.Motto,
 			CreatedAt:   userInfo.CreatedAt,
+			IsVerifier:  verifierInfo != nil,
 		},
 		Stats: types.UserStats{
 			Following: following,
@@ -127,6 +153,13 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 			Likes:     totalLikes + totalCollects,
 		},
 		IsFollowing: isFollowing,
+		IsVerifier:  verifierInfo != nil,
+	}
+	if verifierInfo != nil {
+		rep.VerifierID = verifierInfo.ID
+		rep.Verifier = verifierInfo
+		rep.User.VerifierID = verifierInfo.ID
+		rep.User.Verifier = verifierInfo
 	}
 
 	response.Success(c, rep)

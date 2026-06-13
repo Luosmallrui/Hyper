@@ -54,6 +54,7 @@ type ITicketingService interface {
 	AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error
 	DeleteVerifier(ctx context.Context, userID, verifierID int64) error
 	GetVerifierActivationQR(ctx context.Context, userID, verifierID int64) (map[string]string, error)
+	GetVerifierActivationInfo(ctx context.Context, verifierID int64) (*types.VerifierActivationInfoResponse, error)
 	ActivateVerifier(ctx context.Context, userID int64, req types.ActivateVerifierRequest) (*types.ActivateVerifierResponse, error)
 	ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error)
 	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error
@@ -975,7 +976,29 @@ func (s *TicketingService) GetVerifierActivationQR(ctx context.Context, userID, 
 	resp["wechat_qr"] = qrURL
 	resp["wechat_qr_url"] = qrURL
 	resp["wechat_mini_program_code_url"] = qrURL
-	fmt.Println(resp)
+	return resp, nil
+}
+
+func (s *TicketingService) GetVerifierActivationInfo(ctx context.Context, verifierID int64) (*types.VerifierActivationInfoResponse, error) {
+	var verifier models.Verifier
+	if err := s.DB.WithContext(ctx).First(&verifier, verifierID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("核销员邀请不存在")
+		}
+		return nil, err
+	}
+	resp := &types.VerifierActivationInfoResponse{
+		VerifierID:  verifier.ID,
+		Name:        verifier.Name,
+		Phone:       verifier.Phone,
+		Status:      verifier.Status,
+		IsBound:     verifier.UserID != 0,
+		OrganizerID: verifier.OrganizerID,
+	}
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).First(&org, verifier.OrganizerID).Error; err == nil {
+		resp.OrganizerName = org.Name
+	}
 	return resp, nil
 }
 
@@ -984,15 +1007,26 @@ func (s *TicketingService) ActivateVerifier(ctx context.Context, userID int64, r
 	if err := s.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
 		return nil, err
 	}
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.Channel = strings.TrimSpace(req.Channel)
+	if req.Channel == "" {
+		req.Channel = "wechat"
+	}
 	if strings.TrimSpace(user.Mobile) == "" {
 		return nil, errors.New("请先绑定手机号")
 	}
-	if strings.TrimSpace(user.Mobile) != strings.TrimSpace(req.Phone) {
+	if strings.TrimSpace(user.Mobile) != req.Phone {
 		return nil, errors.New("登录手机号与核销员手机号不一致")
 	}
 
 	var verifier models.Verifier
-	if err := s.DB.WithContext(ctx).Where("id = ? AND phone = ?", req.VerifierID, req.Phone).First(&verifier).Error; err != nil {
+	query := s.DB.WithContext(ctx).Where("phone = ?", req.Phone)
+	if req.VerifierID > 0 {
+		query = query.Where("id = ?", req.VerifierID)
+	} else {
+		query = query.Where("(user_id = 0 OR user_id = ?)", userID)
+	}
+	if err := query.Order("id desc").First(&verifier).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("核销员邀请不存在")
 		}
