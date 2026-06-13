@@ -286,6 +286,42 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_discount` bigint NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)' AFTER `points_amount`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `qr_code_url` varchar(255) NOT NULL DEFAULT '' COMMENT '取票二维码图片URL' AFTER `qr_code`;
 
+CREATE TABLE IF NOT EXISTS `ticket_order_viewers`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单观演人ID',
+    `order_id`   bigint unsigned NOT NULL COMMENT '票务订单ID',
+    `order_no`   varchar(30)     NOT NULL COMMENT '订单号',
+    `viewer_id`  bigint unsigned NOT NULL DEFAULT 0 COMMENT '观演人ID，直接提交实名信息时为0',
+    `real_name`  varchar(50)     NOT NULL COMMENT '观演人姓名快照',
+    `id_card`    varchar(20)     NOT NULL COMMENT '身份证号快照',
+    `phone`      varchar(20)     NOT NULL DEFAULT '' COMMENT '手机号快照',
+    `type`       tinyint         NOT NULL DEFAULT 1 COMMENT '类型：1成人 2儿童 3老人',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_ticket_order_viewer_order` (`order_id`) USING BTREE,
+    KEY `idx_ticket_order_viewer_order_no` (`order_no`) USING BTREE,
+    KEY `idx_ticket_order_viewer_viewer` (`viewer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票务订单观演人表';
+
+-- Existing deployments:
+-- CREATE TABLE IF NOT EXISTS `ticket_order_viewers` (
+--     `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单观演人ID',
+--     `order_id` bigint unsigned NOT NULL COMMENT '票务订单ID',
+--     `order_no` varchar(30) NOT NULL COMMENT '订单号',
+--     `viewer_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '观演人ID，直接提交实名信息时为0',
+--     `real_name` varchar(50) NOT NULL COMMENT '观演人姓名快照',
+--     `id_card` varchar(20) NOT NULL COMMENT '身份证号快照',
+--     `phone` varchar(20) NOT NULL DEFAULT '' COMMENT '手机号快照',
+--     `type` tinyint NOT NULL DEFAULT 1 COMMENT '类型：1成人 2儿童 3老人',
+--     `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--     `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+--     PRIMARY KEY (`id`) USING BTREE,
+--     KEY `idx_ticket_order_viewer_order` (`order_id`) USING BTREE,
+--     KEY `idx_ticket_order_viewer_order_no` (`order_no`) USING BTREE,
+--     KEY `idx_ticket_order_viewer_viewer` (`viewer_id`) USING BTREE
+-- ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票务订单观演人表';
+
 CREATE TABLE IF NOT EXISTS `refunds`
 (
     `id`                 bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -413,6 +449,13 @@ CREATE TABLE IF NOT EXISTS `platform_settings`
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `uk_platform_setting_key` (`setting_key`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台设置表';
+
+-- Existing viewers table migration:
+-- 观演人允许被不同购票账号重复添加，仅限制同一账号内身份证/手机号重复。
+-- ALTER TABLE `viewers` DROP INDEX `uk_id_card`;
+-- ALTER TABLE `viewers` DROP INDEX `uk_phone`;
+-- ALTER TABLE `viewers` ADD UNIQUE KEY `uk_viewer_user_id_card` (`user_id`, `id_card`);
+-- ALTER TABLE `viewers` ADD UNIQUE KEY `uk_viewer_user_phone` (`user_id`, `phone`);
 
 INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '计划有变', 1),

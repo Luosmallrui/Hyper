@@ -50,11 +50,11 @@ func (PayRecord) TableName() string {
 // Viewer 观影人表
 type Viewer struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID    int       `gorm:"not null;index" json:"user_id"`                                // 所属用户ID（关联 users 表）
-	RealName  string    `gorm:"size:50;not null" json:"real_name"`                            // 真实姓名
-	IDCard    string    `gorm:"type:char(18);not null;uniqueIndex:uk_id_card" json:"id_card"` // 身份证号
-	Phone     string    `gorm:"type:char(11);not null;uniqueIndex:uk_phone" json:"phone"`     // 手机号码
-	Type      int8      `gorm:"default:1" json:"type"`                                        // 类型：1-成人，2-儿童，3-老人
+	UserID    int       `gorm:"not null;uniqueIndex:uk_viewer_user_id_card;uniqueIndex:uk_viewer_user_phone" json:"user_id"` // 所属用户ID（关联 users 表）
+	RealName  string    `gorm:"size:50;not null" json:"real_name"`                                                           // 真实姓名
+	IDCard    string    `gorm:"type:char(18);not null;uniqueIndex:uk_viewer_user_id_card" json:"id_card"`                    // 身份证号
+	Phone     string    `gorm:"type:char(11);not null;uniqueIndex:uk_viewer_user_phone" json:"phone"`                        // 手机号码
+	Type      int8      `gorm:"default:1" json:"type"`                                                                       // 类型：1-成人，2-儿童，3-老人
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

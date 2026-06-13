@@ -427,6 +427,10 @@ func (h *Ticketing) CreateViewer(c *gin.Context) error {
 	}
 	id, err := h.TicketingService.CreateViewer(c.Request.Context(), currentUserID(c), req)
 	if err != nil {
+		if isViewerConflict(err) {
+			response.Abort(c, http.StatusConflict, err.Error())
+			return nil
+		}
 		return err
 	}
 	response.Success(c, gin.H{"success": true, "id": id})
@@ -443,6 +447,10 @@ func (h *Ticketing) UpdateViewer(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.UpdateViewer(c.Request.Context(), currentUserID(c), id, req); err != nil {
+		if isViewerConflict(err) {
+			response.Abort(c, http.StatusConflict, err.Error())
+			return nil
+		}
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
@@ -690,6 +698,14 @@ func currentUserID(c *gin.Context) int64 {
 func verifierID(c *gin.Context) int64 {
 	id, _ := strconv.ParseInt(c.GetHeader("X-Verifier-Id"), 10, 64)
 	return id
+}
+
+func isViewerConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "已存在") || strings.Contains(msg, "已被") || strings.Contains(msg, "Duplicate entry")
 }
 
 func page(c *gin.Context) int {

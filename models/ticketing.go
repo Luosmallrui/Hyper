@@ -139,6 +139,23 @@ func (TicketOrder) TableName() string {
 	return "ticket_orders"
 }
 
+type TicketOrderViewer struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrderID   int64     `gorm:"column:order_id;not null;index" json:"order_id"`
+	OrderNo   string    `gorm:"column:order_no;size:30;not null;index" json:"order_no"`
+	ViewerID  int64     `gorm:"column:viewer_id;not null;default:0;index" json:"viewer_id"`
+	RealName  string    `gorm:"column:real_name;size:50;not null" json:"real_name"`
+	IDCard    string    `gorm:"column:id_card;size:20;not null" json:"id_card"`
+	Phone     string    `gorm:"column:phone;size:20;not null;default:''" json:"phone"`
+	Type      int8      `gorm:"column:type;not null;default:1" json:"type"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (TicketOrderViewer) TableName() string {
+	return "ticket_order_viewers"
+}
+
 type Refund struct {
 	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrderID          int64     `gorm:"column:order_id;not null;index" json:"order_id"`

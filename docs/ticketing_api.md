@@ -1165,9 +1165,22 @@ POST /api/v1/order/create
 {
   "activity_id": 1,
   "ticket_spec_id": 1,
-  "quantity": 1,
-  "buyer_name": "罗小瑞",
-  "buyer_id_card": "500101199811040817"
+  "quantity": 2,
+  "viewer_ids": [12, 13],
+  "viewers": [
+    {
+      "id": 12,
+      "real_name": "罗小瑞",
+      "id_card": "500101199811040817",
+      "phone": "13800138000"
+    },
+    {
+      "id": 13,
+      "real_name": "农子健",
+      "id_card": "500101199901010818",
+      "phone": "13800138001"
+    }
+  ]
 }
 ```
 
@@ -1178,7 +1191,27 @@ POST /api/v1/order/create
   "code": 200,
   "data": {
     "success": true,
-    "order_no": "T2026053114300012ab34cd"
+    "order_no": "T2026053114300012ab34cd",
+    "total_price": 17600,
+    "actual_price": 17600,
+    "qr_code": "TICKET:T2026053114300012ab34cd:xxxx",
+    "qr_code_url": "https://cdn.hypercn.cn/ticket/qrcode/2026/06/12/T2026053114300012ab34cd.png",
+    "viewers": [
+      {
+        "viewer_id": 12,
+        "real_name": "罗小瑞",
+        "id_card_masked": "5001**********0817",
+        "phone_masked": "138****8000",
+        "type": 1
+      },
+      {
+        "viewer_id": 13,
+        "real_name": "农子健",
+        "id_card_masked": "5001**********0818",
+        "phone_masked": "138****8001",
+        "type": 1
+      }
+    ]
   }
 }
 ```
@@ -1187,8 +1220,12 @@ POST /api/v1/order/create
 
 - 活动必须为 `status=3` 已上架
 - 票券必须启用并且在销售时间内
-- 开启实名模式时，必须传 `buyer_name` 和 `buyer_id_card`
-- 开启未成年人校验时，18 岁以下不可购票
+- `quantity` 可以大于 1，但不能超过票档 `purchase_limit`，且不能超过剩余库存
+- 开启实名模式时，`viewer_ids`/`viewers` 解析后的观演人数必须等于 `quantity`
+- `viewer_ids` 用于提交当前账号已保存的观演人；`viewers` 可提交观演人快照，若传 `id` 或 `viewer_id` 则以后端保存的观演人为准
+- `buyer_name` 和 `buyer_id_card` 仍兼容旧客户端；实名模式下只买 1 张且未传 `viewer_ids/viewers` 时可继续使用
+- 后端会把首位观演人同步到 `buyer_name`/`buyer_id_card`，并把全部观演人写入 `ticket_order_viewers`
+- 开启未成年人校验时，每位观演人 18 岁以下均不可购票
 
 ### 发起微信支付
 
@@ -1260,6 +1297,26 @@ GET /api/v1/order/:order_no
     },
     "buyer_name": "罗小瑞",
     "buyer_id_card": "500101199811040817",
+    "viewers": [
+      {
+        "viewer_id": 12,
+        "real_name": "罗小瑞",
+        "id_card": "500101199811040817",
+        "id_card_masked": "5001**********0817",
+        "phone": "13800138000",
+        "phone_masked": "138****8000",
+        "type": 1
+      },
+      {
+        "viewer_id": 13,
+        "real_name": "农子健",
+        "id_card": "500101199901010818",
+        "id_card_masked": "5001**********0818",
+        "phone": "13800138001",
+        "phone_masked": "138****8001",
+        "type": 1
+      }
+    ],
     "pay_method": "",
     "pay_time": null,
     "created_at": "2026-05-31T14:30:00+08:00",

@@ -392,11 +392,14 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		if spec.Stock-spec.SoldCount < req.Quantity {
 			return errors.New("库存不足")
 		}
-		if act.RealNameMode == 1 && (req.BuyerName == "" || req.BuyerIDCard == "") {
-			return errors.New("实名模式下需要填写购票人姓名和身份证")
+		orderViewers, err := s.resolveOrderViewers(tx, userID, req, req.Quantity, act.RealNameMode == 1, act.MinorCheck == 1)
+		if err != nil {
+			return err
 		}
-		if act.MinorCheck == 1 && isMinor(req.BuyerIDCard) {
-			return errors.New("未成年人不可购票")
+		buyerName, buyerIDCard := req.BuyerName, req.BuyerIDCard
+		if len(orderViewers) > 0 {
+			buyerName = orderViewers[0].RealName
+			buyerIDCard = orderViewers[0].IDCard
 		}
 		if err := tx.Model(&spec).UpdateColumn("sold_count", gorm.Expr("sold_count + ?", req.Quantity)).Error; err != nil {
 			return err
@@ -456,8 +459,8 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 			ActualPrice:    actualPrice,
 			PointsAmount:   pointsAmount,
 			PointsDiscount: pointsDiscount,
-			BuyerName:      req.BuyerName,
-			BuyerIDCard:    req.BuyerIDCard,
+			BuyerName:      buyerName,
+			BuyerIDCard:    buyerIDCard,
 			Status:         models.TicketOrderStatusPending,
 			ExpireTime:     expireTime,
 			QRCode:         qrContent,
@@ -466,15 +469,122 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		if err := tx.Create(&order).Error; err != nil {
 			return err
 		}
+		for i := range orderViewers {
+			orderViewers[i].OrderID = order.ID
+			orderViewers[i].OrderNo = order.OrderNo
+		}
+		if len(orderViewers) > 0 {
+			if err := tx.Create(&orderViewers).Error; err != nil {
+				return err
+			}
+		}
 		result.TotalPrice = totalPrice
 		result.PointsAmount = pointsAmount
 		result.PointsDiscount = pointsDiscount
 		result.ActualPrice = actualPrice
 		result.QRCode = qrContent
 		result.QRCodeURL = qrURL
+		result.Viewers = orderViewerItems(orderViewers, false)
 		return nil
 	})
 	return result, err
+}
+
+func (s *TicketingService) resolveOrderViewers(tx *gorm.DB, userID int64, req types.CreateTicketOrderRequest, quantity int, realNameMode, minorCheck bool) ([]models.TicketOrderViewer, error) {
+	viewers := make([]models.TicketOrderViewer, 0, len(req.ViewerIDs)+len(req.Viewers))
+	seenIDs := make(map[int64]struct{})
+	if len(req.ViewerIDs) > 0 {
+		var saved []models.Viewer
+		if err := tx.Where("user_id = ? AND id IN ?", int(userID), req.ViewerIDs).Find(&saved).Error; err != nil {
+			return nil, err
+		}
+		savedByID := make(map[int64]models.Viewer, len(saved))
+		for _, viewer := range saved {
+			savedByID[viewer.ID] = viewer
+		}
+		for _, id := range req.ViewerIDs {
+			if id <= 0 {
+				return nil, errors.New("观演人ID无效")
+			}
+			if _, ok := seenIDs[id]; ok {
+				return nil, errors.New("观演人不能重复选择")
+			}
+			viewer, ok := savedByID[id]
+			if !ok {
+				return nil, errors.New("观演人不存在")
+			}
+			seenIDs[id] = struct{}{}
+			viewers = append(viewers, models.TicketOrderViewer{
+				ViewerID: viewer.ID,
+				RealName: strings.TrimSpace(viewer.RealName),
+				IDCard:   strings.TrimSpace(viewer.IDCard),
+				Phone:    strings.TrimSpace(viewer.Phone),
+				Type:     viewer.Type,
+			})
+		}
+	}
+	for _, input := range req.Viewers {
+		viewerID := input.ViewerID
+		if viewerID == 0 {
+			viewerID = input.ID
+		}
+		if viewerID > 0 {
+			if _, ok := seenIDs[viewerID]; ok {
+				continue
+			}
+			var saved models.Viewer
+			if err := tx.Where("user_id = ? AND id = ?", int(userID), viewerID).First(&saved).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil, errors.New("观演人不存在")
+				}
+				return nil, err
+			}
+			seenIDs[viewerID] = struct{}{}
+			viewers = append(viewers, models.TicketOrderViewer{
+				ViewerID: saved.ID,
+				RealName: strings.TrimSpace(saved.RealName),
+				IDCard:   strings.TrimSpace(saved.IDCard),
+				Phone:    strings.TrimSpace(saved.Phone),
+				Type:     saved.Type,
+			})
+			continue
+		}
+		viewers = append(viewers, models.TicketOrderViewer{
+			RealName: strings.TrimSpace(input.RealName),
+			IDCard:   strings.TrimSpace(input.IDCard),
+			Phone:    strings.TrimSpace(input.Phone),
+			Type:     input.Type,
+		})
+	}
+	if len(viewers) == 0 && (strings.TrimSpace(req.BuyerName) != "" || strings.TrimSpace(req.BuyerIDCard) != "") {
+		viewers = append(viewers, models.TicketOrderViewer{
+			RealName: strings.TrimSpace(req.BuyerName),
+			IDCard:   strings.TrimSpace(req.BuyerIDCard),
+			Type:     1,
+		})
+	}
+	if realNameMode {
+		if len(viewers) != quantity {
+			return nil, errors.New("实名模式下观演人数必须等于购票数量")
+		}
+	}
+	seenIDCards := make(map[string]struct{})
+	for i := range viewers {
+		if viewers[i].Type == 0 {
+			viewers[i].Type = 1
+		}
+		if viewers[i].RealName == "" || viewers[i].IDCard == "" {
+			return nil, errors.New("实名模式下需要填写每位观演人的姓名和身份证")
+		}
+		if _, ok := seenIDCards[viewers[i].IDCard]; ok {
+			return nil, errors.New("观演人不能重复选择")
+		}
+		seenIDCards[viewers[i].IDCard] = struct{}{}
+		if minorCheck && isMinor(viewers[i].IDCard) {
+			return nil, errors.New("未成年人不可购票")
+		}
+	}
+	return viewers, nil
 }
 
 func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error) {
@@ -565,6 +675,14 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 	}
 
 	list := make([]types.TicketOrderListItem, 0, len(rows))
+	orderNos := make([]string, 0, len(rows))
+	for _, r := range rows {
+		orderNos = append(orderNos, r.OrderNo)
+	}
+	viewersByOrderNo, err := s.orderViewersByOrderNo(ctx, orderNos)
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range rows {
 		item := types.TicketOrderListItem{
 			OrderNo:     r.OrderNo,
@@ -578,6 +696,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			ExpireTime:  r.ExpireTime,
 			PayTime:     r.PayTime,
 		}
+		item.Viewers = orderViewerItems(viewersByOrderNo[r.OrderNo], false)
 		item.Activity.ID = r.ActivityID
 		item.Activity.Name = r.ActivityName
 		item.Activity.StartTime = r.StartTime
@@ -1080,17 +1199,21 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	var spec models.TicketSpec
 	_ = s.DB.WithContext(ctx).First(&spec, order.TicketSpecID).Error
 	item := struct {
-		ActivityName      string `json:"activity_name"`
-		TicketSpecName    string `json:"ticket_spec_name"`
-		Quantity          int    `json:"quantity"`
-		BuyerNameMasked   string `json:"buyer_name_masked"`
-		BuyerIDCardMasked string `json:"buyer_id_card_masked"`
+		ActivityName      string                  `json:"activity_name"`
+		TicketSpecName    string                  `json:"ticket_spec_name"`
+		Quantity          int                     `json:"quantity"`
+		BuyerNameMasked   string                  `json:"buyer_name_masked"`
+		BuyerIDCardMasked string                  `json:"buyer_id_card_masked"`
+		Viewers           []types.OrderViewerItem `json:"viewers,omitempty"`
 	}{
 		ActivityName:      activity.Name,
 		TicketSpecName:    spec.Name,
 		Quantity:          order.Quantity,
 		BuyerNameMasked:   maskName(order.BuyerName),
 		BuyerIDCardMasked: maskIDCard(order.BuyerIDCard),
+	}
+	if viewers, err := s.orderViewers(ctx, order.ID); err == nil {
+		item.Viewers = orderViewerItems(viewers, false)
 	}
 	return &types.ScanOrderResponse{Success: true, Order: &item}, nil
 }
@@ -1195,16 +1318,13 @@ func (s *TicketingService) CreateViewer(ctx context.Context, userID int64, req t
 			return errors.New("常用观演人已达上限")
 		}
 		var exists models.Viewer
-		if err := tx.Where("id_card = ?", req.IDCard).First(&exists).Error; err == nil {
-			if int64(exists.UserID) == userID {
-				return errors.New("该观演人已存在")
-			}
-			return errors.New("该身份证已被其他用户绑定")
+		if err := tx.Where("user_id = ? AND id_card = ?", userID, req.IDCard).First(&exists).Error; err == nil {
+			return errors.New("该观演人已存在")
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		if err := tx.Where("phone = ? AND user_id <> ?", req.Phone, userID).First(&exists).Error; err == nil {
-			return errors.New("该手机号已被其他用户绑定")
+		if err := tx.Where("user_id = ? AND phone = ?", userID, req.Phone).First(&exists).Error; err == nil {
+			return errors.New("该手机号已被当前账号其他观演人绑定")
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
@@ -1236,7 +1356,7 @@ func (s *TicketingService) UpdateViewer(ctx context.Context, userID, viewerID in
 		}
 		if req.Phone != "" {
 			var exists models.Viewer
-			if err := tx.Where("phone = ? AND id <> ?", req.Phone, viewerID).First(&exists).Error; err == nil {
+			if err := tx.Where("user_id = ? AND phone = ? AND id <> ?", userID, req.Phone, viewerID).First(&exists).Error; err == nil {
 				return errors.New("该手机号已被其他观演人绑定")
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
@@ -1259,6 +1379,20 @@ func (s *TicketingService) DeleteViewer(ctx context.Context, userID, viewerID in
 		var activeOrders int64
 		if err := tx.Model(&models.TicketOrder{}).
 			Where("user_id = ? AND buyer_id_card = ? AND status IN ?", userID, viewer.IDCard, []int8{
+				models.TicketOrderStatusPending,
+				models.TicketOrderStatusUsable,
+				models.TicketOrderStatusRefunding,
+				models.TicketOrderStatusRefundReject,
+			}).
+			Count(&activeOrders).Error; err != nil {
+			return err
+		}
+		if activeOrders > 0 {
+			return errors.New("观演人已关联未完成订单，暂不可删除")
+		}
+		if err := tx.Table("ticket_order_viewers tov").
+			Joins("JOIN ticket_orders o ON o.id = tov.order_id").
+			Where("o.user_id = ? AND (tov.viewer_id = ? OR tov.id_card = ?) AND o.status IN ?", userID, viewer.ID, viewer.IDCard, []int8{
 				models.TicketOrderStatusPending,
 				models.TicketOrderStatusUsable,
 				models.TicketOrderStatusRefunding,
@@ -1439,6 +1573,9 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 	resp.Activity.EndTime = act.EndTime
 	resp.Activity.PosterList = act.PosterList
 	resp.TicketSpec.Name = spec.Name
+	if viewers, err := s.orderViewers(ctx, order.ID); err == nil {
+		resp.Viewers = orderViewerItems(viewers, true)
+	}
 	var refund models.Refund
 	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id desc").First(&refund).Error; err == nil {
 		statusText := refundStatusText(refund.Status)
@@ -1474,6 +1611,49 @@ func refundStatusText(status int8) string {
 	default:
 		return "未知"
 	}
+}
+
+func (s *TicketingService) orderViewers(ctx context.Context, orderID int64) ([]models.TicketOrderViewer, error) {
+	var viewers []models.TicketOrderViewer
+	err := s.DB.WithContext(ctx).Where("order_id = ?", orderID).Order("id asc").Find(&viewers).Error
+	return viewers, err
+}
+
+func (s *TicketingService) orderViewersByOrderNo(ctx context.Context, orderNos []string) (map[string][]models.TicketOrderViewer, error) {
+	result := make(map[string][]models.TicketOrderViewer)
+	if len(orderNos) == 0 {
+		return result, nil
+	}
+	var viewers []models.TicketOrderViewer
+	if err := s.DB.WithContext(ctx).Where("order_no IN ?", orderNos).Order("id asc").Find(&viewers).Error; err != nil {
+		return nil, err
+	}
+	for _, viewer := range viewers {
+		result[viewer.OrderNo] = append(result[viewer.OrderNo], viewer)
+	}
+	return result, nil
+}
+
+func orderViewerItems(viewers []models.TicketOrderViewer, includeSensitive bool) []types.OrderViewerItem {
+	if len(viewers) == 0 {
+		return nil
+	}
+	items := make([]types.OrderViewerItem, 0, len(viewers))
+	for _, viewer := range viewers {
+		item := types.OrderViewerItem{
+			ViewerID:     viewer.ViewerID,
+			RealName:     viewer.RealName,
+			IDCardMasked: maskIDCard(viewer.IDCard),
+			PhoneMasked:  maskPhone(viewer.Phone),
+			Type:         viewer.Type,
+		}
+		if includeSensitive {
+			item.IDCard = viewer.IDCard
+			item.Phone = viewer.Phone
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {

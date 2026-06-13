@@ -239,6 +239,7 @@ GET /api/v1/order/list?legacy=1
 | 编辑观演人 | 调用 `PUT /api/v1/viewers/:id`，body 不需要传 `id` |
 | 删除未关联订单的观演人 | 调用 `DELETE /api/v1/viewers/:id` 成功 |
 | 删除已关联未完成订单的观演人 | 后端返回错误，前端展示失败提示 |
+| 多人购票 | `quantity` 大于 1 时提交 `viewer_ids/viewers`，实名活动要求观演人数等于购票数量 |
 | 我的票务订单列表 | 调用 `/api/v1/order/list`，不传 `legacy=1` |
 | 旧商品订单列表如仍保留入口 | 调用 `/api/v1/order/list?legacy=1` |
 
@@ -249,8 +250,10 @@ GET /api/v1/order/list?legacy=1
 | 文件 | 改动 |
 |---|---|
 | `handler/ticketing.go` | 新增 `/api/v1/viewers` 路由和 handler |
-| `service/ticketing.go` | 新增观演人 CRUD 和票务订单列表查询 |
-| `types/ticketing.go` | 新增 `ViewerItem`、`TicketOrderListItem` |
+| `service/ticketing.go` | 新增观演人 CRUD、票务订单列表查询、多人观演人下单落库 |
+| `types/ticketing.go` | 新增 `ViewerItem`、`TicketOrderListItem`、`OrderViewerInput`、`OrderViewerItem` |
+| `models/ticketing.go` | 新增 `TicketOrderViewer`，保存订单观演人快照 |
+| `config/table.sql` | 新增 `ticket_order_viewers` 表 |
 | `types/order.go` | 调整 `UpdateViewerReq`，body 不再强制要求 `id` |
 | `handler/order.go` | `/api/v1/order/list` 默认转到票务订单列表，`legacy=1` 走旧商品订单 |
 | `cmd/api-server/wire_gen.go` | 将 `TicketingService` 注入旧订单 handler 用于兼容分流 |
@@ -271,4 +274,3 @@ GOCACHE=/private/tmp/hyper-go-build go test ./handler ./service ./types ./cmd/ap
 - `pkg/socket/adapter` 现有测试存在空指针 panic。
 
 以上失败与本次 P0 接口改动无关。
-
