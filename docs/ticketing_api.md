@@ -1567,6 +1567,31 @@ GET /api/v1/organizer/verifier/:id/activation-qr
 }
 ```
 
+### 获取核销员绑定确认信息
+
+```http
+GET /api/v1/verifier/activation-info?v=1
+```
+
+说明：微信小程序码只携带短参数 `scene=v%3D1`，不会直接带 `organizerName` 这种中文 query。小程序绑定页解析 `v` 后调用本接口获取主办方名称。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "verifier_id": 1,
+    "name": "核销员A",
+    "phone": "13800138000",
+    "status": 0,
+    "is_bound": false,
+    "organizer_id": 10,
+    "organizer_name": "测试主办方"
+  }
+}
+```
+
 ### 核销员激活
 
 ```http
@@ -1580,9 +1605,7 @@ Authorization: Bearer <access_token>
 
 ```json
 {
-  "verifier_id": 1,
-  "phone": "13800138000",
-  "channel": "wechat"
+  "phone": "13800138000"
 }
 ```
 

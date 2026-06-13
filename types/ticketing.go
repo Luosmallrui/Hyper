@@ -272,9 +272,9 @@ type VerifierRequest struct {
 }
 
 type ActivateVerifierRequest struct {
-	VerifierID int64  `json:"verifier_id" binding:"required"`
+	VerifierID int64  `json:"verifier_id"`
 	Phone      string `json:"phone" binding:"required"`
-	Channel    string `json:"channel" binding:"required"`
+	Channel    string `json:"channel"`
 }
 
 type ActivateVerifierResponse struct {
@@ -282,6 +282,16 @@ type ActivateVerifierResponse struct {
 	VerifierID int64 `json:"verifier_id"`
 	UserID     int64 `json:"user_id"`
 	Status     int8  `json:"status"`
+}
+
+type VerifierActivationInfoResponse struct {
+	VerifierID    int64  `json:"verifier_id"`
+	Name          string `json:"name"`
+	Phone         string `json:"phone"`
+	Status        int8   `json:"status"`
+	IsBound       bool   `json:"is_bound"`
+	OrganizerID   int64  `json:"organizer_id"`
+	OrganizerName string `json:"organizer_name"`
 }
 
 type ScanOrderRequest struct {
