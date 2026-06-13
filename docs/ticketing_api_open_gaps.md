@@ -222,6 +222,15 @@ GET /api/v1/order/list?page=1&size=10&status=1
         },
         "buyer_name": "罗小瑞",
         "buyer_id_card": "5001**********0817",
+        "viewers": [
+          {
+            "viewer_id": 12,
+            "real_name": "罗小瑞",
+            "id_card_masked": "5001**********0817",
+            "phone_masked": "138****8000",
+            "type": 1
+          }
+        ],
         "created_at": "2026-05-31T14:30:00+08:00",
         "expire_time": "2026-05-31T14:45:00+08:00",
         "pay_time": "2026-05-31T14:32:00+08:00"

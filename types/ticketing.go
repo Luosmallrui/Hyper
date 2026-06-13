@@ -111,23 +111,45 @@ type SaveTicketSpecsRequest struct {
 }
 
 type CreateTicketOrderRequest struct {
-	ActivityID   int64  `json:"activity_id" binding:"required"`
-	TicketSpecID int64  `json:"ticket_spec_id" binding:"required"`
-	Quantity     int    `json:"quantity" binding:"required,min=1"`
-	BuyerName    string `json:"buyer_name"`
-	BuyerIDCard  string `json:"buyer_id_card"`
-	UsePoints    bool   `json:"use_points"`
-	PointsAmount int64  `json:"points_amount"`
+	ActivityID   int64              `json:"activity_id" binding:"required"`
+	TicketSpecID int64              `json:"ticket_spec_id" binding:"required"`
+	Quantity     int                `json:"quantity" binding:"required,min=1"`
+	BuyerName    string             `json:"buyer_name"`
+	BuyerIDCard  string             `json:"buyer_id_card"`
+	ViewerIDs    []int64            `json:"viewer_ids"`
+	Viewers      []OrderViewerInput `json:"viewers"`
+	UsePoints    bool               `json:"use_points"`
+	PointsAmount int64              `json:"points_amount"`
+}
+
+type OrderViewerInput struct {
+	ID       int64  `json:"id"`
+	ViewerID int64  `json:"viewer_id"`
+	RealName string `json:"real_name"`
+	IDCard   string `json:"id_card"`
+	Phone    string `json:"phone"`
+	Type     int8   `json:"type"`
+}
+
+type OrderViewerItem struct {
+	ViewerID     int64  `json:"viewer_id"`
+	RealName     string `json:"real_name"`
+	IDCard       string `json:"id_card,omitempty"`
+	IDCardMasked string `json:"id_card_masked"`
+	Phone        string `json:"phone,omitempty"`
+	PhoneMasked  string `json:"phone_masked"`
+	Type         int8   `json:"type"`
 }
 
 type CreateTicketOrderResponse struct {
-	OrderNo        string `json:"order_no"`
-	TotalPrice     int64  `json:"total_price"`
-	PointsAmount   int64  `json:"points_amount"`
-	PointsDiscount int64  `json:"points_discount"`
-	ActualPrice    int64  `json:"actual_price"`
-	QRCode         string `json:"qr_code"`
-	QRCodeURL      string `json:"qr_code_url"`
+	OrderNo        string            `json:"order_no"`
+	TotalPrice     int64             `json:"total_price"`
+	PointsAmount   int64             `json:"points_amount"`
+	PointsDiscount int64             `json:"points_discount"`
+	ActualPrice    int64             `json:"actual_price"`
+	QRCode         string            `json:"qr_code"`
+	QRCodeURL      string            `json:"qr_code_url"`
+	Viewers        []OrderViewerItem `json:"viewers,omitempty"`
 }
 
 type TicketOrderDetailResponse struct {
@@ -149,14 +171,15 @@ type TicketOrderDetailResponse struct {
 	TicketSpec struct {
 		Name string `json:"name"`
 	} `json:"ticket_spec"`
-	BuyerName   string     `json:"buyer_name"`
-	BuyerIDCard string     `json:"buyer_id_card"`
-	PayMethod   string     `json:"pay_method"`
-	PayTime     *time.Time `json:"pay_time"`
-	CreatedAt   time.Time  `json:"created_at"`
-	QRCode      string     `json:"qr_code"`
-	QRCodeURL   string     `json:"qr_code_url"`
-	ExpireTime  time.Time  `json:"expire_time"`
+	BuyerName   string            `json:"buyer_name"`
+	BuyerIDCard string            `json:"buyer_id_card"`
+	Viewers     []OrderViewerItem `json:"viewers,omitempty"`
+	PayMethod   string            `json:"pay_method"`
+	PayTime     *time.Time        `json:"pay_time"`
+	CreatedAt   time.Time         `json:"created_at"`
+	QRCode      string            `json:"qr_code"`
+	QRCodeURL   string            `json:"qr_code_url"`
+	ExpireTime  time.Time         `json:"expire_time"`
 	RefundInfo  *struct {
 		RefundNo         string `json:"refund_no"`
 		RefundAmount     int64  `json:"refund_amount"`
@@ -188,11 +211,12 @@ type TicketOrderListItem struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
 	} `json:"ticket_spec"`
-	BuyerName   string     `json:"buyer_name"`
-	BuyerIDCard string     `json:"buyer_id_card"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpireTime  time.Time  `json:"expire_time"`
-	PayTime     *time.Time `json:"pay_time"`
+	BuyerName   string            `json:"buyer_name"`
+	BuyerIDCard string            `json:"buyer_id_card"`
+	Viewers     []OrderViewerItem `json:"viewers,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	ExpireTime  time.Time         `json:"expire_time"`
+	PayTime     *time.Time        `json:"pay_time"`
 }
 
 type CancelOrderRequest struct {
@@ -302,11 +326,12 @@ type ScanOrderRequest struct {
 type ScanOrderResponse struct {
 	Success bool `json:"success"`
 	Order   *struct {
-		ActivityName      string `json:"activity_name"`
-		TicketSpecName    string `json:"ticket_spec_name"`
-		Quantity          int    `json:"quantity"`
-		BuyerNameMasked   string `json:"buyer_name_masked"`
-		BuyerIDCardMasked string `json:"buyer_id_card_masked"`
+		ActivityName      string            `json:"activity_name"`
+		TicketSpecName    string            `json:"ticket_spec_name"`
+		Quantity          int               `json:"quantity"`
+		BuyerNameMasked   string            `json:"buyer_name_masked"`
+		BuyerIDCardMasked string            `json:"buyer_id_card_masked"`
+		Viewers           []OrderViewerItem `json:"viewers,omitempty"`
 	} `json:"order,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
 }
