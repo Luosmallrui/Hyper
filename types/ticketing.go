@@ -232,6 +232,31 @@ type RejectRefundRequest struct {
 	RejectReason string `json:"reject_reason" binding:"required"`
 }
 
+type OrganizerOrderListItem struct {
+	OrderNo        string            `json:"order_no"`
+	Status         int8              `json:"status"`
+	TotalPrice     int64             `json:"total_price"`
+	ActualPrice    int64             `json:"actual_price"`
+	PointsAmount   int64             `json:"points_amount"`
+	PointsDiscount int64             `json:"points_discount"`
+	Quantity       int               `json:"quantity"`
+	UserID         int64             `json:"user_id"`
+	UserName       string            `json:"user_name"`
+	UserMobile     string            `json:"user_mobile"`
+	UserAvatar     string            `json:"user_avatar"`
+	BuyerName      string            `json:"buyer_name"`
+	BuyerIDCard    string            `json:"buyer_id_card"`
+	Viewers        []OrderViewerItem `json:"viewers,omitempty"`
+	ActivityID     int64             `json:"activity_id"`
+	ActivityName   string            `json:"activity_name"`
+	TicketSpecID   int64             `json:"ticket_spec_id"`
+	TicketSpecName string            `json:"ticket_spec_name"`
+	PayMethod      string            `json:"pay_method"`
+	PayTime        *time.Time        `json:"pay_time"`
+	CreatedAt      time.Time         `json:"created_at"`
+	ExpireTime     time.Time         `json:"expire_time"`
+}
+
 type OrganizerRefundListItem struct {
 	RefundNo         string    `json:"refund_no"`
 	Status           int8      `json:"status"`
@@ -320,7 +345,7 @@ type VerifierActivationInfoResponse struct {
 
 type ScanOrderRequest struct {
 	QRCode     string `json:"qr_code" binding:"required"`
-	ActivityID int64  `json:"activity_id" binding:"required"`
+	ActivityID int64  `json:"activity_id"`
 }
 
 type ScanOrderResponse struct {

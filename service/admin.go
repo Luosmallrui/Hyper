@@ -459,6 +459,15 @@ func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req 
 	if req.Status == models.ActivityStatusRejected && req.RejectReason == "" {
 		return errors.New("拒绝时必须填写 reject_reason")
 	}
+	if req.Status == models.ActivityStatusOnline {
+		var activity models.Activity
+		if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+			return err
+		}
+		if err := validateChinaCoordinate(activity.Latitude, activity.Longitude); err != nil {
+			return err
+		}
+	}
 
 	updates := map[string]any{
 		"status":        req.Status,
