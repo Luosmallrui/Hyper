@@ -1402,6 +1402,80 @@ POST /api/v1/order/:order_no/cancel
 
 ---
 
+### 主办方订单列表
+
+```http
+GET /api/v1/organizer/orders?page=1&size=10&activity_id=1&status=1&keyword=罗小瑞&start_date=2026-06-01&end_date=2026-06-30
+Authorization: Bearer <access_token>
+```
+
+说明：该接口用于商家端“订单与售后”的订单列表，只返回当前登录主办方名下活动的票务订单；用户侧“我的订单”仍使用 `GET /api/v1/order/list`。
+
+参数：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 页码，默认 1 |
+| size | 否 | 每页数量，默认 10 |
+| activity_id | 否 | 按活动 ID 筛选 |
+| status | 否 | 按订单状态筛选 |
+| keyword | 否 | 匹配订单号、买家昵称/手机号、购票人姓名/身份证、观演人姓名/身份证/手机号 |
+| start_date | 否 | 下单开始日期，格式 `YYYY-MM-DD` |
+| end_date | 否 | 下单结束日期，格式 `YYYY-MM-DD`，包含当天 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "order_no": "T2026053114300012ab34cd",
+        "status": 1,
+        "total_price": 17600,
+        "actual_price": 17600,
+        "points_amount": 0,
+        "points_discount": 0,
+        "quantity": 2,
+        "user_id": 1001,
+        "user_name": "邪修的马路路",
+        "user_mobile": "138****8000",
+        "user_avatar": "https://cdn.xxx/avatar.png",
+        "buyer_name": "罗小瑞",
+        "buyer_id_card": "5001**********0817",
+        "viewers": [
+          {
+            "viewer_id": 12,
+            "real_name": "罗小瑞",
+            "id_card_masked": "5001**********0817",
+            "phone_masked": "138****8000",
+            "type": 1
+          }
+        ],
+        "activity_id": 1,
+        "activity_name": "周末电音派对",
+        "ticket_spec_id": 1,
+        "ticket_spec_name": "早鸟票",
+        "pay_method": "JSAPI",
+        "pay_time": "2026-05-31T14:32:00+08:00",
+        "created_at": "2026-05-31T14:30:00+08:00",
+        "expire_time": "2026-05-31T14:45:00+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+字段说明：
+
+- `user_name/user_mobile/user_avatar`：真正的下单账号信息，商家端“买家”应展示这些字段。
+- `buyer_name/buyer_id_card`：实名购票兼容字段，当前表示首位观演人，不等同于下单账号。
+- `viewers`：本订单全部观演人脱敏信息。
+
+---
+
 ## 8. 退款模块
 
 ### 获取退款原因列表
@@ -1690,10 +1764,11 @@ POST /api/v1/verifier/scan
 
 ```json
 {
-  "qr_code": "TICKET:T2026053114300012ab34cd:xxxx",
-  "activity_id": 1
+  "qr_code": "TICKET:T2026053114300012ab34cd:xxxx"
 }
 ```
+
+说明：`activity_id` 为可选字段。普通扫码核销不需要传；如果前端处于某个活动的专场核销页面，可以传 `activity_id`，后端会校验票是否属于该活动，不属于则返回 `WRONG_ACTIVITY`。
 
 响应成功：
 

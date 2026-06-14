@@ -38,6 +38,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
+		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
 		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
@@ -502,6 +503,42 @@ func (h *Ticketing) ListUserRefunds(c *gin.Context) error {
 		status = &v
 	}
 	resp, err := h.TicketingService.ListUserRefunds(c.Request.Context(), currentUserID(c), status, page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerOrders(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return err
+		}
+		v := int8(value)
+		status = &v
+	}
+	var activityID int64
+	if raw := c.Query("activity_id"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return err
+		}
+		activityID = value
+	}
+	resp, err := h.TicketingService.ListOrganizerOrders(
+		c.Request.Context(),
+		currentUserID(c),
+		activityID,
+		status,
+		c.Query("keyword"),
+		c.Query("start_date"),
+		c.Query("end_date"),
+		page(c),
+		size(c),
+	)
 	if err != nil {
 		return err
 	}

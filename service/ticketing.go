@@ -46,6 +46,7 @@ type ITicketingService interface {
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
 	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
+	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
 	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
@@ -253,9 +254,16 @@ func (s *TicketingService) SubmitActivityAudit(ctx context.Context, userID, acti
 	if err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).Model(&models.Activity{}).
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).
 		Where("id = ? AND organizer_id = ? AND status IN ?", activityID, org.ID, []int8{models.ActivityStatusDraft, models.ActivityStatusRejected}).
-		Update("status", models.ActivityStatusPending).Error
+		First(&activity).Error; err != nil {
+		return err
+	}
+	if err := validateChinaCoordinate(activity.Latitude, activity.Longitude); err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Model(&activity).Update("status", models.ActivityStatusPending).Error
 }
 
 func (s *TicketingService) GetActivityStatistics(ctx context.Context, userID, activityID int64) (*types.ActivityStatisticsResponse, error) {
@@ -841,6 +849,148 @@ func (s *TicketingService) ListUserRefunds(ctx context.Context, userID int64, st
 	return &types.PageResponse[types.UserRefundListItem]{List: list, Total: total}, nil
 }
 
+func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("ticket_orders o").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Joins("JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
+		Joins("LEFT JOIN users u ON u.id = o.user_id").
+		Where("a.organizer_id = ?", org.ID)
+	if activityID > 0 {
+		query = query.Where("o.activity_id = ?", activityID)
+	}
+	if status != nil {
+		query = query.Where("o.status = ?", *status)
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where(`
+			o.order_no LIKE ?
+			OR u.nickname LIKE ?
+			OR u.mobile LIKE ?
+			OR o.buyer_name LIKE ?
+			OR o.buyer_id_card LIKE ?
+			OR EXISTS (
+				SELECT 1 FROM ticket_order_viewers tov
+				WHERE tov.order_id = o.id
+				AND (tov.real_name LIKE ? OR tov.id_card LIKE ? OR tov.phone LIKE ?)
+			)
+		`, like, like, like, like, like, like, like, like)
+	}
+	if startDate = strings.TrimSpace(startDate); startDate != "" {
+		start, err := parseDateStart(startDate)
+		if err != nil {
+			return nil, fmt.Errorf("开始日期格式错误")
+		}
+		query = query.Where("o.created_at >= ?", start)
+	}
+	if endDate = strings.TrimSpace(endDate); endDate != "" {
+		end, err := parseDateEnd(endDate)
+		if err != nil {
+			return nil, fmt.Errorf("结束日期格式错误")
+		}
+		query = query.Where("o.created_at < ?", end)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		OrderNo        string
+		Status         int8
+		TotalPrice     int64
+		ActualPrice    int64
+		PointsAmount   int64
+		PointsDiscount int64
+		Quantity       int
+		UserID         int64
+		UserName       string
+		UserMobile     string
+		UserAvatar     string
+		BuyerName      string
+		BuyerIDCard    string
+		ActivityID     int64
+		ActivityName   string
+		TicketSpecID   int64
+		TicketSpecName string
+		PayMethod      string
+		PayTime        *time.Time
+		CreatedAt      time.Time
+		ExpireTime     time.Time
+	}
+	if err := query.Select(`
+			o.order_no,
+			o.status,
+			o.total_price,
+			o.actual_price,
+			o.points_amount,
+			o.points_discount,
+			o.quantity,
+			o.user_id,
+			u.nickname AS user_name,
+			u.mobile AS user_mobile,
+			u.avatar AS user_avatar,
+			o.buyer_name,
+			o.buyer_id_card,
+			o.activity_id,
+			a.name AS activity_name,
+			o.ticket_spec_id,
+			ts.name AS ticket_spec_name,
+			o.pay_method,
+			o.pay_time,
+			o.created_at,
+			o.expire_time
+		`).
+		Order("o.created_at desc").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	orderNos := make([]string, 0, len(rows))
+	for _, row := range rows {
+		orderNos = append(orderNos, row.OrderNo)
+	}
+	viewersByOrderNo, err := s.orderViewersByOrderNo(ctx, orderNos)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]types.OrganizerOrderListItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, types.OrganizerOrderListItem{
+			OrderNo:        row.OrderNo,
+			Status:         row.Status,
+			TotalPrice:     row.TotalPrice,
+			ActualPrice:    row.ActualPrice,
+			PointsAmount:   row.PointsAmount,
+			PointsDiscount: row.PointsDiscount,
+			Quantity:       row.Quantity,
+			UserID:         row.UserID,
+			UserName:       row.UserName,
+			UserMobile:     maskPhone(row.UserMobile),
+			UserAvatar:     row.UserAvatar,
+			BuyerName:      row.BuyerName,
+			BuyerIDCard:    maskIDCard(row.BuyerIDCard),
+			Viewers:        orderViewerItems(viewersByOrderNo[row.OrderNo], false),
+			ActivityID:     row.ActivityID,
+			ActivityName:   row.ActivityName,
+			TicketSpecID:   row.TicketSpecID,
+			TicketSpecName: row.TicketSpecName,
+			PayMethod:      row.PayMethod,
+			PayTime:        row.PayTime,
+			CreatedAt:      row.CreatedAt,
+			ExpireTime:     row.ExpireTime,
+		})
+	}
+	return &types.PageResponse[types.OrganizerOrderListItem]{List: list, Total: total}, nil
+}
+
 func (s *TicketingService) ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
@@ -1179,7 +1329,7 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	if err := s.DB.WithContext(ctx).Where("qr_code = ?", req.QRCode).First(&order).Error; err != nil {
 		return &types.ScanOrderResponse{Success: false, ErrorCode: "ORDER_NOT_FOUND"}, nil
 	}
-	if order.ActivityID != req.ActivityID {
+	if req.ActivityID > 0 && order.ActivityID != req.ActivityID {
 		return &types.ScanOrderResponse{Success: false, ErrorCode: "WRONG_ACTIVITY"}, nil
 	}
 	if order.Status == models.TicketOrderStatusUsed {
@@ -1741,6 +1891,14 @@ func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
 	putString(updates, "city", req.City)
 	putString(updates, "district", req.District)
 	putString(updates, "address", req.Address)
+	if req.Latitude != nil || req.Longitude != nil {
+		if req.Latitude == nil || req.Longitude == nil {
+			return nil, fmt.Errorf("经纬度必须同时填写")
+		}
+		if err := validateChinaCoordinate(*req.Latitude, *req.Longitude); err != nil {
+			return nil, err
+		}
+	}
 	putFloat64(updates, "latitude", req.Latitude)
 	putFloat64(updates, "longitude", req.Longitude)
 	putString(updates, "poster_detail", req.PosterDetail)
@@ -1763,6 +1921,16 @@ func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
 		updates["end_time"] = t
 	}
 	return updates, nil
+}
+
+func validateChinaCoordinate(latitude, longitude float64) error {
+	if latitude == 0 || longitude == 0 {
+		return errors.New("活动经纬度不能为空，请在地图中选择准确位置")
+	}
+	if latitude < 3 || latitude > 54 || longitude < 73 || longitude > 136 {
+		return errors.New("活动经纬度不在中国范围内，请重新选择位置")
+	}
+	return nil
 }
 
 func buildTicketSpec(activityID int64, item types.TicketSpecSaveItem) (*models.TicketSpec, error) {
@@ -1808,6 +1976,28 @@ func parseDatetime(value string) (time.Time, error) {
 		last = err
 	}
 	return time.Time{}, last
+}
+
+func parseDateStart(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.ParseInLocation("2006-01-02", value, time.Local); err == nil {
+		return t, nil
+	}
+	return parseDatetime(value)
+}
+
+func parseDateEnd(value string) (time.Time, error) {
+	t, err := parseDateStart(value)
+	if err != nil || t.IsZero() {
+		return t, err
+	}
+	if len(strings.TrimSpace(value)) == len("2006-01-02") {
+		return t.AddDate(0, 0, 1), nil
+	}
+	return t, nil
 }
 
 func normalizePage(page, size int) (int, int) {

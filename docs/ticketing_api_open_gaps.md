@@ -258,11 +258,7 @@ GET /api/v1/order/list?page=1&size=10&status=1
 
 ## 4. 主办方后台订单列表
 
-### 现状
-
-主办方后台需要按活动、订单状态、关键字查看票务订单，但 `ticketing_api.md` 暂未提供后台订单列表接口。
-
-### 建议新增
+### 已实现
 
 ```http
 GET /api/v1/organizer/orders?page=1&size=10&activity_id=1&status=1&keyword=罗小瑞
@@ -276,7 +272,7 @@ GET /api/v1/organizer/orders?page=1&size=10&activity_id=1&status=1&keyword=罗�
 | size | 否 | 每页数量，默认 10 |
 | activity_id | 否 | 活动 ID |
 | status | 否 | 订单状态 |
-| keyword | 否 | 订单号、购票人姓名、手机号或身份证后四位 |
+| keyword | 否 | 订单号、买家昵称/手机号、购票人姓名、手机号或身份证后四位 |
 | start_date | 否 | 下单开始日期，格式 `YYYY-MM-DD` |
 | end_date | 否 | 下单结束日期，格式 `YYYY-MM-DD` |
 
@@ -297,8 +293,21 @@ GET /api/v1/organizer/orders?page=1&size=10&activity_id=1&status=1&keyword=罗�
         "activity_name": "周末电音派对",
         "ticket_spec_id": 1,
         "ticket_spec_name": "早鸟票",
+        "user_id": 1001,
+        "user_name": "邪修的马路路",
+        "user_mobile": "138****8000",
+        "user_avatar": "https://cdn.xxx/avatar.png",
         "buyer_name": "罗小瑞",
         "buyer_id_card": "5001**********0817",
+        "viewers": [
+          {
+            "viewer_id": 12,
+            "real_name": "罗小瑞",
+            "id_card_masked": "5001**********0817",
+            "phone_masked": "138****8000",
+            "type": 1
+          }
+        ],
         "pay_method": "JSAPI",
         "pay_time": "2026-05-31T14:32:00+08:00",
         "created_at": "2026-05-31T14:30:00+08:00"
@@ -313,6 +322,9 @@ GET /api/v1/organizer/orders?page=1&size=10&activity_id=1&status=1&keyword=罗�
 
 - 只返回当前登录主办方名下活动的订单。
 - 若当前用户不是已认证主办方，应返回权限错误。
+- `user_name/user_mobile/user_avatar` 是真实下单账号信息，商家端“买家”应展示这些字段。
+- `buyer_name/buyer_id_card` 是实名购票兼容字段，表示首位观演人，不等同于下单账号。
+- `keyword` 会匹配订单号、买家昵称/手机号、首位购票人姓名/身份证，以及多人观演人明细中的姓名、身份证、手机号。
 
 ---
 
