@@ -74,6 +74,8 @@ type IAdminService interface {
 	ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error)
 	ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error
+	ListBankAccountAudits(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	AuditBankAccount(ctx context.Context, id int64, req types.BankAccountAuditRequest) error
 	ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error)
 	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
 }

@@ -318,6 +318,8 @@ POST /api/v1/admin/messages
 | 商家对账 | GET | `/finance/settlements?organizer_id=` |
 | 商家提现列表 | GET | `/withdraws?status=&organizer_id=` |
 | 商家提现审核 | PUT | `/withdraws/:id/audit` |
+| 收款账户审核列表 | GET | `/bank-account-audits?status=&organizer_id=` |
+| 收款账户审核 | PUT | `/bank-account-audits/:id/audit` |
 
 提现审核：
 
@@ -328,10 +330,72 @@ POST /api/v1/admin/messages
 }
 ```
 
+收款账户审核列表：
+
+```http
+GET /api/v1/admin/bank-account-audits?page=1&pageSize=20&status=0&organizer_id=10
+Authorization: Bearer <admin_access_token>
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": 12,
+        "organizer_id": 10,
+        "organizer_name": "Hyper Club",
+        "organizer_type": "venue",
+        "user_id": 1001,
+        "user_name": "商家负责人",
+        "user_mobile": "13800138000",
+        "bank_account_name": "张三",
+        "bank_account_no": "6222000000000000000",
+        "bank_name": "招商银行",
+        "status": 0,
+        "reject_reason": "",
+        "reviewed_at": null,
+        "created_at": "2026-06-15T16:20:00+08:00",
+        "updated_at": "2026-06-15T16:20:00+08:00"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+收款账户审核：
+
+```http
+PUT /api/v1/admin/bank-account-audits/:id/audit
+Authorization: Bearer <admin_access_token>
+```
+
+请求：
+
+```json
+{
+  "status": 1,
+  "reject_reason": ""
+}
+```
+
+说明：
+
+- `status=1` 通过：同步写入商家正式收款账户，商家随后可发起提现。
+- `status=2` 拒绝：不修改商家正式收款账户，前端展示 `reject_reason` 并允许商家重新提交。
+- 已审核记录不能重复审核。
+
 状态约定：
 
 ```text
 提现 status: 0 待审核, 1 通过, 2 拒绝
+收款账户审核 status: 0 待审核, 1 通过, 2 拒绝
 通用 status: 1 启用/正常, 0 禁用
 ```
 
@@ -344,5 +408,6 @@ POST /api/v1/admin/messages
 - `activity_collection_items`
 - `platform_messages`
 - `organizer_withdraws`
+- `organizer_bank_account_audits`
 
 部署前请执行 `config/table.sql` 中对应建表语句。

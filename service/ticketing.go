@@ -26,7 +26,10 @@ type ITicketingService interface {
 	GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error)
 	ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) error
 	UpdateOrganizerBasic(ctx context.Context, userID int64, req types.OrganizerBasicRequest) error
+	GetWithdrawInfo(ctx context.Context, userID int64) (*types.OrganizerWithdrawInfoResponse, error)
 	UpdateWithdrawInfo(ctx context.Context, userID int64, req types.OrganizerWithdrawRequest) error
+	ListOrganizerWithdraws(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[models.OrganizerWithdraw], error)
+	CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error)
 	GetActivity(ctx context.Context, activityID int64) (*types.ActivityDetailResponse, error)
 	SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error)
 	GetMyActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
@@ -152,16 +155,119 @@ func (s *TicketingService) UpdateOrganizerBasic(ctx context.Context, userID int6
 	return s.DB.WithContext(ctx).Model(org).Updates(updates).Error
 }
 
+func (s *TicketingService) GetWithdrawInfo(ctx context.Context, userID int64) (*types.OrganizerWithdrawInfoResponse, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerWithdrawInfoResponse{
+		BankAccountName: org.BankAccountName,
+		BankAccountNo:   org.BankAccountNo,
+		BankName:        org.BankName,
+		CanWithdraw:     org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "",
+	}
+
+	var latest models.OrganizerBankAccountAudit
+	err = s.DB.WithContext(ctx).
+		Where("organizer_id = ?", org.ID).
+		Order("id DESC").
+		First(&latest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return resp, nil
+		}
+		return nil, err
+	}
+	info := buildOrganizerBankAuditInfo(latest)
+	resp.LatestAudit = &info
+	if latest.Status == models.OrganizerBankAuditStatusPending {
+		resp.PendingAudit = &info
+	}
+	return resp, nil
+}
+
 func (s *TicketingService) UpdateWithdrawInfo(ctx context.Context, userID int64, req types.OrganizerWithdrawRequest) error {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).Model(org).Updates(map[string]any{
-		"bank_account_name": req.BankAccountName,
-		"bank_account_no":   req.BankAccountNo,
-		"bank_name":         req.BankName,
-	}).Error
+	if org.Status != models.OrganizerStatusApproved {
+		return errors.New("商家入驻通过后才能提交收款账户审核")
+	}
+	var pending int64
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerBankAccountAudit{}).
+		Where("organizer_id = ? AND status = ?", org.ID, models.OrganizerBankAuditStatusPending).
+		Count(&pending).Error; err != nil {
+		return err
+	}
+	if pending > 0 {
+		return errors.New("已有待审核的收款账户申请，请勿重复提交")
+	}
+	audit := models.OrganizerBankAccountAudit{
+		OrganizerID:     org.ID,
+		UserID:          org.UserID,
+		BankAccountName: strings.TrimSpace(req.BankAccountName),
+		BankAccountNo:   strings.TrimSpace(req.BankAccountNo),
+		BankName:        strings.TrimSpace(req.BankName),
+		Status:          models.OrganizerBankAuditStatusPending,
+	}
+	if audit.BankAccountName == "" || audit.BankAccountNo == "" || audit.BankName == "" {
+		return errors.New("收款人、收款账户、银行信息不能为空")
+	}
+	return s.DB.WithContext(ctx).Create(&audit).Error
+}
+
+func (s *TicketingService) ListOrganizerWithdraws(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[models.OrganizerWithdraw], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("organizer_id = ?", org.ID)
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []models.OrganizerWithdraw
+	if err := query.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return &types.PageResponse[models.OrganizerWithdraw]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if org.BankAccountName == "" || org.BankAccountNo == "" || org.BankName == "" {
+		return 0, errors.New("收款账户审核通过后才能提现")
+	}
+	var pending int64
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).
+		Where("organizer_id = ? AND status = 0", org.ID).
+		Count(&pending).Error; err != nil {
+		return 0, err
+	}
+	if pending > 0 {
+		return 0, errors.New("已有待审核提现申请，请勿重复提交")
+	}
+	withdraw := models.OrganizerWithdraw{
+		OrganizerID:     org.ID,
+		Amount:          req.Amount,
+		BankAccountName: org.BankAccountName,
+		BankAccountNo:   org.BankAccountNo,
+		BankName:        org.BankName,
+		Status:          0,
+		Remark:          req.Remark,
+	}
+	if err := s.DB.WithContext(ctx).Create(&withdraw).Error; err != nil {
+		return 0, err
+	}
+	return withdraw.ID, nil
 }
 
 func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error) {
@@ -1867,6 +1973,20 @@ func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 	resp.AccountInfo.BankAccountNo = org.BankAccountNo
 	resp.AccountInfo.BankName = org.BankName
 	return resp
+}
+
+func buildOrganizerBankAuditInfo(audit models.OrganizerBankAccountAudit) types.OrganizerBankAuditInfo {
+	return types.OrganizerBankAuditInfo{
+		ID:              audit.ID,
+		BankAccountName: audit.BankAccountName,
+		BankAccountNo:   audit.BankAccountNo,
+		BankName:        audit.BankName,
+		Status:          audit.Status,
+		RejectReason:    audit.RejectReason,
+		ReviewedAt:      audit.ReviewedAt,
+		CreatedAt:       audit.CreatedAt,
+		UpdatedAt:       audit.UpdatedAt,
+	}
 }
 
 func (s *TicketingService) notifyOrganizerApply(ctx context.Context, org models.Organizer, applicantUserID int64) {

@@ -362,6 +362,57 @@ func (s *AdminService) AuditWithdraw(ctx context.Context, id int64, req types.Wi
 	return s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("id = ?", id).Updates(map[string]any{"status": req.Status, "remark": req.Remark}).Error
 }
 
+func (s *AdminService) ListBankAccountAudits(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
+	page, pageSize = normalizeAdminPage(page, pageSize)
+	query := s.DB.WithContext(ctx).Table("organizer_bank_account_audits a").
+		Select("a.*, o.name AS organizer_name, o.type AS organizer_type, u.nickname AS user_name, u.mobile AS user_mobile").
+		Joins("LEFT JOIN organizers o ON o.id = a.organizer_id").
+		Joins("LEFT JOIN users u ON u.id = a.user_id")
+	if status != nil {
+		query = query.Where("a.status = ?", *status)
+	}
+	if organizerID > 0 {
+		query = query.Where("a.organizer_id = ?", organizerID)
+	}
+	return adminMapPage(query.Order("a.id desc"), page, pageSize)
+}
+
+func (s *AdminService) AuditBankAccount(ctx context.Context, id int64, req types.BankAccountAuditRequest) error {
+	if req.Status != models.OrganizerBankAuditStatusApproved && req.Status != models.OrganizerBankAuditStatusRejected {
+		return errors.New("审核状态无效，仅支持 1通过 或 2拒绝")
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var audit models.OrganizerBankAccountAudit
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&audit).Error; err != nil {
+			return err
+		}
+		if audit.Status != models.OrganizerBankAuditStatusPending {
+			return errors.New("该收款账户申请已审核")
+		}
+		now := time.Now()
+		updates := map[string]any{
+			"status":        req.Status,
+			"reject_reason": req.RejectReason,
+			"reviewed_at":   now,
+			"updated_at":    now,
+		}
+		if err := tx.Model(&audit).Updates(updates).Error; err != nil {
+			return err
+		}
+		if req.Status == models.OrganizerBankAuditStatusApproved {
+			if err := tx.Model(&models.Organizer{}).Where("id = ?", audit.OrganizerID).Updates(map[string]any{
+				"bank_account_name": audit.BankAccountName,
+				"bank_account_no":   audit.BankAccountNo,
+				"bank_name":         audit.BankName,
+				"updated_at":        now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	var total int64

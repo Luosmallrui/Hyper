@@ -100,3 +100,8 @@ type WithdrawAuditRequest struct {
 	Status int8   `json:"status" binding:"required"`
 	Remark string `json:"remark"`
 }
+
+type BankAccountAuditRequest struct {
+	Status       int8   `json:"status" binding:"required"`
+	RejectReason string `json:"reject_reason"`
+}
