@@ -133,7 +133,7 @@ func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView)
 		}
 	case "HYPER_SYSTEM_MSGS":
 		if c.NoticeSubscribe != nil {
-			_, err = c.NoticeSubscribe.handleSystem(ctx, mv)
+			err = c.NoticeSubscribe.handleSystem(ctx, mv)
 		}
 	default:
 		// 不认识的 topic，直接返回错误看日志

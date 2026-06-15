@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/apache/rocketmq-client-go/v2/consumer"
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -31,7 +30,7 @@ func (m *NoticeSubscribe) Setup(ctx context.Context) error {
 	return nil
 }
 
-func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.MessageView) (consumer.ConsumeResult, error) {
+func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.MessageView) error {
 	var event types.SystemMessage
 	if err := json.Unmarshal(msgs.GetBody(), &event); err != nil {
 		log.L.Error("unmarshal msg error", zap.Error(err))
@@ -44,9 +43,15 @@ func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.Mes
 			log.L.Error("unmarshal msg error", zap.Error(err))
 		}
 		m.handleFollowNotice(ctx, &data)
+	case "platform_message":
+		var data types.PlatformMessagePayload
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			log.L.Error("unmarshal platform message error", zap.Error(err))
+		}
+		m.handlePlatformMessage(ctx, &data)
 	}
 
-	return consumer.ConsumeSuccess, nil
+	return nil
 }
 
 func (m *NoticeSubscribe) handleFollowNotice(ctx context.Context, data *types.FollowPayload) {
@@ -77,4 +82,21 @@ func (m *NoticeSubscribe) handleFollowNotice(ctx context.Context, data *types.Fo
 	// 推送消息
 	socket.Session.Chat.Write(content)
 	// log.Printf("[排查调试] 消息已推送到 Socket 写入队列")
+}
+
+func (m *NoticeSubscribe) handlePlatformMessage(ctx context.Context, data *types.PlatformMessagePayload) {
+	sid := server.GetServerId()
+	channel := socket.Session.Chat.Name()
+	cids, err := m.ConnectService.GetUidFromClientIds(ctx, sid, channel, int(data.TargetID))
+	if err != nil {
+		log.L.Error("GetUidFromClientIds error", zap.Error(err))
+		return
+	}
+	if len(cids) == 0 {
+		return
+	}
+	content := socket.NewSenderContent().
+		SetReceive(cids...).
+		SetMessage("notice.platform_message", data)
+	socket.Session.Chat.Write(content)
 }

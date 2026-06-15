@@ -62,8 +62,8 @@ func (m *MessageSubscribe) Setup(ctx context.Context) error {
 func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.MessageView) error {
 	var imMsg types.Message
 	if err := json.Unmarshal(msgs.GetBody(), &imMsg); err != nil {
-		log.L.Error("unmarshal msg error", zap.Error(err))
-		return err //返回err防止Ack 掉
+		log.L.Error("unmarshal msg error", zap.Error(err), zap.String("body", previewMessageBody(msgs.GetBody())))
+		return nil
 	}
 	log.L.Info("receive message", zap.Any("msg", imMsg))
 	// 幂等去重：done + lock 两段式
@@ -231,6 +231,14 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		log.L.Error(fmt.Sprintf("[MQ] 未知 SessionType=%d, msg_id=%d", imMsg.SessionType, imMsg.Id))
 	}
 	return nil
+}
+
+func previewMessageBody(body []byte) string {
+	const max = 200
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max]) + "..."
 }
 func (m *MessageSubscribe) doBatchPush(ctx context.Context, uid int, msg *types.Message, targetUID int) {
 	trace := fmt.Sprintf("[PUSH msg=%d from=%d to=%d]", msg.Id, msg.SenderID, targetUID)

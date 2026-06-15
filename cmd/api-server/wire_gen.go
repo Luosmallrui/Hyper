@@ -326,6 +326,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:            db,
 		Secret:        v,
 		WeChatService: weChatService,
+		MqProducer:    producer,
 	}
 	handlerAdmin := &handler.Admin{
 		Config:       cfg,

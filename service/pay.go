@@ -538,7 +538,9 @@ func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddo
 			return err
 		}
 		if refund.Status == models.RefundStatusSuccess {
-			return nil
+			return tx.Model(&models.TicketOrder{}).
+				Where("id = ? AND status <> ?", refund.OrderID, models.TicketOrderStatusRefundSuccess).
+				Update("status", models.TicketOrderStatusRefundSuccess).Error
 		}
 		updates := map[string]any{
 			"status":        status,
