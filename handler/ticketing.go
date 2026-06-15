@@ -36,6 +36,8 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/basic", h.wrap(h.UpdateOrganizerBasic))
 		organizer.GET("/withdraw-info", h.wrap(h.GetWithdrawInfo))
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
+		organizer.GET("/withdraws", h.wrap(h.ListOrganizerWithdraws))
+		organizer.POST("/withdraws", h.wrap(h.CreateOrganizerWithdraw))
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
 		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
@@ -147,11 +149,11 @@ func (h *Ticketing) UpdateOrganizerBasic(c *gin.Context) error {
 }
 
 func (h *Ticketing) GetWithdrawInfo(c *gin.Context) error {
-	resp, err := h.TicketingService.GetOrganizerInfo(c.Request.Context(), currentUserID(c))
+	resp, err := h.TicketingService.GetWithdrawInfo(c.Request.Context(), currentUserID(c))
 	if err != nil {
 		return err
 	}
-	response.Success(c, resp.AccountInfo)
+	response.Success(c, resp)
 	return nil
 }
 
@@ -164,6 +166,37 @@ func (h *Ticketing) UpdateWithdrawInfo(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerWithdraws(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return err
+		}
+		v := int8(value)
+		status = &v
+	}
+	resp, err := h.TicketingService.ListOrganizerWithdraws(c.Request.Context(), currentUserID(c), status, queryInt(c, "page"), queryInt(c, "size"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerWithdraw(c *gin.Context) error {
+	var req types.CreateOrganizerWithdrawRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.CreateOrganizerWithdraw(c.Request.Context(), currentUserID(c), req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
 	return nil
 }
 

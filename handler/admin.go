@@ -96,6 +96,8 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/points/logs", context.Wrap(a.ListPointLogs))
 		authorized.GET("/withdraws", context.Wrap(a.ListWithdraws))
 		authorized.PUT("/withdraws/:id/audit", context.Wrap(a.AuditWithdraw))
+		authorized.GET("/bank-account-audits", context.Wrap(a.ListBankAccountAudits))
+		authorized.PUT("/bank-account-audits/:id/audit", context.Wrap(a.AuditBankAccount))
 		authorized.GET("/messages", context.Wrap(a.ListMessages))
 		authorized.POST("/messages", context.Wrap(a.CreateMessage))
 
@@ -475,6 +477,36 @@ func (a *Admin) AuditWithdraw(c *gin.Context) error {
 		return err
 	}
 	if err := a.AdminService.AuditWithdraw(c.Request.Context(), adminParamID(c), req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) ListBankAccountAudits(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return err
+		}
+		v := int8(value)
+		status = &v
+	}
+	resp, err := a.AdminService.ListBankAccountAudits(c.Request.Context(), adminPage(c), adminPageSize(c), status, adminQueryInt64(c, "organizer_id"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) AuditBankAccount(c *gin.Context) error {
+	var req types.BankAccountAuditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := a.AdminService.AuditBankAccount(c.Request.Context(), adminParamID(c), req); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

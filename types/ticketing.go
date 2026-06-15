@@ -33,6 +33,32 @@ type OrganizerWithdrawRequest struct {
 	BankName        string `json:"bank_name" binding:"required"`
 }
 
+type OrganizerBankAuditInfo struct {
+	ID              int64      `json:"id"`
+	BankAccountName string     `json:"bank_account_name"`
+	BankAccountNo   string     `json:"bank_account_no"`
+	BankName        string     `json:"bank_name"`
+	Status          int8       `json:"status"`
+	RejectReason    string     `json:"reject_reason"`
+	ReviewedAt      *time.Time `json:"reviewed_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type OrganizerWithdrawInfoResponse struct {
+	BankAccountName string                  `json:"bank_account_name"`
+	BankAccountNo   string                  `json:"bank_account_no"`
+	BankName        string                  `json:"bank_name"`
+	CanWithdraw     bool                    `json:"can_withdraw"`
+	PendingAudit    *OrganizerBankAuditInfo `json:"pending_audit,omitempty"`
+	LatestAudit     *OrganizerBankAuditInfo `json:"latest_audit,omitempty"`
+}
+
+type CreateOrganizerWithdrawRequest struct {
+	Amount int64  `json:"amount" binding:"required,min=1"`
+	Remark string `json:"remark"`
+}
+
 type OrganizerInfoResponse struct {
 	ID             int64   `json:"id"`
 	Type           string  `json:"type"`

@@ -335,6 +335,7 @@ PUT /api/v1/organizer/basic
 
 ```http
 GET /api/v1/organizer/withdraw-info
+Authorization: Bearer <organizer_token>
 ```
 
 响应：
@@ -345,15 +346,38 @@ GET /api/v1/organizer/withdraw-info
   "data": {
     "bank_account_name": "张三",
     "bank_account_no": "6222...",
-    "bank_name": "招商银行"
+    "bank_name": "招商银行",
+    "can_withdraw": true,
+    "pending_audit": null,
+    "latest_audit": {
+      "id": 12,
+      "bank_account_name": "张三",
+      "bank_account_no": "6222000000000000000",
+      "bank_name": "招商银行",
+      "status": 1,
+      "reject_reason": "",
+      "reviewed_at": "2026-06-15T16:30:00+08:00",
+      "created_at": "2026-06-15T16:20:00+08:00",
+      "updated_at": "2026-06-15T16:30:00+08:00"
+    }
   }
 }
 ```
 
-### 修改提现信息
+字段说明：
+
+| 字段 | 说明 |
+|---|---|
+| bank_account_name/bank_account_no/bank_name | 当前已审核通过、可用于提现的正式收款账户 |
+| can_withdraw | 是否已有正式收款账户，可发起提现 |
+| pending_audit | 当前待审核申请；没有则为 `null` 或不返回 |
+| latest_audit.status | `0` 待审核；`1` 通过；`2` 拒绝 |
+
+### 提交收款账户审核
 
 ```http
 PUT /api/v1/organizer/withdraw-info
+Authorization: Bearer <organizer_token>
 ```
 
 请求：
@@ -363,6 +387,99 @@ PUT /api/v1/organizer/withdraw-info
   "bank_account_name": "张三",
   "bank_account_no": "6222000000000000000",
   "bank_name": "招商银行"
+}
+```
+
+说明：
+
+- 商家入驻审核通过后才能提交收款账户审核。
+- 提交后生成一条 `status=0` 的审核申请，不会立即覆盖正式收款账户。
+- 同一商家存在待审核申请时，不允许重复提交。
+- 管理员审核通过后，申请中的银行卡信息才会同步到 `organizers.bank_*`，此时 `can_withdraw=true`。
+- 管理员拒绝后，商家可修改信息再次提交。
+
+成功响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true
+  }
+}
+```
+
+### 商家提现列表
+
+```http
+GET /api/v1/organizer/withdraws?page=1&size=10&status=0
+Authorization: Bearer <organizer_token>
+```
+
+查询参数：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| page | 否 | 默认 1 |
+| size | 否 | 默认 10 |
+| status | 否 | `0` 待审核；`1` 通过；`2` 拒绝 |
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "organizer_id": 10,
+        "amount": 10000,
+        "bank_account_name": "张三",
+        "bank_account_no": "6222000000000000000",
+        "bank_name": "招商银行",
+        "status": 0,
+        "remark": "",
+        "created_at": "2026-06-15T16:40:00+08:00",
+        "updated_at": "2026-06-15T16:40:00+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+### 发起商家提现
+
+```http
+POST /api/v1/organizer/withdraws
+Authorization: Bearer <organizer_token>
+```
+
+请求：
+
+```json
+{
+  "amount": 10000,
+  "remark": "6月活动结算提现"
+}
+```
+
+说明：
+
+- `amount` 单位为分。
+- 只有收款账户审核通过后才能发起提现。
+- 提交提现时会快照当前正式收款账户到提现记录中，避免后续改卡影响历史打款记录。
+- 同一商家存在待审核提现申请时，不允许重复提交。
+
+成功响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 1
+  }
 }
 ```
 

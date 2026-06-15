@@ -80,13 +80,38 @@ type PlatformMessage struct {
 func (PlatformMessage) TableName() string { return "platform_messages" }
 
 type OrganizerWithdraw struct {
-	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
-	Amount      int64     `gorm:"column:amount;not null" json:"amount"`
-	Status      int8      `gorm:"column:status;not null;default:0" json:"status"`
-	Remark      string    `gorm:"column:remark;size:255" json:"remark"`
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID     int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Amount          int64     `gorm:"column:amount;not null" json:"amount"`
+	BankAccountName string    `gorm:"column:bank_account_name;size:50;not null;default:''" json:"bank_account_name"`
+	BankAccountNo   string    `gorm:"column:bank_account_no;size:50;not null;default:''" json:"bank_account_no"`
+	BankName        string    `gorm:"column:bank_name;size:50;not null;default:''" json:"bank_name"`
+	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
+	Remark          string    `gorm:"column:remark;size:255" json:"remark"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (OrganizerWithdraw) TableName() string { return "organizer_withdraws" }
+
+const (
+	OrganizerBankAuditStatusPending  int8 = 0
+	OrganizerBankAuditStatusApproved int8 = 1
+	OrganizerBankAuditStatusRejected int8 = 2
+)
+
+type OrganizerBankAccountAudit struct {
+	ID              int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID     int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	UserID          int64      `gorm:"column:user_id;not null;index" json:"user_id"`
+	BankAccountName string     `gorm:"column:bank_account_name;size:50;not null" json:"bank_account_name"`
+	BankAccountNo   string     `gorm:"column:bank_account_no;size:50;not null" json:"bank_account_no"`
+	BankName        string     `gorm:"column:bank_name;size:50;not null" json:"bank_name"`
+	Status          int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	RejectReason    string     `gorm:"column:reject_reason;size:255" json:"reject_reason"`
+	ReviewedAt      *time.Time `gorm:"column:reviewed_at" json:"reviewed_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerBankAccountAudit) TableName() string { return "organizer_bank_account_audits" }

@@ -537,6 +537,9 @@ CREATE TABLE IF NOT EXISTS `organizer_withdraws`
     `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '提现ID',
     `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
     `amount`       bigint          NOT NULL COMMENT '提现金额(分)',
+    `bank_account_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款人快照',
+    `bank_account_no`   varchar(50) NOT NULL DEFAULT '' COMMENT '收款账户快照',
+    `bank_name`         varchar(50) NOT NULL DEFAULT '' COMMENT '银行名称快照',
     `status`       tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1通过 2拒绝',
     `remark`       varchar(255)    NOT NULL DEFAULT '' COMMENT '审核备注',
     `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -544,6 +547,30 @@ CREATE TABLE IF NOT EXISTS `organizer_withdraws`
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_withdraw_organizer` (`organizer_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方提现表';
+
+-- Existing organizer_withdraws table migration:
+-- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_account_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款人快照' AFTER `amount`;
+-- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_account_no` varchar(50) NOT NULL DEFAULT '' COMMENT '收款账户快照' AFTER `bank_account_name`;
+-- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_name` varchar(50) NOT NULL DEFAULT '' COMMENT '银行名称快照' AFTER `bank_account_no`;
+
+CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
+(
+    `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '收款账户审核ID',
+    `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
+    `user_id`           bigint unsigned NOT NULL COMMENT '提交用户ID',
+    `bank_account_name` varchar(50)     NOT NULL COMMENT '收款人',
+    `bank_account_no`   varchar(50)     NOT NULL COMMENT '收款账户',
+    `bank_name`         varchar(50)     NOT NULL COMMENT '银行名称',
+    `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1通过 2拒绝',
+    `reject_reason`     varchar(255)    NOT NULL DEFAULT '' COMMENT '拒绝原因',
+    `reviewed_at`       datetime        NULL COMMENT '审核时间',
+    `created_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_bank_audit_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_bank_audit_user` (`user_id`) USING BTREE,
+    KEY `idx_bank_audit_status` (`status`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方收款账户审核表';
 
 -- Existing viewers table migration:
 -- 观演人允许被不同购票账号重复添加，仅限制同一账号内身份证/手机号重复。
