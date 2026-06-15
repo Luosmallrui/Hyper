@@ -450,6 +450,101 @@ CREATE TABLE IF NOT EXISTS `platform_settings`
     UNIQUE KEY `uk_platform_setting_key` (`setting_key`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台设置表';
 
+CREATE TABLE IF NOT EXISTS `admin_roles`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '角色ID',
+    `name`        varchar(50)     NOT NULL COMMENT '角色名称',
+    `description` varchar(255)    NOT NULL DEFAULT '' COMMENT '角色说明',
+    `permissions` text            NULL COMMENT '权限JSON或逗号列表',
+    `status`      tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台角色表';
+
+CREATE TABLE IF NOT EXISTS `admin_operation_logs`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+    `admin_id`   bigint unsigned NOT NULL COMMENT '管理员ID',
+    `action`     varchar(100)    NOT NULL COMMENT '操作动作',
+    `resource`   varchar(100)    NOT NULL DEFAULT '' COMMENT '资源',
+    `method`     varchar(20)     NOT NULL DEFAULT '' COMMENT 'HTTP方法',
+    `path`       varchar(255)    NOT NULL DEFAULT '' COMMENT '请求路径',
+    `ip`         varchar(50)     NOT NULL DEFAULT '' COMMENT 'IP',
+    `remark`     varchar(255)    NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_admin_log_admin` (`admin_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台操作日志表';
+
+CREATE TABLE IF NOT EXISTS `admin_categories`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '分类ID',
+    `type`       varchar(50)     NOT NULL COMMENT '分类类型',
+    `name`       varchar(100)    NOT NULL COMMENT '分类名称',
+    `image`      varchar(255)    NOT NULL DEFAULT '' COMMENT '图片',
+    `value`      varchar(100)    NOT NULL DEFAULT '' COMMENT '扩展值',
+    `sort`       int             NOT NULL DEFAULT 0 COMMENT '排序',
+    `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_admin_category_type` (`type`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台分类配置表';
+
+CREATE TABLE IF NOT EXISTS `activity_collections`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动合集ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `title`        varchar(100)    NOT NULL COMMENT '合集标题',
+    `share_title`  varchar(100)    NOT NULL DEFAULT '' COMMENT '分享标题',
+    `description`  text            NULL COMMENT '合集简介',
+    `share_image`  varchar(255)    NOT NULL DEFAULT '' COMMENT '分享图',
+    `status`       tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_activity_collection_organizer` (`organizer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动合集表';
+
+CREATE TABLE IF NOT EXISTS `activity_collection_items`
+(
+    `id`            bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '合集活动ID',
+    `collection_id` bigint unsigned NOT NULL COMMENT '合集ID',
+    `activity_id`   bigint unsigned NOT NULL COMMENT '活动ID',
+    `sort`          int             NOT NULL DEFAULT 0 COMMENT '排序',
+    `created_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_collection_item_collection` (`collection_id`) USING BTREE,
+    KEY `idx_collection_item_activity` (`activity_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动合集明细表';
+
+CREATE TABLE IF NOT EXISTS `platform_messages`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '消息ID',
+    `title`      varchar(100)    NOT NULL COMMENT '标题',
+    `content`    text            NULL COMMENT '内容',
+    `type`       varchar(50)     NOT NULL DEFAULT '' COMMENT '消息类型',
+    `target`     varchar(50)     NOT NULL DEFAULT '' COMMENT '发送对象',
+    `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1已发布 0草稿',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台消息表';
+
+CREATE TABLE IF NOT EXISTS `organizer_withdraws`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '提现ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `amount`       bigint          NOT NULL COMMENT '提现金额(分)',
+    `status`       tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1通过 2拒绝',
+    `remark`       varchar(255)    NOT NULL DEFAULT '' COMMENT '审核备注',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_withdraw_organizer` (`organizer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方提现表';
+
 -- Existing viewers table migration:
 -- 观演人允许被不同购票账号重复添加，仅限制同一账号内身份证/手机号重复。
 -- ALTER TABLE `viewers` DROP INDEX `uk_id_card`;

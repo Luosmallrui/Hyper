@@ -105,7 +105,7 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 		body, _ := json.Marshal(msgMap)
 
 		msg := &rmq_client.Message{
-			Topic: "hyper_system_messages",
+			Topic: types.SystemMessageTopic,
 			Body:  body,
 		}
 

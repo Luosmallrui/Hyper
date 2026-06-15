@@ -636,6 +636,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 	}
 
 	var rows []struct {
+		ID             int64
 		OrderNo        string
 		Status         int8
 		TotalPrice     int64
@@ -655,7 +656,8 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		PayTime        *time.Time
 	}
 	err := query.
-		Select(`ticket_orders.order_no,
+		Select(`ticket_orders.id,
+			ticket_orders.order_no,
 			ticket_orders.status,
 			ticket_orders.total_price,
 			ticket_orders.actual_price,
@@ -684,17 +686,30 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 
 	list := make([]types.TicketOrderListItem, 0, len(rows))
 	orderNos := make([]string, 0, len(rows))
+	orderIDs := make([]int64, 0, len(rows))
 	for _, r := range rows {
 		orderNos = append(orderNos, r.OrderNo)
+		orderIDs = append(orderIDs, r.ID)
 	}
 	viewersByOrderNo, err := s.orderViewersByOrderNo(ctx, orderNos)
 	if err != nil {
 		return nil, err
 	}
+	refundStatusByOrderID, err := s.latestRefundStatusByOrderID(ctx, orderIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range rows {
+		status := r.Status
+		if refundStatusByOrderID[r.ID] == models.RefundStatusSuccess && status != models.TicketOrderStatusRefundSuccess {
+			status = models.TicketOrderStatusRefundSuccess
+			_ = s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+				Where("id = ? AND status <> ?", r.ID, models.TicketOrderStatusRefundSuccess).
+				Update("status", models.TicketOrderStatusRefundSuccess).Error
+		}
 		item := types.TicketOrderListItem{
 			OrderNo:     r.OrderNo,
-			Status:      r.Status,
+			Status:      status,
 			TotalPrice:  r.TotalPrice,
 			ActualPrice: r.ActualPrice,
 			Quantity:    r.Quantity,
@@ -1728,6 +1743,13 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 	}
 	var refund models.Refund
 	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id desc").First(&refund).Error; err == nil {
+		if refund.Status == models.RefundStatusSuccess && order.Status != models.TicketOrderStatusRefundSuccess {
+			order.Status = models.TicketOrderStatusRefundSuccess
+			resp.Status = order.Status
+			_ = s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+				Where("id = ? AND status <> ?", order.ID, models.TicketOrderStatusRefundSuccess).
+				Update("status", models.TicketOrderStatusRefundSuccess).Error
+		}
 		statusText := refundStatusText(refund.Status)
 		resp.RefundNo = refund.RefundNo
 		resp.RefundInfo = &struct {
@@ -1780,6 +1802,26 @@ func (s *TicketingService) orderViewersByOrderNo(ctx context.Context, orderNos [
 	}
 	for _, viewer := range viewers {
 		result[viewer.OrderNo] = append(result[viewer.OrderNo], viewer)
+	}
+	return result, nil
+}
+
+func (s *TicketingService) latestRefundStatusByOrderID(ctx context.Context, orderIDs []int64) (map[int64]int8, error) {
+	result := make(map[int64]int8)
+	if len(orderIDs) == 0 {
+		return result, nil
+	}
+	var refunds []models.Refund
+	if err := s.DB.WithContext(ctx).
+		Where("order_id IN ?", orderIDs).
+		Order("id desc").
+		Find(&refunds).Error; err != nil {
+		return nil, err
+	}
+	for _, refund := range refunds {
+		if _, ok := result[refund.OrderID]; !ok {
+			result[refund.OrderID] = refund.Status
+		}
 	}
 	return result, nil
 }

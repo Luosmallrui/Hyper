@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2/rlog"
 	"github.com/apache/rocketmq-clients/golang/v5/credentials"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
@@ -28,8 +27,7 @@ var (
 )
 
 func init() {
-	rlog.SetLogLevel("error")
-	rlog.SetOutputPath("./logss/a.log")
+
 }
 
 func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
@@ -43,10 +41,14 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 	os.Setenv("mq.consoleAppender.enabled", "true")
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("rocketmq.client.logRoot", logPath)
+	rmq_client.EnableSsl = false
 	rmq_client.ResetLogger()
-	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0]}
-	if cfg.Ak != "" && cfg.Sk != "" {
-		rmqConfig.Credentials = &credentials.SessionCredentials{}
+	rmqConfig := &rmq_client.Config{
+		Endpoint: cfg.NameServer[0],
+		Credentials: &credentials.SessionCredentials{
+			AccessKey:    cfg.Ak,
+			AccessSecret: cfg.Sk,
+		},
 	}
 	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(types.ImTopicChat))
 	if err != nil {
@@ -72,7 +74,9 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	os.Setenv("mq.consoleAppender.enabled", "true")
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("rocketmq.client.logRoot", logPath)
+	rmq_client.EnableSsl = false
 	rmq_client.ResetLogger()
+	fmt.Println(cfg.NameServer[0], 55)
 	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0], ConsumerGroup: cfg.Consumer.Group}
 	if cfg.Ak != "" && cfg.Sk != "" {
 		rmqConfig.Credentials = &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}

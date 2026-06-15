@@ -10,6 +10,7 @@ import (
 	"errors"
 	"time"
 
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -19,6 +20,7 @@ type IAdminService interface {
 	GetOrganizerList(ctx context.Context, page, pageSize int, status *int8, organizerType string) (*types.AdminOrganizerListResponse, error)
 	GetOrganizerDetail(ctx context.Context, organizerID int64) (*types.AdminOrganizerDetail, error)
 	AuditOrganizer(ctx context.Context, organizerID int64, req types.AdminAuditOrganizerRequest) error
+	DeleteOrganizer(ctx context.Context, organizerID int64) error
 	BindAdminWechatSubscriber(ctx context.Context, adminID int64, code string) error
 	GetPartyList(ctx context.Context, page, pageSize int, keyword, partyType string) (*types.AdminPartyListResponse, error)
 	GetPartyDetail(ctx context.Context, partyID int64) (*types.AdminPartyDetail, error)
@@ -45,6 +47,35 @@ type IAdminService interface {
 	GetSettings(ctx context.Context) ([]types.AdminSettingItem, error)
 	UpdateSettings(ctx context.Context, settings []types.AdminSettingItem) error
 	GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error)
+	GetAdminProfile(ctx context.Context, adminID int64) (*types.AdminProfileResponse, error)
+	UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error
+	UpdateAdminPassword(ctx context.Context, adminID int64, req types.AdminPasswordRequest) error
+	ListAdmins(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.Admin], error)
+	CreateAdmin(ctx context.Context, req types.AdminAccountRequest) (int64, error)
+	UpdateAdmin(ctx context.Context, id int64, req types.AdminAccountRequest) error
+	DeleteAdmin(ctx context.Context, id int64) error
+	ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.AdminRole], error)
+	SaveRole(ctx context.Context, id int64, req types.AdminRoleRequest) (int64, error)
+	DeleteRole(ctx context.Context, id int64) error
+	ListOperationLogs(ctx context.Context, page, pageSize int, adminID int64, keyword string) (*types.AdminPageResponse[models.AdminOperationLog], error)
+	ListCategories(ctx context.Context, page, pageSize int, categoryType string) (*types.AdminPageResponse[models.AdminCategory], error)
+	SaveCategory(ctx context.Context, id int64, req types.AdminCategoryRequest) (int64, error)
+	DeleteCategory(ctx context.Context, id int64) error
+	ListUserRecords(ctx context.Context, userID int64, recordType string, page, pageSize int) (*types.AdminPageResponse[map[string]any], error)
+	ListViewers(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[map[string]any], error)
+	ListActivityCollections(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[types.ActivityCollectionItem], error)
+	SaveActivityCollection(ctx context.Context, id int64, req types.ActivityCollectionRequest) (int64, error)
+	DeleteActivityCollection(ctx context.Context, id int64) error
+	ListVerifiers(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error)
+	UpdateNoteStatus(ctx context.Context, noteID int64, status int) error
+	ListNoteRecords(ctx context.Context, recordType string, page, pageSize int, noteID int64) (*types.AdminPageResponse[map[string]any], error)
+	ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error)
+	ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error
+	ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error)
+	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
 }
 
 type AdminService struct {
@@ -52,6 +83,7 @@ type AdminService struct {
 	DB            *gorm.DB
 	Secret        []byte
 	WeChatService IWeChatService
+	MqProducer    rmq_client.Producer
 }
 
 var _ IAdminService = (*AdminService)(nil)
@@ -191,6 +223,59 @@ func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, re
 		return errors.New("入驻申请不存在")
 	}
 	return nil
+}
+
+func (s *AdminService) DeleteOrganizer(ctx context.Context, organizerID int64) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var org models.Organizer
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", organizerID).First(&org).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Activity{}).
+			Where("organizer_id = ? AND status IN ?", organizerID, []int8{
+				models.ActivityStatusDraft,
+				models.ActivityStatusPending,
+				models.ActivityStatusAuditing,
+				models.ActivityStatusOnline,
+			}).
+			Updates(map[string]any{
+				"status":        models.ActivityStatusRejected,
+				"reject_reason": "主办方已被管理员删除",
+				"updated_at":    time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("organizer_id = ?", organizerID).Delete(&models.Verifier{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("organizer_id = ?", organizerID).Delete(&models.OrganizerStore{}).Error; err != nil {
+			return err
+		}
+		var collections []models.ActivityCollection
+		if err := tx.Where("organizer_id = ?", organizerID).Find(&collections).Error; err != nil {
+			return err
+		}
+		collectionIDs := make([]int64, 0, len(collections))
+		for _, collection := range collections {
+			collectionIDs = append(collectionIDs, collection.ID)
+		}
+		if len(collectionIDs) > 0 {
+			if err := tx.Where("collection_id IN ?", collectionIDs).Delete(&models.ActivityCollectionItem{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("organizer_id = ?", organizerID).Delete(&models.ActivityCollection{}).Error; err != nil {
+			return err
+		}
+		result := tx.Delete(&org)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (s *AdminService) BindAdminWechatSubscriber(ctx context.Context, adminID int64, code string) error {
