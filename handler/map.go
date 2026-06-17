@@ -8,6 +8,7 @@ import (
 	"Hyper/types"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +108,23 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	if tagBits := parseTagBits(c.Query("tag_ids")); tagBits > 0 {
 		query = query.Where("tags & ? = ?", tagBits, tagBits)
 	}
+	if tagBits := parseTagBits(c.Query("tags")); tagBits > 0 {
+		query = query.Where("tags & ? = ?", tagBits, tagBits)
+	}
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("title LIKE ? OR location_name LIKE ? OR address LIKE ? OR description LIKE ?", like, like, like, like)
+	}
+	if area := strings.TrimSpace(c.Query("area")); area != "" {
+		query = query.Where("area_id = ?", area)
+	}
+	if district := strings.TrimSpace(c.Query("district")); district != "" {
+		query = query.Where("district_id = ?", district)
+	}
+	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
+		like := "%" + businessArea + "%"
+		query = query.Where("location_name LIKE ? OR address LIKE ?", like, like)
+	}
 	if err := query.Order("created_at DESC").Limit(limit).Find(&parties).Error; err != nil {
 		return nil, err
 	}
@@ -163,6 +181,11 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 			DistrictID:   party.DistrictID,
 			AreaID:       party.AreaID,
 			TagIDs:       tagBitsToIDs(party.Tags),
+			DiscountTags: []string{},
+		}
+		marker.Distance = markerDistance(c, marker.Lat, marker.Lng)
+		if exceedsDistance(c, marker.Distance) {
+			continue
 		}
 		if user, ok := userMap[party.UserID]; ok {
 			marker.User = user.Nickname
@@ -180,6 +203,19 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", models.ActivityStatusOnline).
 		Where("latitude <> 0 AND longitude <> 0")
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR description LIKE ?", like, like, like, like, like, like)
+	}
+	if district := strings.TrimSpace(c.Query("district")); district != "" {
+		query = query.Where("district = ?", district)
+	}
+	if area := strings.TrimSpace(c.Query("area")); area != "" {
+		query = query.Where("address LIKE ?", "%"+area+"%")
+	}
+	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
+		query = query.Where("address LIKE ?", "%"+businessArea+"%")
+	}
 	if err := query.Order("created_at DESC").Limit(limit).Find(&activities).Error; err != nil {
 		return nil, err
 	}
@@ -236,24 +272,31 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	markers := make([]types.MapMarker, 0, len(activities))
 	for _, activity := range activities {
 		marker := types.MapMarker{
-			ID:           fmt.Sprintf("activity-%d", activity.ID),
-			Source:       "activity",
-			SourceID:     activity.ID,
-			Title:        activity.Name,
-			Type:         "activity",
-			Location:     activity.Address,
-			Address:      activity.Address,
-			Lat:          activity.Latitude,
-			Lng:          activity.Longitude,
-			CoverImage:   activity.PosterList,
-			CreatedAt:    formatMarkerTime(activity.CreatedAt),
-			AvgPrice:     priceMap[activity.ID],
-			CurrentCount: 0,
-			PostCount:    0,
-			Icon:         "https://cdn.hypercn.cn/icon/party.png",
-			StartTime:    formatMarkerTime(activity.StartTime),
-			EndTime:      formatMarkerTime(activity.EndTime),
-			Status:       activity.Status,
+			ID:            fmt.Sprintf("activity-%d", activity.ID),
+			Source:        "activity",
+			SourceID:      activity.ID,
+			Title:         activity.Name,
+			Type:          "activity",
+			Location:      activity.Address,
+			Address:       activity.Address,
+			Lat:           activity.Latitude,
+			Lng:           activity.Longitude,
+			CoverImage:    activity.PosterList,
+			CreatedAt:     formatMarkerTime(activity.CreatedAt),
+			AvgPrice:      priceMap[activity.ID],
+			CurrentCount:  0,
+			PostCount:     0,
+			Icon:          "https://cdn.hypercn.cn/icon/party.png",
+			StartTime:     formatMarkerTime(activity.StartTime),
+			EndTime:       formatMarkerTime(activity.EndTime),
+			Status:        activity.Status,
+			District:      activity.District,
+			Distance:      markerDistance(c, activity.Latitude, activity.Longitude),
+			SupportPoints: true,
+			DiscountTags:  []string{},
+		}
+		if exceedsDistance(c, marker.Distance) {
+			continue
 		}
 		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
 			marker.UserID = organizer.UserID
@@ -360,4 +403,31 @@ func tagBitsToIDs(bits int) []int {
 		}
 	}
 	return ids
+}
+
+func markerDistance(c *gin.Context, lat, lng float64) float64 {
+	userLat, latErr := strconv.ParseFloat(c.Query("lat"), 64)
+	userLng, lngErr := strconv.ParseFloat(c.Query("lng"), 64)
+	if latErr != nil || lngErr != nil || userLat == 0 || userLng == 0 || lat == 0 || lng == 0 {
+		return 0
+	}
+	return haversineKM(userLat, userLng, lat, lng)
+}
+
+func exceedsDistance(c *gin.Context, distance float64) bool {
+	limit, err := strconv.ParseFloat(c.Query("distance"), 64)
+	if err != nil || limit <= 0 || distance <= 0 {
+		return false
+	}
+	return distance > limit
+}
+
+func haversineKM(lat1, lng1, lat2, lng2 float64) float64 {
+	const earthRadiusKM = 6371.0
+	toRad := func(v float64) float64 { return v * math.Pi / 180 }
+	dLat := toRad(lat2 - lat1)
+	dLng := toRad(lng2 - lng1)
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(toRad(lat1))*math.Cos(toRad(lat2))*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return earthRadiusKM * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }

@@ -60,16 +60,20 @@ type CreateOrganizerWithdrawRequest struct {
 }
 
 type OrganizerInfoResponse struct {
-	ID             int64   `json:"id"`
-	Type           string  `json:"type"`
-	Name           string  `json:"name"`
-	Logo           string  `json:"logo"`
-	Status         int8    `json:"status"`
-	RejectReason   string  `json:"reject_reason,omitempty"`
-	Level          string  `json:"level"`
-	ServiceFeeRate float64 `json:"service_fee_rate"`
-	JoinDays       int     `json:"join_days"`
-	BasicInfo      struct {
+	ID                     int64   `json:"id"`
+	Type                   string  `json:"type"`
+	Name                   string  `json:"name"`
+	Logo                   string  `json:"logo"`
+	Status                 int8    `json:"status"`
+	RejectReason           string  `json:"reject_reason,omitempty"`
+	Level                  string  `json:"level"`
+	ServiceFeeRate         float64 `json:"service_fee_rate"`
+	LevelValue             int     `json:"level_value"`
+	FeeRate                float64 `json:"fee_rate"`
+	CompletedActivityCount int64   `json:"completed_activity_count"`
+	NextLevelRequiredCount int64   `json:"next_level_required_count"`
+	JoinDays               int     `json:"join_days"`
+	BasicInfo              struct {
 		Province string `json:"province"`
 		City     string `json:"city"`
 		District string `json:"district"`
@@ -179,15 +183,17 @@ type CreateTicketOrderResponse struct {
 }
 
 type TicketOrderDetailResponse struct {
-	OrderNo        string `json:"order_no"`
-	Status         int8   `json:"status"`
-	TotalPrice     int64  `json:"total_price"`
-	ActualPrice    int64  `json:"actual_price"`
-	PointsAmount   int64  `json:"points_amount"`
-	PointsDiscount int64  `json:"points_discount"`
-	RefundNo       string `json:"refund_no,omitempty"`
-	Quantity       int    `json:"quantity"`
-	Activity       struct {
+	OrderNo          string `json:"order_no"`
+	Status           int8   `json:"status"`
+	RefundStatus     string `json:"refund_status,omitempty"`
+	RefundStatusText string `json:"refund_status_text,omitempty"`
+	TotalPrice       int64  `json:"total_price"`
+	ActualPrice      int64  `json:"actual_price"`
+	PointsAmount     int64  `json:"points_amount"`
+	PointsDiscount   int64  `json:"points_discount"`
+	RefundNo         string `json:"refund_no,omitempty"`
+	Quantity         int    `json:"quantity"`
+	Activity         struct {
 		ID         int64     `json:"id"`
 		Name       string    `json:"name"`
 		StartTime  time.Time `json:"start_time"`
@@ -221,12 +227,15 @@ type TicketOrderDetailResponse struct {
 }
 
 type TicketOrderListItem struct {
-	OrderNo     string `json:"order_no"`
-	Status      int8   `json:"status"`
-	TotalPrice  int64  `json:"total_price"`
-	ActualPrice int64  `json:"actual_price"`
-	Quantity    int    `json:"quantity"`
-	Activity    struct {
+	OrderNo          string `json:"order_no"`
+	Status           int8   `json:"status"`
+	RefundNo         string `json:"refund_no,omitempty"`
+	RefundStatus     string `json:"refund_status,omitempty"`
+	RefundStatusText string `json:"refund_status_text,omitempty"`
+	TotalPrice       int64  `json:"total_price"`
+	ActualPrice      int64  `json:"actual_price"`
+	Quantity         int    `json:"quantity"`
+	Activity         struct {
 		ID         int64     `json:"id"`
 		Name       string    `json:"name"`
 		StartTime  time.Time `json:"start_time"`

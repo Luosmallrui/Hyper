@@ -23,6 +23,7 @@ const (
 	TypeSignReward       = 2 // 签到奖励
 	TypeOrderRefund      = 3 // 订单退款返还
 	TypeSystemCompensate = 4 // 系统/人工补偿
+	TypeOrderReward      = 5 // 订单消费返积分
 
 	// 支出类
 	TypeExchange    = 10 // 积分兑换
