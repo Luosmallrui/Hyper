@@ -171,15 +171,30 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	ctx := c.Request.Context()
-	query := pc.DB.Model(&models.Merchant{})
+	query := pc.DB.Model(&models.Merchant{}).Where("status = ?", "active")
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("title LIKE ? OR location_name LIKE ? OR address LIKE ? OR description LIKE ?", like, like, like, like)
+	}
 	districtId := c.Query("district_id")
+	if districtId == "" {
+		districtId = c.Query("district")
+	}
 	districtIdNum, _ := strconv.Atoi(districtId)
 	if districtIdNum > 0 {
 		query = query.Where("district_id = ?", districtIdNum)
 	}
-	areaID, _ := strconv.Atoi(c.Query("area_id"))
+	areaRaw := c.Query("area_id")
+	if areaRaw == "" {
+		areaRaw = c.Query("area")
+	}
+	areaID, _ := strconv.Atoi(areaRaw)
 	if areaID > 0 {
 		query = query.Where("area_id = ?", areaID)
+	}
+	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
+		like := "%" + businessArea + "%"
+		query = query.Where("location_name LIKE ? OR address LIKE ?", like, like)
 	}
 	categoryParam := c.Query("category")
 	if categoryParam != "" {
@@ -208,6 +223,22 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	if requiredTags > 0 {
 		query = query.Where("tags & ? = ?", requiredTags, requiredTags)
 	}
+	lat, latErr := strconv.ParseFloat(c.Query("lat"), 64)
+	lng, lngErr := strconv.ParseFloat(c.Query("lng"), 64)
+	distanceLimit, _ := strconv.ParseFloat(c.Query("distance"), 64)
+	if latErr == nil && lngErr == nil && lat != 0 && lng != 0 && distanceLimit > 0 {
+		distanceSQL := `
+        (6371 * acos(
+            cos(radians(?)) *
+            cos(radians(latitude)) *
+            cos(radians(longitude) - radians(?)) +
+            sin(radians(?)) *
+            sin(radians(latitude))
+        ))
+        `
+		query = query.Where(distanceSQL+" <= ?", lat, lng, lat, distanceLimit)
+	}
+
 	sortType := c.DefaultQuery("sort", "default")
 
 	switch sortType {
@@ -220,13 +251,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		query = query.Order("district_id DESC")
 
 	case "distance":
-		latStr := c.Query("lat")
-		lngStr := c.Query("lng")
-
-		lat, err1 := strconv.ParseFloat(latStr, 64)
-		lng, err2 := strconv.ParseFloat(lngStr, 64)
-
-		if err1 == nil && err2 == nil {
+		if latErr == nil && lngErr == nil && lat != 0 && lng != 0 {
 			// Haversine 公式计算距离（单位：km）
 			distanceSQL := `
         (6371 * acos(
@@ -246,7 +271,10 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		query = query.Order("created_at DESC")
 	}
 	var total int64
-	total = 2
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(500, gin.H{"code": 500, "msg": "查询失败", "data": nil})
+		return nil
+	}
 	offset := (page - 1) * pageSize
 	var merchant []models.Merchant
 

@@ -57,12 +57,14 @@ func (s *SearchHandler) Globalserch(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	if req.Keyword == "" {
-		return response.NewError(http.StatusInternalServerError, "搜索关键词不能为空")
+	if req.Keyword == "" && req.District == "" && req.Area == "" && req.BusinessArea == "" && req.Distance <= 0 && req.Tags == "" {
+		return response.NewError(http.StatusBadRequest, "搜索关键词或筛选条件不能为空")
 	}
 
 	res, err := s.Serch.GlobalSerch(c.Request.Context(), req)
-	s.Serch.SaveSearchHistory(c, c.GetInt("user_id"), req.Keyword)
+	if req.Keyword != "" {
+		s.Serch.SaveSearchHistory(c, c.GetInt("user_id"), req.Keyword)
+	}
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}

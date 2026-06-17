@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,12 +82,13 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 		mu sync.Mutex
 
-		dbUsers   []models.Users
-		dbNotes   []models.Note
-		dbParties []models.Merchant
+		dbUsers      []models.Users
+		dbNotes      []models.Note
+		dbParties    []models.Merchant
+		dbActivities []models.Activity
 	)
 
-	keyword := "%" + req.Keyword + "%"
+	keyword := "%" + strings.TrimSpace(req.Keyword) + "%"
 
 	if (req.Type == 0 && req.NoteCursor == 0) || req.Type == 1 {
 		g.Go(func() error {
@@ -141,8 +143,25 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 	if req.Type == 0 || req.Type == 3 {
 		g.Go(func() error {
-			db := s.DB.WithContext(ctx).Model(&models.Merchant{}).
-				Where("(title LIKE ? OR location_name LIKE ?)", keyword, keyword)
+			db := s.DB.WithContext(ctx).Model(&models.Merchant{}).Where("status = ?", "active")
+			if strings.TrimSpace(req.Keyword) != "" {
+				db = db.Where("(title LIKE ? OR location_name LIKE ? OR address LIKE ?)", keyword, keyword, keyword)
+			}
+			if req.District != "" {
+				db = db.Where("district_id = ?", req.District)
+			}
+			if req.Area != "" {
+				db = db.Where("area_id = ?", req.Area)
+			}
+			if req.BusinessArea != "" {
+				db = db.Where("location_name LIKE ? OR address LIKE ?", "%"+req.BusinessArea+"%", "%"+req.BusinessArea+"%")
+			}
+			if tagBits := parseSearchTagBits(req.Tags); tagBits > 0 {
+				db = db.Where("tags & ? = ?", tagBits, tagBits)
+			}
+			if req.Distance > 0 && req.Lat != 0 && req.Lng != 0 {
+				db = db.Where(searchDistanceSQL("latitude", "longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
+			}
 			if req.PartyCursor > 0 {
 				db = db.Where("id < ?", req.PartyCursor)
 			}
@@ -155,6 +174,39 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 			if len(dbParties) > 0 {
 				mu.Lock()
 				resp.NextPartyCursor = dbParties[len(dbParties)-1].ID
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+
+	if req.Type == 0 || req.Type == 4 {
+		g.Go(func() error {
+			db := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ?", models.ActivityStatusOnline)
+			if strings.TrimSpace(req.Keyword) != "" {
+				db = db.Where("(name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ?)", keyword, keyword, keyword, keyword, keyword)
+			}
+			if req.District != "" {
+				db = db.Where("district = ?", req.District)
+			}
+			if req.Area != "" {
+				db = db.Where("address LIKE ?", "%"+req.Area+"%")
+			}
+			if req.BusinessArea != "" {
+				db = db.Where("address LIKE ?", "%"+req.BusinessArea+"%")
+			}
+			if req.Distance > 0 && req.Lat != 0 && req.Lng != 0 {
+				db = db.Where(searchDistanceSQL("latitude", "longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
+			}
+			if req.PartyCursor > 0 {
+				db = db.Where("id < ?", req.PartyCursor)
+			}
+			if err := db.Order("id DESC").Limit(req.Limit).Find(&dbActivities).Error; err != nil {
+				return err
+			}
+			if len(dbActivities) > 0 {
+				mu.Lock()
+				resp.NextPartyCursor = dbActivities[len(dbActivities)-1].ID
 				mu.Unlock()
 			}
 			return nil
@@ -216,7 +268,80 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 			})
 		}
 	}
+	if len(dbActivities) > 0 {
+		activityIDs := make([]int64, 0, len(dbActivities))
+		for _, a := range dbActivities {
+			activityIDs = append(activityIDs, a.ID)
+		}
+		priceMap := s.activityMinPriceMap(ctx, activityIDs)
+		resp.Activities = make([]types.SearchActivityItem, 0, len(dbActivities))
+		for _, a := range dbActivities {
+			resp.Activities = append(resp.Activities, types.SearchActivityItem{
+				ID:         a.ID,
+				Name:       a.Name,
+				PosterList: a.PosterList,
+				StartTime:  a.StartTime,
+				EndTime:    a.EndTime,
+				Province:   a.Province,
+				City:       a.City,
+				District:   a.District,
+				Address:    a.Address,
+				Lat:        a.Latitude,
+				Lng:        a.Longitude,
+				AvgPrice:   priceMap[a.ID],
+				Status:     a.Status,
+			})
+		}
+	}
 	return resp, nil
+}
+
+func parseSearchTagBits(raw string) int {
+	var bits int
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		var id int
+		_, _ = fmt.Sscanf(item, "%d", &id)
+		if id > 0 {
+			bits |= id
+		}
+	}
+	return bits
+}
+
+func searchDistanceSQL(latColumn, lngColumn string) string {
+	return fmt.Sprintf(`(6371 * acos(
+		cos(radians(?)) *
+		cos(radians(%s)) *
+		cos(radians(%s) - radians(?)) +
+		sin(radians(?)) *
+		sin(radians(%s))
+	))`, latColumn, lngColumn, latColumn)
+}
+
+func (s *SearchService) activityMinPriceMap(ctx context.Context, activityIDs []int64) map[int64]int64 {
+	result := make(map[int64]int64)
+	if len(activityIDs) == 0 {
+		return result
+	}
+	var rows []struct {
+		ActivityID int64
+		MinPrice   int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketSpec{}).
+		Select("activity_id, MIN(price) AS min_price").
+		Where("activity_id IN ?", activityIDs).
+		Group("activity_id").
+		Scan(&rows).Error; err != nil {
+		return result
+	}
+	for _, row := range rows {
+		result[row.ActivityID] = row.MinPrice
+	}
+	return result
 }
 
 func (s *SearchService) getUsersMap(ctx context.Context, userIds []int) map[int]types.SearchUserItem {

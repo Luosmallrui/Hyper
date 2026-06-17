@@ -42,7 +42,7 @@ type ITicketingService interface {
 	SaveTicketSpecs(ctx context.Context, userID, activityID int64, specs []types.TicketSpecSaveItem) error
 	DeleteTicketSpec(ctx context.Context, userID, specID int64) error
 	CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error)
-	ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error)
+	ListTicketOrders(ctx context.Context, userID int64, status *int8, refundStatus string, page, size int) (*types.PageResponse[types.TicketOrderListItem], error)
 	GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error)
 	ListCancelReasons(ctx context.Context) ([]models.CancelReason, error)
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
@@ -87,7 +87,11 @@ func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (
 	if err != nil {
 		return nil, err
 	}
-	return buildOrganizerInfo(org), nil
+	resp := buildOrganizerInfo(org)
+	if err := s.fillOrganizerLevelInfo(ctx, org.ID, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) error {
@@ -730,11 +734,23 @@ func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo,
 	return "https://cdn.hypercn.cn/" + objectKey, nil
 }
 
-func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
+func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, refundStatus string, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ?", userID)
 	if status != nil {
 		query = query.Where("status = ?", *status)
+	}
+	if refundStatus = strings.TrimSpace(refundStatus); refundStatus != "" {
+		refundStatusValue, ok := refundStatusValue(refundStatus)
+		if !ok {
+			return nil, fmt.Errorf("售后状态参数错误")
+		}
+		query = query.Where(`EXISTS (
+			SELECT 1 FROM refunds r
+			WHERE r.order_id = ticket_orders.id
+			AND r.id = (SELECT MAX(r2.id) FROM refunds r2 WHERE r2.order_id = ticket_orders.id)
+			AND r.status = ?
+		)`, refundStatusValue)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -760,6 +776,8 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		CreatedAt      time.Time
 		ExpireTime     time.Time
 		PayTime        *time.Time
+		RefundNo       string
+		RefundStatus   *int8
 	}
 	err := query.
 		Select(`ticket_orders.id,
@@ -779,9 +797,12 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			ticket_orders.buyer_id_card,
 			ticket_orders.created_at,
 			ticket_orders.expire_time,
-			ticket_orders.pay_time`).
+			ticket_orders.pay_time,
+			lr.refund_no,
+			lr.status AS refund_status`).
 		Joins("LEFT JOIN activities ON activities.id = ticket_orders.activity_id").
 		Joins("LEFT JOIN ticket_specs ON ticket_specs.id = ticket_orders.ticket_spec_id").
+		Joins("LEFT JOIN refunds lr ON lr.order_id = ticket_orders.id AND lr.id = (SELECT MAX(r2.id) FROM refunds r2 WHERE r2.order_id = ticket_orders.id)").
 		Order("ticket_orders.created_at desc").
 		Offset((page - 1) * size).
 		Limit(size).
@@ -816,6 +837,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		item := types.TicketOrderListItem{
 			OrderNo:     r.OrderNo,
 			Status:      status,
+			RefundNo:    r.RefundNo,
 			TotalPrice:  r.TotalPrice,
 			ActualPrice: r.ActualPrice,
 			Quantity:    r.Quantity,
@@ -824,6 +846,10 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			CreatedAt:   r.CreatedAt,
 			ExpireTime:  r.ExpireTime,
 			PayTime:     r.PayTime,
+		}
+		if r.RefundStatus != nil {
+			item.RefundStatus = refundStatusCode(*r.RefundStatus)
+			item.RefundStatusText = refundStatusText(*r.RefundStatus)
 		}
 		item.Viewers = orderViewerItems(viewersByOrderNo[r.OrderNo], false)
 		item.Activity.ID = r.ActivityID
@@ -1858,6 +1884,8 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		}
 		statusText := refundStatusText(refund.Status)
 		resp.RefundNo = refund.RefundNo
+		resp.RefundStatus = refundStatusCode(refund.Status)
+		resp.RefundStatusText = statusText
 		resp.RefundInfo = &struct {
 			RefundNo         string `json:"refund_no"`
 			RefundAmount     int64  `json:"refund_amount"`
@@ -1888,6 +1916,40 @@ func refundStatusText(status int8) string {
 		return "已取消"
 	default:
 		return "未知"
+	}
+}
+
+func refundStatusCode(status int8) string {
+	switch status {
+	case models.RefundStatusAuditing:
+		return "pending_review"
+	case models.RefundStatusRunning:
+		return "refunding"
+	case models.RefundStatusSuccess:
+		return "refunded"
+	case models.RefundStatusRejected:
+		return "rejected"
+	case models.RefundStatusCancelled:
+		return "cancelled"
+	default:
+		return ""
+	}
+}
+
+func refundStatusValue(code string) (int8, bool) {
+	switch code {
+	case "pending_review":
+		return models.RefundStatusAuditing, true
+	case "refunding":
+		return models.RefundStatusRunning, true
+	case "refunded":
+		return models.RefundStatusSuccess, true
+	case "rejected":
+		return models.RefundStatusRejected, true
+	case "cancelled":
+		return models.RefundStatusCancelled, true
+	default:
+		return 0, false
 	}
 }
 
@@ -1973,6 +2035,34 @@ func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 	resp.AccountInfo.BankAccountNo = org.BankAccountNo
 	resp.AccountInfo.BankName = org.BankName
 	return resp
+}
+
+func (s *TicketingService) fillOrganizerLevelInfo(ctx context.Context, organizerID int64, resp *types.OrganizerInfoResponse) error {
+	var completed int64
+	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).
+		Where("organizer_id = ? AND end_time < ?", organizerID, time.Now()).
+		Count(&completed).Error; err != nil {
+		return err
+	}
+	level, feeRate, next := organizerLevelByCompletedCount(completed)
+	resp.LevelValue = level
+	resp.Level = fmt.Sprintf("LV%d", level)
+	resp.FeeRate = feeRate
+	resp.ServiceFeeRate = feeRate
+	resp.CompletedActivityCount = completed
+	resp.NextLevelRequiredCount = next
+	return nil
+}
+
+func organizerLevelByCompletedCount(completed int64) (level int, feeRate float64, nextRequired int64) {
+	switch {
+	case completed >= 10:
+		return 3, 0, 0
+	case completed >= 5:
+		return 2, 0.03, 10
+	default:
+		return 1, 0.05, 5
+	}
 }
 
 func buildOrganizerBankAuditInfo(audit models.OrganizerBankAccountAudit) types.OrganizerBankAuditInfo {

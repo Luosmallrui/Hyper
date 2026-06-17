@@ -41,7 +41,7 @@ func (o *Order) GetOrder(c *gin.Context) error {
 			status = &parsed
 		}
 		userID := int64(c.GetInt("user_id"))
-		orders, err := o.TicketingService.ListTicketOrders(c.Request.Context(), userID, status, orderPage(c), orderSize(c))
+		orders, err := o.TicketingService.ListTicketOrders(c.Request.Context(), userID, status, c.Query("refund_status"), orderPage(c), orderSize(c))
 		if err != nil {
 			return response.NewError(500, err.Error())
 		}

@@ -418,6 +418,7 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 
 func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, tradeType string) error {
 	now := time.Now()
+	var paidOrder models.TicketOrder
 	result := tx.Model(&models.TicketOrder{}).
 		Where("order_no = ? AND status = ?", orderNo, models.TicketOrderStatusPending).
 		Updates(map[string]any{
@@ -438,7 +439,53 @@ func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, t
 		}
 		return fmt.Errorf("票务订单状态不可支付: %d", order.Status)
 	}
-	return nil
+	if err := tx.Where("order_no = ?", orderNo).First(&paidOrder).Error; err != nil {
+		return fmt.Errorf("获取票务订单失败: %w", err)
+	}
+	return p.rewardTicketOrderPoints(tx, paidOrder)
+}
+
+func (p *PayService) rewardTicketOrderPoints(tx *gorm.DB, order models.TicketOrder) error {
+	reward := (order.ActualPrice + 500) / 1000
+	if reward <= 0 {
+		return nil
+	}
+	var exists int64
+	if err := tx.Model(&models.PointsLog{}).
+		Where("user_id = ? AND source_id = ? AND change_type = ?", uint64(order.UserID), order.OrderNo, models.TypeOrderReward).
+		Count(&exists).Error; err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	var account models.UserPoint
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uint64(order.UserID)).First(&account).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		account = models.UserPoint{UserID: uint64(order.UserID), Balance: 0}
+		if err := tx.Create(&account).Error; err != nil {
+			return err
+		}
+	}
+	newBalance := account.Balance + reward
+	if err := tx.Model(&models.UserPoint{}).Where("user_id = ?", uint64(order.UserID)).Updates(map[string]any{
+		"balance":      newBalance,
+		"total_earned": gorm.Expr("total_earned + ?", reward),
+	}).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.PointsLog{
+		UserID:     uint64(order.UserID),
+		Amount:     reward,
+		Balance:    newBalance,
+		ChangeType: models.TypeOrderReward,
+		SourceID:   order.OrderNo,
+		Remark:     "票务订单消费返积分",
+		Status:     1,
+	}).Error
 }
 
 func (p *PayService) ApplyWechatRefund(ctx context.Context, weChatClient *core.Client, refundNo string) error {
