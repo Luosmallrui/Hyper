@@ -579,6 +579,11 @@ CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
 -- ALTER TABLE `viewers` ADD UNIQUE KEY `uk_viewer_user_id_card` (`user_id`, `id_card`);
 -- ALTER TABLE `viewers` ADD UNIQUE KEY `uk_viewer_user_phone` (`user_id`, `phone`);
 
+-- Existing notes table migration:
+-- 场地详情“相关动态”需要动态和场地/门店建立明确关联。
+-- ALTER TABLE `notes` ADD COLUMN `store_id` bigint NOT NULL DEFAULT 0 COMMENT '关联门店/场地ID' AFTER `activity_id`;
+-- ALTER TABLE `notes` ADD KEY `idx_store_id` (`store_id`);
+
 INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '计划有变', 1),
     (2, '买错票券', 2),

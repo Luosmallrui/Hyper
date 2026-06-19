@@ -18,6 +18,7 @@ type Note struct {
 	CreatedAt   time.Time `gorm:"column:created_at;index:idx_created_at" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at" json:"updated_at"`
 	ActivityID  int       `gorm:"column:activity_id;not null;index:idx_activity_id" json:"activity_id"`
+	StoreID     int64     `gorm:"column:store_id;not null;default:0;index:idx_store_id" json:"store_id"`
 }
 
 func (n Note) TableName() string {

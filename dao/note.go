@@ -51,6 +51,25 @@ func (d *NoteDAO) ListNode(ctx context.Context, cursor int64, limit int) (notes 
 	return notes, err
 }
 
+func (d *NoteDAO) ListRelatedNotes(ctx context.Context, storeID int64, activityID int, cursor int64, limit int) (notes []*models.Note, err error) {
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).
+		Where("status = ? AND visible_conf = ?", 1, 1)
+
+	if storeID > 0 {
+		db = db.Where("store_id = ?", storeID)
+	} else {
+		db = db.Where("activity_id = ?", activityID)
+	}
+	if cursor > 0 {
+		cursorTime := time.Unix(0, cursor)
+		db = db.Where("created_at < ?", cursorTime)
+	}
+	err = db.Order("created_at DESC").
+		Limit(limit).
+		Find(&notes).Error
+	return notes, err
+}
+
 func (d *NoteDAO) ListNodeByChannel(ctx context.Context, cursor int64, limit int, ChannelId int) (notes []*models.Note, err error) {
 	db := d.Db.WithContext(ctx).Model(&models.Note{}).Where("channel_id = ?", ChannelId)
 

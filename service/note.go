@@ -30,6 +30,7 @@ type INoteService interface {
 	GetFollowedPosts(ctx context.Context, userId int, cursor int64, pageSize int) (types.ListNotesRep, error)
 	GetALlNote(ctx context.Context) ([]*models.Note, error)
 	GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error)
+	GetRelatedNotes(ctx context.Context, req types.ListRelatedNotesReq, currentUserID uint64) (types.ListNotesRep, error)
 }
 
 type NoteService struct {
@@ -185,6 +186,7 @@ func (s *NoteService) noteToDTO(ctx context.Context, note *models.Note, enrich *
 		CreatedAt:    note.CreatedAt,
 		UpdatedAt:    note.UpdatedAt,
 		ActivityID:   note.ActivityID,
+		StoreID:      note.StoreID,
 	}
 
 	if user, ok := enrich.Users[note.UserID]; ok {
@@ -339,6 +341,23 @@ func (s *NoteService) ListNote(ctx context.Context, cursor int64, pageSize int, 
 	return s.buildListNotesRep(ctx, notes, pageSize, userID), nil
 }
 
+func (s *NoteService) GetRelatedNotes(ctx context.Context, req types.ListRelatedNotesReq, currentUserID uint64) (types.ListNotesRep, error) {
+	if req.PageSize <= 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+	if req.PageSize > 100 {
+		req.PageSize = 100
+	}
+	if req.StoreID <= 0 && req.ActivityID <= 0 {
+		return types.ListNotesRep{Notes: make([]*types.Notes, 0)}, nil
+	}
+	notes, err := s.NoteDAO.ListRelatedNotes(ctx, req.StoreID, req.ActivityID, req.Cursor, req.PageSize+1)
+	if err != nil {
+		return types.ListNotesRep{}, err
+	}
+	return s.buildListNotesRep(ctx, notes, req.PageSize, currentUserID), nil
+}
+
 func (s *NoteService) ListNoteByUser(ctx context.Context, cursor int64, pageSize int, userID int, targetUser int) (types.ListNotesBriefRep, error) {
 	notes, err := s.NoteDAO.ListNodeByUser(ctx, cursor, pageSize+1, targetUser)
 	if err != nil {
@@ -441,6 +460,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		ActivityID:  req.ActivityID,
+		StoreID:     req.StoreID,
 	}
 
 	err := s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
