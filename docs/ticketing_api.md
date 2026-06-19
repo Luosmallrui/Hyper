@@ -140,6 +140,24 @@ Query:
 |---|---|---|
 | source | 否 | `all` / `party` / `activity`，默认 `all` |
 | limit | 否 | 每类最多返回数量，默认 `200`，最大 `500` |
+| keyword | 否 | 关键词，匹配标题、地址、描述 |
+| category_id | 否 | 旧派对/场地分类 ID，仅对 `party` / `venue` / `merchant` 分支生效 |
+| district_id | 否 | 行政区 ID，仅对旧派对/场地分支生效 |
+| district | 否 | 行政区名称或 ID；如 `武侯区`。旧派对/场地会自动转为 `district_id`，票务活动按 `activities.district` 匹配 |
+| area_id | 否 | 商圈/区域 ID，仅对旧派对/场地分支生效 |
+| area | 否 | 商圈/区域名称或 ID；旧派对/场地会自动转为 `area_id`，票务活动按地址模糊匹配 |
+| business_area | 否 | 商圈名称，按地址/位置模糊匹配 |
+| tags/tag_ids | 否 | 标签位，如 `1,4`，仅对旧派对/场地分支生效 |
+| lat/lng | 否 | 用户经纬度，配合 `distance` 使用 |
+| distance | 否 | 距离，单位 km；传 `lat/lng` 时生效 |
+
+示例：
+
+```http
+GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
+```
+
+注意：`category_id=1` 只过滤旧派对/场地。新票务活动当前没有分类字段，因此活动分支不会按 `category_id` 过滤。
 
 数据来源：
 

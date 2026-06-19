@@ -26,9 +26,10 @@ type UploadAvatarRes struct {
 }
 
 type UserProfile struct {
-	UserID   uint64 `json:"user_id"`
-	Avatar   string `json:"avatar"`
-	Nickname string `json:"nickname"`
+	UserID     uint64 `json:"user_id"`
+	UserHashID string `json:"user_hash_id,omitempty"`
+	Avatar     string `json:"avatar"`
+	Nickname   string `json:"nickname"`
 }
 
 type GetUserInfoRequest struct {

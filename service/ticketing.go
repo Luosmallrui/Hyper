@@ -567,6 +567,15 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 			}
 		}
 		actualPrice := totalPrice - pointsDiscount
+		orderStatus := models.TicketOrderStatusPending
+		payMethod := ""
+		var payTime *time.Time
+		if actualPrice == 0 {
+			orderStatus = models.TicketOrderStatusUsable
+			payMethod = zeroPayMethod(pointsAmount)
+			nowPaid := time.Now()
+			payTime = &nowPaid
+		}
 		order := models.TicketOrder{
 			OrderNo:        orderNo,
 			UserID:         userID,
@@ -577,9 +586,11 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 			ActualPrice:    actualPrice,
 			PointsAmount:   pointsAmount,
 			PointsDiscount: pointsDiscount,
+			PayMethod:      payMethod,
+			PayTime:        payTime,
 			BuyerName:      buyerName,
 			BuyerIDCard:    buyerIDCard,
-			Status:         models.TicketOrderStatusPending,
+			Status:         orderStatus,
 			ExpireTime:     expireTime,
 			QRCode:         qrContent,
 			QRCodeURL:      qrURL,
@@ -600,6 +611,7 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		result.PointsAmount = pointsAmount
 		result.PointsDiscount = pointsDiscount
 		result.ActualPrice = actualPrice
+		result.Status = orderStatus
 		result.QRCode = qrContent
 		result.QRCodeURL = qrURL
 		result.Viewers = orderViewerItems(orderViewers, false)
@@ -738,7 +750,14 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ?", userID)
 	if status != nil {
-		query = query.Where("status = ?", *status)
+		switch *status {
+		case models.TicketOrderStatusPending:
+			query = query.Where("status = ? AND actual_price > 0", *status)
+		case models.TicketOrderStatusUsable:
+			query = query.Where("(status = ? OR (status = ? AND actual_price = 0))", *status, models.TicketOrderStatusPending)
+		default:
+			query = query.Where("status = ?", *status)
+		}
 	}
 	if refundStatus = strings.TrimSpace(refundStatus); refundStatus != "" {
 		refundStatusValue, ok := refundStatusValue(refundStatus)
@@ -763,6 +782,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		Status         int8
 		TotalPrice     int64
 		ActualPrice    int64
+		PointsAmount   int64
 		Quantity       int
 		ActivityID     int64
 		ActivityName   string
@@ -785,6 +805,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			ticket_orders.status,
 			ticket_orders.total_price,
 			ticket_orders.actual_price,
+			ticket_orders.points_amount,
 			ticket_orders.quantity,
 			ticket_orders.activity_id,
 			activities.name AS activity_name,
@@ -833,6 +854,10 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			_ = s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
 				Where("id = ? AND status <> ?", r.ID, models.TicketOrderStatusRefundSuccess).
 				Update("status", models.TicketOrderStatusRefundSuccess).Error
+		}
+		if status == models.TicketOrderStatusPending && r.ActualPrice == 0 {
+			status = models.TicketOrderStatusUsable
+			_ = s.markZeroPayOrderUsable(ctx, r.ID, r.PointsAmount)
 		}
 		item := types.TicketOrderListItem{
 			OrderNo:     r.OrderNo,
@@ -1839,6 +1864,15 @@ func (s *TicketingService) listActivities(query *gorm.DB, page, size int) (*type
 }
 
 func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.TicketOrder) (*types.TicketOrderDetailResponse, error) {
+	if order.Status == models.TicketOrderStatusPending && order.ActualPrice == 0 {
+		if err := s.markZeroPayOrderUsable(ctx, order.ID, order.PointsAmount); err != nil {
+			return nil, err
+		}
+		order.Status = models.TicketOrderStatusUsable
+		order.PayMethod = zeroPayMethod(order.PointsAmount)
+		nowPaid := time.Now()
+		order.PayTime = &nowPaid
+	}
 	var act models.Activity
 	if err := s.DB.WithContext(ctx).First(&act, order.ActivityID).Error; err != nil {
 		return nil, err
@@ -1900,6 +1934,25 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		}{RefundNo: refund.RefundNo, Status: refund.Status, StatusText: statusText}
 	}
 	return resp, nil
+}
+
+func (s *TicketingService) markZeroPayOrderUsable(ctx context.Context, orderID int64, pointsAmount int64) error {
+	payMethod := zeroPayMethod(pointsAmount)
+	nowPaid := time.Now()
+	return s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("id = ? AND status = ? AND actual_price = 0", orderID, models.TicketOrderStatusPending).
+		Updates(map[string]any{
+			"status":     models.TicketOrderStatusUsable,
+			"pay_method": payMethod,
+			"pay_time":   nowPaid,
+		}).Error
+}
+
+func zeroPayMethod(pointsAmount int64) string {
+	if pointsAmount > 0 {
+		return "points"
+	}
+	return "free"
 }
 
 func refundStatusText(status int8) string {

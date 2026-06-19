@@ -32,6 +32,7 @@ type CommentResponse struct {
 	ID         uint64    `json:"id"`
 	NoteID     uint64    `json:"note_id"`
 	UserID     uint64    `json:"user_id"`
+	UserHashID string    `json:"user_hash_id,omitempty"`
 	Content    string    `json:"content"`
 	LikeCount  int       `json:"like_count"`
 	ReplyCount int       `json:"reply_count"` // 回复数
@@ -50,6 +51,8 @@ type ReplyResponse struct {
 	ID         uint64    `json:"id"`
 	RootID     uint64    `json:"root_id"`
 	ParentID   uint64    `json:"parent_id"`
+	UserID     uint64    `json:"user_id"`
+	UserHashID string    `json:"user_hash_id,omitempty"`
 	Content    string    `json:"content"`
 	LikeCount  int       `json:"like_count"`
 	IsLiked    bool      `json:"is_liked"`

@@ -72,6 +72,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	messageDAO := dao.NewMessageDAO(db)
 	users := dao.NewUsers(db)
 	userService := &service.UserService{
+		Config:    cfg,
 		UsersRepo: users,
 		Redis:     redisClient,
 		DB:        db,

@@ -25,6 +25,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	users := dao.NewUsers(db)
 	redisClient := client.NewRedisClient(cfg)
 	userService := &service.UserService{
+		Config:    cfg,
 		UsersRepo: users,
 		Redis:     redisClient,
 		DB:        db,

@@ -103,7 +103,8 @@ type UserToken struct {
 }
 type UserBasicInfo struct {
 	Id          int           `json:"id"`
-	UserID      string        `json:"user_id"`    // Snowflake ID（对外）
+	UserID      string        `json:"user_id"` // Snowflake ID（对外）
+	NumericID   int           `json:"numeric_user_id"`
 	Nickname    string        `json:"nickname"`   // 邪修的马路路
 	AvatarURL   string        `json:"avatar_url"` // 头像
 	VipLevel    string        `json:"vip_level"`  // gold / silver / none

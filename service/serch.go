@@ -187,7 +187,7 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 				db = db.Where("(name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ?)", keyword, keyword, keyword, keyword, keyword)
 			}
 			if req.District != "" {
-				db = db.Where("district = ?", req.District)
+				db = db.Where("district = ?", s.resolveDistrictName(ctx, req.District))
 			}
 			if req.Area != "" {
 				db = db.Where("address LIKE ?", "%"+req.Area+"%")
@@ -342,6 +342,21 @@ func (s *SearchService) activityMinPriceMap(ctx context.Context, activityIDs []i
 		result[row.ActivityID] = row.MinPrice
 	}
 	return result
+}
+
+func (s *SearchService) resolveDistrictName(ctx context.Context, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if _, err := fmt.Sscanf(raw, "%d", new(int)); err != nil {
+		return raw
+	}
+	var district models.District
+	if err := s.DB.WithContext(ctx).Where("id = ?", raw).First(&district).Error; err != nil {
+		return raw
+	}
+	return district.Name
 }
 
 func (s *SearchService) getUsersMap(ctx context.Context, userIds []int) map[int]types.SearchUserItem {
