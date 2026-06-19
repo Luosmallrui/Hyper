@@ -23,6 +23,7 @@ type INoteService interface {
 	CreateNote(ctx context.Context, userID uint64, req *types.CreateNoteRequest) (uint64, error)
 	GetUserNotes(ctx context.Context, userID uint64, status int, limit, offset int) ([]*models.Note, error)
 	UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error
+	UpdateNoteRelation(ctx context.Context, userID uint64, noteID uint64, req types.UpdateNoteRelationRequest) error
 	ListNote(ctx context.Context, cursor int64, pageSize int, userID uint64) (types.ListNotesRep, error)
 	GetNoteDetail(ctx context.Context, noteID uint64, currentUserID uint64) (*types.NoteDetail, error)
 	GetMyNotesFeed(ctx context.Context, userID int, cursor int64, pageSize int) ([]*models.Note, int64, bool, error)
@@ -507,6 +508,38 @@ func (s *NoteService) GetUserNotes(ctx context.Context, userID uint64, status in
 
 func (s *NoteService) UpdateNoteStatus(ctx context.Context, noteID uint64, status int) error {
 	return s.NoteDAO.UpdateStatus(ctx, noteID, status)
+}
+
+func (s *NoteService) UpdateNoteRelation(ctx context.Context, userID uint64, noteID uint64, req types.UpdateNoteRelationRequest) error {
+	updates := make(map[string]any)
+	if req.StoreID != nil {
+		if *req.StoreID < 0 {
+			return errors.New("store_id不能小于0")
+		}
+		updates["store_id"] = *req.StoreID
+	}
+	if req.ActivityID != nil {
+		if *req.ActivityID < 0 {
+			return errors.New("activity_id不能小于0")
+		}
+		updates["activity_id"] = *req.ActivityID
+	}
+	if len(updates) == 0 {
+		return errors.New("请至少提交store_id或activity_id")
+	}
+	updates["updated_at"] = time.Now()
+
+	result := s.NoteDAO.Db.WithContext(ctx).
+		Model(&models.Note{}).
+		Where("id = ? AND user_id = ? AND status <> ?", noteID, userID, -1).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("动态不存在或无权限修改")
+	}
+	return nil
 }
 
 // ============================================================================

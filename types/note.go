@@ -91,6 +91,11 @@ type CreateNoteResponse struct {
 	NoteID uint64 `json:"note_id"` // 笔记ID
 }
 
+type UpdateNoteRelationRequest struct {
+	StoreID    *int64 `json:"store_id"`
+	ActivityID *int   `json:"activity_id"`
+}
+
 // GetMyNotesRequest 查询自己笔记的请求
 type GetMyNotesRequest struct {
 	Status   int `form:"status" binding:"omitempty,oneof=0 1 2 3"`   // 笔记状态筛选（可选）
