@@ -357,6 +357,7 @@ func (h *Ticketing) CreateTicketOrder(c *gin.Context) error {
 	response.Success(c, gin.H{
 		"success":         true,
 		"order_no":        resp.OrderNo,
+		"status":          resp.Status,
 		"total_price":     resp.TotalPrice,
 		"points_amount":   resp.PointsAmount,
 		"points_discount": resp.PointsDiscount,

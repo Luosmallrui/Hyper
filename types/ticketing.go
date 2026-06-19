@@ -173,6 +173,7 @@ type OrderViewerItem struct {
 
 type CreateTicketOrderResponse struct {
 	OrderNo        string            `json:"order_no"`
+	Status         int8              `json:"status"`
 	TotalPrice     int64             `json:"total_price"`
 	PointsAmount   int64             `json:"points_amount"`
 	PointsDiscount int64             `json:"points_discount"`

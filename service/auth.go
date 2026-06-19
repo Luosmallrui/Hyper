@@ -1,9 +1,11 @@
 package service
 
 import (
+	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/encrypt"
+	"Hyper/pkg/utils"
 	"Hyper/types"
 	"context"
 	"encoding/json"
@@ -36,6 +38,7 @@ type IUserService interface {
 }
 
 type UserService struct {
+	Config    *config.Config
 	UsersRepo *dao.Users
 	Redis     *redis.Client
 	DB        *gorm.DB
@@ -240,6 +243,9 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 		if val != nil {
 			var info types.UserProfile
 			_ = json.Unmarshal([]byte(val.(string)), &info)
+			if info.UserHashID == "" && info.UserID > 0 {
+				info.UserHashID = s.userHashID(info.UserID)
+			}
 			result[uids[i]] = info
 		} else {
 			missingIds = append(missingIds, uids[i])
@@ -257,7 +263,7 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 
 		pipe := s.Redis.Pipeline()
 		for _, user := range dbUsers {
-			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname, UserID: user.Id}
+			info := types.UserProfile{Avatar: user.Avatar, Nickname: user.Nickname, UserID: user.Id, UserHashID: s.userHashID(user.Id)}
 			result[user.Id] = info
 
 			// 写入缓存供下次使用
@@ -268,6 +274,13 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 	}
 
 	return result
+}
+
+func (s *UserService) userHashID(userID uint64) string {
+	if s.Config == nil || s.Config.Jwt.Secret == "" {
+		return ""
+	}
+	return utils.GenHashID(s.Config.Jwt.Secret, int(userID))
 }
 
 // Modify send sms code 模拟发送短信验证码

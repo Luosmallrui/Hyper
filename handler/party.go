@@ -180,7 +180,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	if districtId == "" {
 		districtId = c.Query("district")
 	}
-	districtIdNum, _ := strconv.Atoi(districtId)
+	districtIdNum := pc.resolveDistrictID(c, districtId)
 	if districtIdNum > 0 {
 		query = query.Where("district_id = ?", districtIdNum)
 	}
@@ -188,7 +188,7 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	if areaRaw == "" {
 		areaRaw = c.Query("area")
 	}
-	areaID, _ := strconv.Atoi(areaRaw)
+	areaID := pc.resolveAreaID(c, areaRaw)
 	if areaID > 0 {
 		query = query.Where("area_id = ?", areaID)
 	}
@@ -339,6 +339,36 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 	}
 	response.Success(c, resp)
 	return nil
+}
+
+func (pc *Merchant) resolveDistrictID(c *gin.Context, raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+		return id
+	}
+	var district models.District
+	if err := pc.DB.WithContext(c.Request.Context()).Where("name = ?", raw).First(&district).Error; err != nil {
+		return 0
+	}
+	return district.ID
+}
+
+func (pc *Merchant) resolveAreaID(c *gin.Context, raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+		return id
+	}
+	var area models.Areas
+	if err := pc.DB.WithContext(c.Request.Context()).Where("name = ?", raw).First(&area).Error; err != nil {
+		return 0
+	}
+	return area.ID
 }
 
 // GetPartyDetail 获取派对详情

@@ -140,6 +140,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 		User: types.UserBasicInfo{
 			Id:          userInfo.Id,
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, userInfo.Id),
+			NumericID:   userInfo.Id,
 			Nickname:    userInfo.Nickname,
 			PhoneNumber: userInfo.Mobile,
 			AvatarURL:   userInfo.Avatar,

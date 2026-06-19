@@ -77,6 +77,12 @@ GET /api/v1/map/markers?source=all&keyword=电音&distance=5&district=锦江区&
 - `district_id`
 - `area_id`
 
+参数口径：
+
+- `category_id` 只对旧派对/场地分支生效；票务活动当前没有分类字段，不按该参数过滤。
+- `district` 可以传中文名或数字 ID，例如 `武侯区` 或 `1`。
+- `area` 可以传商圈中文名或数字 ID。
+
 返回字段补充：
 
 ```json

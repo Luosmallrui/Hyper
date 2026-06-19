@@ -102,7 +102,13 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	if districtID := queryInt(c, "district_id"); districtID > 0 {
 		query = query.Where("district_id = ?", districtID)
 	}
+	if districtID := m.resolveDistrictID(c, c.Query("district")); districtID > 0 {
+		query = query.Where("district_id = ?", districtID)
+	}
 	if areaID := queryInt(c, "area_id"); areaID > 0 {
+		query = query.Where("area_id = ?", areaID)
+	}
+	if areaID := m.resolveAreaID(c, c.Query("area")); areaID > 0 {
 		query = query.Where("area_id = ?", areaID)
 	}
 	if tagBits := parseTagBits(c.Query("tag_ids")); tagBits > 0 {
@@ -114,12 +120,6 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("title LIKE ? OR location_name LIKE ? OR address LIKE ? OR description LIKE ?", like, like, like, like)
-	}
-	if area := strings.TrimSpace(c.Query("area")); area != "" {
-		query = query.Where("area_id = ?", area)
-	}
-	if district := strings.TrimSpace(c.Query("district")); district != "" {
-		query = query.Where("district_id = ?", district)
 	}
 	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
 		like := "%" + businessArea + "%"
@@ -209,6 +209,9 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	}
 	if district := strings.TrimSpace(c.Query("district")); district != "" {
 		query = query.Where("district = ?", district)
+	}
+	if districtName := m.resolveDistrictName(c, c.Query("district_id")); districtName != "" {
+		query = query.Where("district = ?", districtName)
 	}
 	if area := strings.TrimSpace(c.Query("area")); area != "" {
 		query = query.Where("address LIKE ?", "%"+area+"%")
@@ -366,6 +369,51 @@ func (m *Map) GetDistrictTree(c *gin.Context) error {
 	response.Success(c, tree)
 
 	return nil
+}
+
+func (m *Map) resolveDistrictID(c *gin.Context, raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+		return id
+	}
+	var district models.District
+	if err := m.DB.WithContext(c.Request.Context()).Where("name = ?", raw).First(&district).Error; err != nil {
+		return 0
+	}
+	return district.ID
+}
+
+func (m *Map) resolveDistrictName(c *gin.Context, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if _, err := strconv.Atoi(raw); err != nil {
+		return raw
+	}
+	var district models.District
+	if err := m.DB.WithContext(c.Request.Context()).Where("id = ?", raw).First(&district).Error; err != nil {
+		return ""
+	}
+	return district.Name
+}
+
+func (m *Map) resolveAreaID(c *gin.Context, raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+		return id
+	}
+	var area models.Areas
+	if err := m.DB.WithContext(c.Request.Context()).Where("name = ?", raw).First(&area).Error; err != nil {
+		return 0
+	}
+	return area.ID
 }
 
 func formatMarkerTime(t time.Time) string {
