@@ -47,6 +47,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
 	g.GET("/list", authorize, context.Wrap(n.ListNote))
+	g.GET("/related", authorize, context.Wrap(n.ListRelatedNotes))
 	g.GET("/followed", authorize, context.Wrap(n.ListFollowedNotes))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
@@ -210,6 +211,20 @@ func (n *Note) ListNote(c *gin.Context) error {
 		}
 	}
 
+	response.Success(c, resp)
+	return nil
+}
+
+func (n *Note) ListRelatedNotes(c *gin.Context) error {
+	userID := c.GetInt("user_id")
+	var req types.ListRelatedNotesReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+	resp, err := n.NoteService.GetRelatedNotes(c.Request.Context(), req, uint64(userID))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "获取相关动态失败: "+err.Error())
+	}
 	response.Success(c, resp)
 	return nil
 }
