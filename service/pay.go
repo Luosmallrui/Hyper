@@ -513,8 +513,12 @@ func (p *PayService) ApplyWechatRefund(ctx context.Context, weChatClient *core.C
 			return fmt.Errorf("订单状态不可退款")
 		}
 		if order.ActualPrice > 0 {
-			if err := tx.Where("order_sn = ? AND pay_status = 2", order.OrderNo).First(&payRecord).Error; err != nil {
-				return fmt.Errorf("支付流水不存在或未支付: %w", err)
+			err := tx.Where("order_sn = ?", order.OrderNo).First(&payRecord).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("查询支付流水失败: %w", err)
+			}
+			if err == nil && payRecord.PayStatus != 2 {
+				return fmt.Errorf("支付流水未支付")
 			}
 		}
 		return nil
