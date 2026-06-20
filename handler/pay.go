@@ -44,6 +44,7 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 		pay.POST("/prepay", authorize, context.Wrap(p.Prepay))
 		pay.POST("/notify", context.Wrap(p.PayNotify))
 		pay.POST("/refund/:refund_no/approve", authorize, context.Wrap(p.ApproveRefund))
+		pay.POST("/refund/:refund_no/sync", authorize, context.Wrap(p.SyncRefund))
 		pay.POST("/refund-notify", context.Wrap(p.RefundNotify))
 
 		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))
@@ -61,6 +62,24 @@ func (p *Pay) ApproveRefund(c *gin.Context) error {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (p *Pay) SyncRefund(c *gin.Context) error {
+	refundNo := c.Param("refund_no")
+	if refundNo == "" {
+		return response.NewError(http.StatusBadRequest, "退款单号不能为空")
+	}
+	refund, err := p.PayService.SyncWechatRefund(c.Request.Context(), p.wechatClient, refundNo)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	response.Success(c, gin.H{
+		"success":       true,
+		"refund_no":     refund.RefundNo,
+		"status":        refund.Status,
+		"wechat_status": refund.WechatStatus,
+	})
 	return nil
 }
 

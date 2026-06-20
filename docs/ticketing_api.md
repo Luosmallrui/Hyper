@@ -1857,6 +1857,39 @@ Authorization: Bearer <access_token>
 - 微信受理后把 `refunds.status` 更新为 `1` 退款中
 - 微信退款成功回调后把 `refunds.status` 更新为 `2`，订单状态更新为 `5`
 
+### 同步微信退款状态
+
+```http
+POST /api/v1/pay/refund/:refund_no/sync
+Authorization: Bearer <access_token>
+```
+
+说明：
+
+- 用于微信退款回调未成功送达、订单长时间停留在“退款中”的兜底处理。
+- 后端会调用微信支付“查询单笔退款”接口：`/v3/refund/domestic/refunds/{out_refund_no}`。
+- 如果微信返回 `SUCCESS`，后端会同步：
+  - `refunds.status = 2`
+  - `refunds.wechat_status = SUCCESS`
+  - `ticket_orders.status = 5`
+  - 追加退款日志
+- 如果微信仍返回处理中，则保持 `refunds.status = 1`、`ticket_orders.status = 4`。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "success": true,
+    "refund_no": "R20260620120000abcd",
+    "status": 2,
+    "wechat_status": "SUCCESS"
+  }
+}
+```
+
 ### 审核拒绝退款
 
 ```http
