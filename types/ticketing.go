@@ -19,6 +19,20 @@ type OrganizerApplyRequest struct {
 	District string `json:"district"`
 }
 
+type OrganizerApplyResponse struct {
+	ApplicationID int64     `json:"application_id"`
+	Status        int8      `json:"status"`
+	SubmittedAt   time.Time `json:"submitted_at"`
+}
+
+type OrganizerAuditStatusResponse struct {
+	Type         string     `json:"type,omitempty"`
+	Status       int8       `json:"status"`
+	RejectReason string     `json:"reject_reason"`
+	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
+	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`
+}
+
 type OrganizerBasicRequest struct {
 	Name     *string `json:"name"`
 	Logo     *string `json:"logo"`
@@ -113,15 +127,17 @@ type ActivityDetailResponse struct {
 	models.Activity
 	TicketSpecs []models.TicketSpec `json:"ticket_specs"`
 	Organizer   *models.Organizer   `json:"organizer,omitempty"`
+	IsSubscribe bool                `json:"is_subscribe"`
 }
 
 type ActivityListItem struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	PosterList string    `json:"poster_list"`
-	StartTime  time.Time `json:"start_time"`
-	EndTime    time.Time `json:"end_time"`
-	Status     int8      `json:"status"`
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	PosterList  string    `json:"poster_list"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	Status      int8      `json:"status"`
+	IsSubscribe bool      `json:"is_subscribe,omitempty"`
 }
 
 type TicketSpecSaveItem struct {

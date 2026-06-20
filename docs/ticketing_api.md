@@ -128,7 +128,7 @@ FormData:
 
 ### 获取首页地图点位
 
-该接口用于小程序首页地图，统一返回旧派对/场地点位和新票务活动点位。
+该接口用于小程序首页地图。当前已迁移为只返回新票务活动点位，不再混入旧 `parties` 派对/场地数据。
 
 ```http
 GET /api/v1/map/markers?source=all&limit=200
@@ -138,16 +138,16 @@ Query:
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| source | 否 | `all` / `party` / `activity`，默认 `all` |
-| limit | 否 | 每类最多返回数量，默认 `200`，最大 `500` |
+| source | 否 | `all` / `activity`，默认 `all`；`party` / `venue` / `merchant` 暂保留但返回空列表 |
+| limit | 否 | 最多返回数量，默认 `200`，最大 `500` |
 | keyword | 否 | 关键词，匹配标题、地址、描述 |
-| category_id | 否 | 旧派对/场地分类 ID，仅对 `party` / `venue` / `merchant` 分支生效 |
-| district_id | 否 | 行政区 ID，仅对旧派对/场地分支生效 |
-| district | 否 | 行政区名称或 ID；如 `武侯区`。旧派对/场地会自动转为 `district_id`，票务活动按 `activities.district` 匹配 |
-| area_id | 否 | 商圈/区域 ID，仅对旧派对/场地分支生效 |
-| area | 否 | 商圈/区域名称或 ID；旧派对/场地会自动转为 `area_id`，票务活动按地址模糊匹配 |
+| category_id | 否 | 预留字段，当前活动暂未按分类过滤 |
+| district_id | 否 | 行政区 ID，会转为行政区名称后按 `activities.district` 匹配 |
+| district | 否 | 行政区名称或 ID；如 `武侯区`，票务活动按 `activities.district` 匹配 |
+| area_id | 否 | 预留字段 |
+| area | 否 | 商圈/区域名称或 ID，活动按地址模糊匹配 |
 | business_area | 否 | 商圈名称，按地址/位置模糊匹配 |
-| tags/tag_ids | 否 | 标签位，如 `1,4`，仅对旧派对/场地分支生效 |
+| tags/tag_ids | 否 | 预留字段，当前活动暂未按标签过滤 |
 | lat/lng | 否 | 用户经纬度，配合 `distance` 使用 |
 | distance | 否 | 距离，单位 km；传 `lat/lng` 时生效 |
 
@@ -157,14 +157,15 @@ Query:
 GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
 ```
 
-注意：`category_id=1` 只过滤旧派对/场地。新票务活动当前没有分类字段，因此活动分支不会按 `category_id` 过滤。
+注意：新票务活动当前没有分类字段，因此 `category_id` 暂不生效。
 
 数据来源：
 
 | source | 来源表 | 条件 | 说明 |
 |---|---|---|---|
-| party | `parties` | `status=active` | 旧派对/场地 |
+| all | `activities` | `status=3` | 新票务活动，管理员审核通过后可见 |
 | activity | `activities` | `status=3` | 新票务活动，管理员审核通过后可见 |
+| party / venue / merchant | - | - | 老派对/场地已停止作为首页数据源，返回空列表 |
 
 响应：
 
@@ -174,34 +175,11 @@ GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
   "data": {
     "list": [
       {
-        "id": "party-1",
-        "source": "party",
-        "source_id": 1,
-        "user_id": 1,
-        "user": "派对主理人",
-        "username": "派对主理人",
-        "user_avatar": "https://cdn.xxx/avatar.jpg",
-        "userAvatar": "https://cdn.xxx/avatar.jpg",
-        "title": "Hyper Club",
-        "type": "场地",
-        "location": "Hyper Club",
-        "address": "朝阳区 xx 路",
-        "lat": 39.9333,
-        "lng": 116.4533,
-        "cover_image": "https://cdn.xxx/cover.jpg",
-        "created_at": "2026-06-03 12:00:00",
-        "avg_price": 7600,
-        "current_count": 9932,
-        "post_count": 372,
-        "icon": "https://cdn.hypercn.cn/icon/jiuba.png",
-        "is_subscribe": false,
-        "is_follow": false,
-        "status": "active"
-      },
-      {
         "id": "activity-1",
         "source": "activity",
         "source_id": 1,
+        "detail_type": "activity",
+        "detail_url": "/api/v1/activity/1",
         "user_id": 1,
         "user": "Hyper Club",
         "username": "Hyper Club",
@@ -226,19 +204,115 @@ GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
         "status": 3
       }
     ],
-    "total": 2
+    "total": 1
   }
 }
 ```
 
 前端跳转建议：
 
-| source | 点击后跳转 |
-|---|---|
-| party | 旧派对/场地详情，使用 `source_id` |
-| activity | 新票务活动详情，使用 `source_id` 调 `/api/v1/activity/:id` |
+优先使用 `detail_url`；当前地图点位只会跳转到新票务活动详情：
+
+```http
+GET /api/v1/activity/:id
+```
 
 说明：为兼容旧首页地图卡片，`activity` 类型也会返回 `user`、`username`、`user_avatar`、`userAvatar`、`avg_price`、`current_count`、`post_count`、`is_subscribe`、`is_follow` 等字段。`avg_price` 使用该活动票种最低价，单位为分。
+
+### 订阅/取消订阅活动
+
+> 新活动不要再调用旧 `/api/v1/merchant/subscribe`。正式接口如下：
+
+```http
+POST /api/v1/activity/{id}/subscribe
+Authorization: Bearer <token>
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "success": true
+  }
+}
+```
+
+取消订阅：
+
+```http
+POST /api/v1/activity/{id}/unsubscribe
+Authorization: Bearer <token>
+```
+
+获取当前用户已订阅活动：
+
+```http
+GET /api/v1/activity/subscriptions?page=1&pageSize=20
+Authorization: Bearer <token>
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "id": 10,
+        "name": "jjjj",
+        "poster_list": "https://cdn.hypercn.cn/ticketing/poster_list/xxx.png",
+        "start_time": "2026-06-13T16:51:00+08:00",
+        "end_time": "2026-06-19T16:51:00+08:00",
+        "status": 3,
+        "is_subscribe": true
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+活动详情会返回当前用户订阅状态：
+
+```http
+GET /api/v1/activity/{id}
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 10,
+    "name": "jjjj",
+    "is_subscribe": true
+  }
+}
+```
+
+兼容说明：
+
+- 旧 `/api/v1/merchant/subscribe` 若收到的 `party_id` 实际存在于新 `activities.id`，后端会兼容写入新活动订阅。
+- 前端仍应尽快切到 `/api/v1/activity/{id}/subscribe`。
+
+数据库：
+
+```sql
+CREATE TABLE IF NOT EXISTS `activity_subscriptions`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订阅ID',
+    `activity_id` bigint unsigned NOT NULL COMMENT '活动ID',
+    `user_id`     bigint unsigned NOT NULL COMMENT '用户ID',
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_activity_user` (`activity_id`, `user_id`) USING BTREE,
+    KEY `idx_activity_subscription_activity` (`activity_id`) USING BTREE,
+    KEY `idx_activity_subscription_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动订阅表';
+```
 
 ## 3. 主办方模块
 
@@ -309,7 +383,23 @@ POST /api/v1/organizer/apply
 响应：
 
 ```json
-{ "code": 200, "data": { "success": true } }
+{
+  "code": 200,
+  "data": {
+    "application_id": 123,
+    "status": 1,
+    "submitted_at": "2026-06-20T13:21:00+08:00"
+  }
+}
+```
+
+重复提交：
+
+```json
+{
+  "code": 409,
+  "msg": "入驻申请正在审核中，请勿重复提交"
+}
 ```
 
 ### 入驻审核状态
@@ -326,6 +416,20 @@ GET /api/v1/organizer/audit-status
   "data": {
     "type": "venue",
     "status": 1,
+    "reject_reason": "",
+    "submitted_at": "2026-06-20T13:21:00+08:00",
+    "reviewed_at": null
+  }
+}
+```
+
+未提交时：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "status": 0,
     "reject_reason": ""
   }
 }
@@ -1532,6 +1636,35 @@ POST /api/v1/order/:order_no/cancel
 ```json
 {
   "reason_id": 1
+}
+```
+
+### 删除订单
+
+```http
+DELETE /api/v1/order/:order_no
+```
+
+说明：
+
+- 这是用户侧“我的订单”删除，本质为软删除/隐藏订单。
+- 删除后该订单不再出现在 `GET /api/v1/order/list`，再次请求 `GET /api/v1/order/:order_no` 会按不存在处理。
+- 后台订单、退款记录、核销记录、财务统计仍保留，不做物理删除。
+- 仅允许删除终态订单：
+  - `2`：已使用
+  - `3`：已取消
+  - `5`：已退款
+- 以下状态不允许删除：待支付、待使用、退款中、退款驳回。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "success": true
+  }
 }
 ```
 

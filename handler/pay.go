@@ -158,7 +158,7 @@ func (p *Pay) Prepay(c *gin.Context) error {
 	resp, err := p.PayService.PreWeChatPay(ctx, p.wechatClient, req)
 	if err != nil {
 		log.L.Error("创建订单失败", zap.Error(err))
-		return response.NewError(500, err.Error())
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	response.Success(c, resp)
 	return nil

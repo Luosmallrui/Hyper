@@ -35,7 +35,7 @@ func (d *NoteDAO) FindByUserID(ctx context.Context, userID uint64, status int, l
 }
 
 func (d *NoteDAO) ListNode(ctx context.Context, cursor int64, limit int) (notes []*models.Note, err error) {
-	db := d.Db.WithContext(ctx).Model(&models.Note{})
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope)
 
 	// 如果前端传了游标（大于0），则查询该时间点之前的数据
 	if cursor > 0 {
@@ -52,8 +52,7 @@ func (d *NoteDAO) ListNode(ctx context.Context, cursor int64, limit int) (notes 
 }
 
 func (d *NoteDAO) ListRelatedNotes(ctx context.Context, storeID int64, activityID int, cursor int64, limit int) (notes []*models.Note, err error) {
-	db := d.Db.WithContext(ctx).Model(&models.Note{}).
-		Where("status = ? AND visible_conf = ?", 1, 1)
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope)
 
 	if storeID > 0 {
 		db = db.Where("store_id = ?", storeID)
@@ -71,7 +70,7 @@ func (d *NoteDAO) ListRelatedNotes(ctx context.Context, storeID int64, activityI
 }
 
 func (d *NoteDAO) ListNodeByChannel(ctx context.Context, cursor int64, limit int, ChannelId int) (notes []*models.Note, err error) {
-	db := d.Db.WithContext(ctx).Model(&models.Note{}).Where("channel_id = ?", ChannelId)
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope).Where("channel_id = ?", ChannelId)
 
 	// 如果前端传了游标（大于0），则查询该时间点之前的数据
 	if cursor > 0 {
@@ -108,6 +107,7 @@ func (d *NoteDAO) FindByIDs(ctx context.Context, ids []uint64) ([]*models.Note, 
 	}
 	var notes []*models.Note
 	err := d.Db.WithContext(ctx).
+		Scopes(publicNoteScope).
 		Where("id IN ?", ids).
 		Find(&notes).Error
 	return notes, err
@@ -140,7 +140,8 @@ func (d *NoteDAO) GetNotesByTopicID(ctx context.Context, topicID uint64, limit, 
 	var notes []*models.Note
 	err := d.Db.WithContext(ctx).
 		Joins("INNER JOIN note_topics ON notes.id = note_topics.note_id").
-		Where("note_topics.topic_id = ? AND notes.status = ?", topicID, 1).
+		Where("note_topics.topic_id = ?", topicID).
+		Scopes(publicNoteScope).
 		Order("notes.created_at DESC").
 		Limit(limit).
 		Offset(offset).
@@ -155,7 +156,7 @@ func (d *NoteDAO) ListNodeByUser(
 	userId int,
 ) (notes []*models.Note, err error) {
 
-	db := d.Db.WithContext(ctx).Model(&models.Note{})
+	db := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope)
 
 	// 先限定用户
 	db = db.Where("user_id = ?", userId)
@@ -176,11 +177,15 @@ func (d *NoteDAO) ListNodeByUser(
 
 func (d *NoteDAO) ListNodeByUserIDs(ctx context.Context, userIDs []int, cursor int64, limit int) ([]*models.Note, error) {
 	var nodes []*models.Note
-	query := d.Db.WithContext(ctx).Where("user_id IN ?", userIDs)
+	query := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope).Where("user_id IN ?", userIDs)
 
 	if cursor > 0 {
 		query = query.Where("id < ?", cursor)
 	}
 	err := query.Order("id DESC").Limit(limit).Find(&nodes).Error
 	return nodes, err
+}
+
+func publicNoteScope(db *gorm.DB) *gorm.DB {
+	return db.Where("notes.status <> ? AND notes.visible_conf = ?", -1, 1)
 }

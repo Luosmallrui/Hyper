@@ -24,13 +24,17 @@ import (
 
 type ITicketingService interface {
 	GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error)
-	ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) error
+	ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) (*types.OrganizerApplyResponse, error)
+	GetOrganizerAuditStatus(ctx context.Context, userID int64) (*types.OrganizerAuditStatusResponse, error)
 	UpdateOrganizerBasic(ctx context.Context, userID int64, req types.OrganizerBasicRequest) error
 	GetWithdrawInfo(ctx context.Context, userID int64) (*types.OrganizerWithdrawInfoResponse, error)
 	UpdateWithdrawInfo(ctx context.Context, userID int64, req types.OrganizerWithdrawRequest) error
 	ListOrganizerWithdraws(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[models.OrganizerWithdraw], error)
 	CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error)
-	GetActivity(ctx context.Context, activityID int64) (*types.ActivityDetailResponse, error)
+	GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error)
+	SubscribeActivity(ctx context.Context, userID, activityID int64) error
+	UnsubscribeActivity(ctx context.Context, userID, activityID int64) error
+	ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
 	SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error)
 	GetMyActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
 	SearchActivities(ctx context.Context, keyword string) ([]types.ActivityListItem, error)
@@ -46,6 +50,7 @@ type ITicketingService interface {
 	GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error)
 	ListCancelReasons(ctx context.Context) ([]models.CancelReason, error)
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
+	DeleteTicketOrder(ctx context.Context, userID int64, orderNo string) error
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
 	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
@@ -94,14 +99,14 @@ func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (
 	return resp, nil
 }
 
-func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) error {
+func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) (*types.OrganizerApplyResponse, error) {
 	if req.Type != models.OrganizerTypeVenue && req.Type != models.OrganizerTypeMerchant {
-		return errors.New("入驻类型无效，仅支持 venue 或 merchant")
+		return nil, errors.New("入驻类型无效，仅支持 venue 或 merchant")
 	}
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
+		return nil, err
 	}
 	data := models.Organizer{
 		UserID:   userID,
@@ -116,13 +121,16 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if err := s.DB.WithContext(ctx).Create(&data).Error; err != nil {
-			return err
+			return nil, err
 		}
 		s.notifyOrganizerApply(ctx, data, userID)
-		return nil
+		return &types.OrganizerApplyResponse{ApplicationID: data.ID, Status: data.Status, SubmittedAt: data.CreatedAt}, nil
+	}
+	if org.Status == models.OrganizerStatusAuditing {
+		return nil, errors.New("入驻申请正在审核中，请勿重复提交")
 	}
 	if org.Status == models.OrganizerStatusApproved {
-		return errors.New("入驻申请已通过，无需重复提交")
+		return nil, errors.New("入驻申请已通过，无需重复提交")
 	}
 	if err := s.DB.WithContext(ctx).Model(&org).Updates(map[string]any{
 		"type":          req.Type,
@@ -135,11 +143,33 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 		"city":          req.City,
 		"district":      req.District,
 	}).Error; err != nil {
-		return err
+		return nil, err
 	}
 	data.ID = org.ID
+	data.CreatedAt = time.Now()
 	s.notifyOrganizerApply(ctx, data, userID)
-	return nil
+	return &types.OrganizerApplyResponse{ApplicationID: org.ID, Status: models.OrganizerStatusAuditing, SubmittedAt: time.Now()}, nil
+}
+
+func (s *TicketingService) GetOrganizerAuditStatus(ctx context.Context, userID int64) (*types.OrganizerAuditStatusResponse, error) {
+	var org models.Organizer
+	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &types.OrganizerAuditStatusResponse{Status: models.OrganizerStatusPending, RejectReason: ""}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerAuditStatusResponse{
+		Type:         org.Type,
+		Status:       org.Status,
+		RejectReason: org.RejectReason,
+		SubmittedAt:  &org.CreatedAt,
+	}
+	if org.Status == models.OrganizerStatusApproved || org.Status == models.OrganizerStatusRejected {
+		resp.ReviewedAt = &org.UpdatedAt
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) UpdateOrganizerBasic(ctx context.Context, userID int64, req types.OrganizerBasicRequest) error {
@@ -313,7 +343,7 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 	return act.ID, nil
 }
 
-func (s *TicketingService) GetActivity(ctx context.Context, activityID int64) (*types.ActivityDetailResponse, error) {
+func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error) {
 	var act models.Activity
 	if err := s.DB.WithContext(ctx).First(&act, activityID).Error; err != nil {
 		return nil, err
@@ -324,7 +354,76 @@ func (s *TicketingService) GetActivity(ctx context.Context, activityID int64) (*
 	}
 	var org models.Organizer
 	_ = s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error
-	return &types.ActivityDetailResponse{Activity: act, TicketSpecs: specs, Organizer: &org}, nil
+	resp := &types.ActivityDetailResponse{Activity: act, TicketSpecs: specs, Organizer: &org}
+	if userID > 0 {
+		var count int64
+		_ = s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
+			Where("activity_id = ? AND user_id = ?", activityID, userID).
+			Count(&count).Error
+		resp.IsSubscribe = count > 0
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) SubscribeActivity(ctx context.Context, userID, activityID int64) error {
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ?", activityID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	sub := models.ActivitySubscription{ActivityID: activityID, UserID: userID}
+	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&sub).Error
+}
+
+func (s *TicketingService) UnsubscribeActivity(ctx context.Context, userID, activityID int64) error {
+	return s.DB.WithContext(ctx).
+		Where("activity_id = ? AND user_id = ?", activityID, userID).
+		Delete(&models.ActivitySubscription{}).Error
+}
+
+func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error) {
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("activity_subscriptions AS sub").
+		Joins("JOIN activities a ON a.id = sub.activity_id").
+		Where("sub.user_id = ?", userID)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var rows []struct {
+		ID         int64
+		Name       string
+		PosterList string
+		StartTime  time.Time
+		EndTime    time.Time
+		Status     int8
+	}
+	if err := query.
+		Select("a.id, a.name, a.poster_list, a.start_time, a.end_time, a.status").
+		Order("sub.created_at DESC").
+		Offset((page - 1) * size).
+		Limit(size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	list := make([]types.ActivityListItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, types.ActivityListItem{
+			ID:          row.ID,
+			Name:        row.Name,
+			PosterList:  row.PosterList,
+			StartTime:   row.StartTime,
+			EndTime:     row.EndTime,
+			Status:      row.Status,
+			IsSubscribe: true,
+		})
+	}
+	return &types.PageResponse[types.ActivityListItem]{List: list, Total: total}, nil
 }
 
 func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error) {
@@ -719,7 +818,7 @@ func (s *TicketingService) resolveOrderViewers(tx *gorm.DB, userID int64, req ty
 
 func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error) {
 	var order models.TicketOrder
-	if err := s.DB.WithContext(ctx).Where("order_no = ? AND user_id = ?", orderNo, userID).First(&order).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("order_no = ? AND user_id = ? AND user_deleted_at IS NULL", orderNo, userID).First(&order).Error; err != nil {
 		return nil, err
 	}
 	return s.buildOrderDetail(ctx, order)
@@ -748,7 +847,7 @@ func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo,
 
 func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, refundStatus string, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
 	page, size = normalizePage(page, size)
-	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ?", userID)
+	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ? AND user_deleted_at IS NULL", userID)
 	if status != nil {
 		switch *status {
 		case models.TicketOrderStatusPending:
@@ -843,13 +942,14 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 	if err != nil {
 		return nil, err
 	}
-	refundStatusByOrderID, err := s.latestRefundStatusByOrderID(ctx, orderIDs)
+	refundByOrderID, err := s.latestRefundByOrderID(ctx, orderIDs)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range rows {
 		status := r.Status
-		if refundStatusByOrderID[r.ID] == models.RefundStatusSuccess && status != models.TicketOrderStatusRefundSuccess {
+		latestRefund, hasRefund := refundByOrderID[r.ID]
+		if hasRefund && latestRefund.Status == models.RefundStatusSuccess && status != models.TicketOrderStatusRefundSuccess {
 			status = models.TicketOrderStatusRefundSuccess
 			_ = s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
 				Where("id = ? AND status <> ?", r.ID, models.TicketOrderStatusRefundSuccess).
@@ -872,7 +972,11 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			ExpireTime:  r.ExpireTime,
 			PayTime:     r.PayTime,
 		}
-		if r.RefundStatus != nil {
+		if hasRefund {
+			item.RefundNo = latestRefund.RefundNo
+			item.RefundStatus = refundStatusCode(latestRefund.Status)
+			item.RefundStatusText = refundStatusText(latestRefund.Status)
+		} else if r.RefundStatus != nil {
 			item.RefundStatus = refundStatusCode(*r.RefundStatus)
 			item.RefundStatusText = refundStatusText(*r.RefundStatus)
 		}
@@ -898,7 +1002,7 @@ func (s *TicketingService) ListCancelReasons(ctx context.Context) ([]models.Canc
 func (s *TicketingService) CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND user_id = ?", orderNo, userID).First(&order).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND user_id = ? AND user_deleted_at IS NULL", orderNo, userID).First(&order).Error; err != nil {
 			return err
 		}
 		if order.Status != models.TicketOrderStatusPending {
@@ -911,6 +1015,23 @@ func (s *TicketingService) CancelTicketOrder(ctx context.Context, userID int64, 
 			return err
 		}
 		return tx.Model(&order).Updates(map[string]any{"status": models.TicketOrderStatusCancelled, "cancel_reason": reason.Reason}).Error
+	})
+}
+
+func (s *TicketingService) DeleteTicketOrder(ctx context.Context, userID int64, orderNo string) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("order_no = ? AND user_id = ? AND user_deleted_at IS NULL", orderNo, userID).
+			First(&order).Error; err != nil {
+			return err
+		}
+		switch order.Status {
+		case models.TicketOrderStatusUsed, models.TicketOrderStatusCancelled, models.TicketOrderStatusRefundSuccess:
+		default:
+			return errors.New("当前订单不可删除")
+		}
+		return tx.Model(&order).Update("user_deleted_at", time.Now()).Error
 	})
 }
 
@@ -2027,8 +2148,8 @@ func (s *TicketingService) orderViewersByOrderNo(ctx context.Context, orderNos [
 	return result, nil
 }
 
-func (s *TicketingService) latestRefundStatusByOrderID(ctx context.Context, orderIDs []int64) (map[int64]int8, error) {
-	result := make(map[int64]int8)
+func (s *TicketingService) latestRefundByOrderID(ctx context.Context, orderIDs []int64) (map[int64]models.Refund, error) {
+	result := make(map[int64]models.Refund)
 	if len(orderIDs) == 0 {
 		return result, nil
 	}
@@ -2041,7 +2162,7 @@ func (s *TicketingService) latestRefundStatusByOrderID(ctx context.Context, orde
 	}
 	for _, refund := range refunds {
 		if _, ok := result[refund.OrderID]; !ok {
-			result[refund.OrderID] = refund.Status
+			result[refund.OrderID] = refund
 		}
 	}
 	return result, nil

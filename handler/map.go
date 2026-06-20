@@ -57,8 +57,8 @@ func (m *Map) GetMap(c *gin.Context) error {
 
 func (m *Map) GetMarkers(c *gin.Context) error {
 	source := c.DefaultQuery("source", "all")
-	if source != "all" && source != "party" && source != "activity" && source != "venue" && source != "merchant" {
-		return errors.New("source 仅支持 all、party、activity、venue、merchant")
+	if source != "all" && source != "activity" && source != "party" && source != "venue" && source != "merchant" {
+		return errors.New("source 仅支持 all、activity、party、venue、merchant")
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
 	if limit <= 0 {
@@ -69,12 +69,9 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 	}
 
 	markers := make([]types.MapMarker, 0)
-	if source == "all" || source == "party" || source == "venue" || source == "merchant" {
-		parties, err := m.getPartyMarkers(c, limit)
-		if err != nil {
-			return err
-		}
-		markers = append(markers, parties...)
+	if source == "party" || source == "venue" || source == "merchant" {
+		response.Success(c, types.MapMarkerResponse{List: markers, Total: 0})
+		return nil
 	}
 	if source == "all" || source == "activity" {
 		activities, err := m.getActivityMarkers(c, limit)
@@ -163,6 +160,8 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 			ID:           fmt.Sprintf("party-%d", party.ID),
 			Source:       source,
 			SourceID:     party.ID,
+			DetailType:   "merchant",
+			DetailURL:    fmt.Sprintf("/api/v1/merchant/%d", party.ID),
 			UserID:       int64(party.UserID),
 			Title:        party.Title,
 			Type:         party.Type,
@@ -278,6 +277,8 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			ID:            fmt.Sprintf("activity-%d", activity.ID),
 			Source:        "activity",
 			SourceID:      activity.ID,
+			DetailType:    "activity",
+			DetailURL:     fmt.Sprintf("/api/v1/activity/%d", activity.ID),
 			Title:         activity.Name,
 			Type:          "activity",
 			Location:      activity.Address,

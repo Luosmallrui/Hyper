@@ -699,6 +699,7 @@ func (s *NoteService) buildNoteDetail(
 		UserID:      int64(note.UserID),
 		Title:       note.Title,
 		Content:     note.Content,
+		ActivityID:  note.ActivityID,
 		Type:        note.Type,
 		Status:      note.Status,
 		VisibleConf: note.VisibleConf,
@@ -731,31 +732,46 @@ func (s *NoteService) buildNoteDetail(
 	_ = jsonUnmarshalOr(note.Location, &detail.Location, types.Location{})
 	_ = jsonUnmarshalOr(note.MediaData, &detail.MediaData, make([]types.NoteMedia, 0))
 
-	MerchantID := note.ActivityID
-
-	resp := &types.MerchantDetail{}
-	var merchant models.Merchant
-	if err := s.DB.Where("id = ?", MerchantID).First(&merchant).Error; err != nil {
+	if note.ActivityID > 0 {
+		detail.Activity = s.buildNoteActivity(ctx, int64(note.ActivityID), int64(currentUserID))
 	}
-
-	resp.AvgPrice = 7600
-	resp.UserId = merchant.UserID
-	resp.Name = merchant.Title
-	resp.LocationName = merchant.LocationName
-	images := make([]string, 0)
-	_ = json.Unmarshal([]byte(merchant.ImagesJSON), &images)
-	resp.Images = images
-	avatar, nickname, _ := s.UserService.GetUserAvatar(ctx, int64(merchant.UserID))
-	resp.UserAvatar = avatar
-	resp.UserName = nickname
-	resp.Id = merchant.ID
-	isFollow, _ := s.FollowService.CheckFollowStatus(ctx, currentUserID, uint64(merchant.UserID))
-	isSub, _ := s.MerchantService.CheckSubcribe(ctx, int(currentUserID), int(merchant.ID))
-	resp.IsSubscribe = isSub
-	resp.BusinessHours = "19:30-次日02:30"
-	resp.IsFollow = isFollow
-	detail.Activity = resp
 	return detail
+}
+
+func (s *NoteService) buildNoteActivity(ctx context.Context, activityID int64, currentUserID int64) *types.NoteActivity {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).First(&activity, activityID).Error; err != nil {
+		return nil
+	}
+	resp := &types.NoteActivity{
+		ID:           activity.ID,
+		Name:         activity.Name,
+		ShareTitle:   activity.ShareTitle,
+		Description:  activity.Description,
+		StartTime:    activity.StartTime,
+		EndTime:      activity.EndTime,
+		Address:      activity.Address,
+		Latitude:     activity.Latitude,
+		Longitude:    activity.Longitude,
+		PosterList:   activity.PosterList,
+		PosterDetail: activity.PosterDetail,
+		Status:       activity.Status,
+		DetailURL:    fmt.Sprintf("/api/v1/activity/%d", activity.ID),
+		OrganizerID:  activity.OrganizerID,
+	}
+	var organizer models.Organizer
+	if err := s.DB.WithContext(ctx).First(&organizer, activity.OrganizerID).Error; err == nil {
+		resp.OrganizerName = organizer.Name
+		resp.OrganizerLogo = organizer.Logo
+	}
+	if currentUserID > 0 {
+		var count int64
+		_ = s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
+			Where("activity_id = ? AND user_id = ?", activityID, currentUserID).
+			Count(&count).Error
+		resp.IsSubscribe = count > 0
+	}
+	return resp
 }
 
 func (s *NoteService) incrementViewCount(ctx context.Context, noteID uint64) error {

@@ -111,6 +111,17 @@ func (TicketSpec) TableName() string {
 	return "ticket_specs"
 }
 
+type ActivitySubscription struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ActivityID int64     `gorm:"column:activity_id;not null;uniqueIndex:uk_activity_user,priority:1;index" json:"activity_id"`
+	UserID     int64     `gorm:"column:user_id;not null;uniqueIndex:uk_activity_user,priority:2;index" json:"user_id"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (ActivitySubscription) TableName() string {
+	return "activity_subscriptions"
+}
+
 type TicketOrder struct {
 	ID             int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrderNo        string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`
@@ -131,6 +142,7 @@ type TicketOrder struct {
 	QRCode         string     `gorm:"column:qr_code;size:255" json:"qr_code"`
 	QRCodeURL      string     `gorm:"column:qr_code_url;size:255" json:"qr_code_url"`
 	CancelReason   string     `gorm:"column:cancel_reason;size:100" json:"cancel_reason"`
+	UserDeletedAt  *time.Time `gorm:"column:user_deleted_at" json:"user_deleted_at"`
 	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }

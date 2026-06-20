@@ -22,6 +22,8 @@ type MapMarker struct {
 	ID              string   `json:"id"`
 	Source          string   `json:"source"`    // party | activity
 	SourceID        int64    `json:"source_id"` // 原表 ID
+	DetailType      string   `json:"detail_type,omitempty"`
+	DetailURL       string   `json:"detail_url,omitempty"`
 	UserID          int64    `json:"user_id"`
 	User            string   `json:"user"`
 	UserName        string   `json:"username"`
