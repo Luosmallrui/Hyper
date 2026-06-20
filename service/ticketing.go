@@ -1026,11 +1026,11 @@ func (s *TicketingService) DeleteTicketOrder(ctx context.Context, userID int64, 
 			First(&order).Error; err != nil {
 			return err
 		}
-		switch order.Status {
-		case models.TicketOrderStatusUsed, models.TicketOrderStatusCancelled, models.TicketOrderStatusRefundSuccess:
-		default:
-			return errors.New("当前订单不可删除")
-		}
+		//switch order.Status {
+		//case models.TicketOrderStatusUsed, models.TicketOrderStatusCancelled, models.TicketOrderStatusRefundSuccess:
+		//default:
+		//	return errors.New("当前订单不可删除")
+		//}
 		return tx.Model(&order).Update("user_deleted_at", time.Now()).Error
 	})
 }
