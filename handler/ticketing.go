@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type Ticketing struct {
@@ -57,9 +58,12 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		activity.POST("/create", h.wrap(h.SaveActivityStep))
 		activity.GET("/my-list", h.wrap(h.GetMyActivities))
 		activity.GET("/search", h.wrap(h.SearchActivities))
+		activity.GET("/subscriptions", h.wrap(h.ListSubscribedActivities))
 		activity.GET("/:id/statistics", h.wrap(h.GetActivityStatistics))
 		activity.GET("/:id/statistics/daily", h.wrap(h.GetActivityDailyStatistics))
 		activity.GET("/:id", h.wrap(h.GetActivity))
+		activity.POST("/:id/subscribe", h.wrap(h.SubscribeActivity))
+		activity.POST("/:id/unsubscribe", h.wrap(h.UnsubscribeActivity))
 		activity.DELETE("/:id", h.wrap(h.DeleteActivity))
 		activity.POST("/:id/submit-audit", h.wrap(h.SubmitActivityAudit))
 		activity.GET("/:id/ticket-specs", h.wrap(h.GetTicketSpecs))
@@ -74,6 +78,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		order.GET("/cancel-reasons", h.wrap(h.ListCancelReasons))
 		order.GET("/:order_no", h.wrap(h.GetTicketOrderDetail))
 		order.POST("/:order_no/cancel", h.wrap(h.CancelTicketOrder))
+		order.DELETE("/:order_no", h.wrap(h.DeleteTicketOrder))
 	}
 
 	refund := v1.Group("/refund", auth)
@@ -129,10 +134,15 @@ func (h *Ticketing) ApplyOrganizer(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	if err := h.TicketingService.ApplyOrganizer(c.Request.Context(), currentUserID(c), req); err != nil {
+	resp, err := h.TicketingService.ApplyOrganizer(c.Request.Context(), currentUserID(c), req)
+	if err != nil {
+		if isOrganizerApplyConflict(err) {
+			response.Abort(c, http.StatusConflict, err.Error())
+			return nil
+		}
 		return err
 	}
-	response.Success(c, gin.H{"success": true})
+	response.Success(c, resp)
 	return nil
 }
 
@@ -201,11 +211,11 @@ func (h *Ticketing) CreateOrganizerWithdraw(c *gin.Context) error {
 }
 
 func (h *Ticketing) GetOrganizerAuditStatus(c *gin.Context) error {
-	resp, err := h.TicketingService.GetOrganizerInfo(c.Request.Context(), currentUserID(c))
+	resp, err := h.TicketingService.GetOrganizerAuditStatus(c.Request.Context(), currentUserID(c))
 	if err != nil {
 		return err
 	}
-	response.Success(c, gin.H{"type": resp.Type, "status": resp.Status, "reject_reason": resp.RejectReason})
+	response.Success(c, resp)
 	return nil
 }
 
@@ -227,7 +237,46 @@ func (h *Ticketing) GetActivity(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := h.TicketingService.GetActivity(c.Request.Context(), id)
+	resp, err := h.TicketingService.GetActivity(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "活动不存在")
+		}
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) SubscribeActivity(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.SubscribeActivity(c.Request.Context(), currentUserID(c), id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "活动不存在")
+		}
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) UnsubscribeActivity(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.UnsubscribeActivity(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListSubscribedActivities(c *gin.Context) error {
+	resp, err := h.TicketingService.ListSubscribedActivities(c.Request.Context(), currentUserID(c), page(c), size(c))
 	if err != nil {
 		return err
 	}
@@ -390,6 +439,14 @@ func (h *Ticketing) CancelTicketOrder(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.CancelTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no"), req.ReasonID); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) DeleteTicketOrder(c *gin.Context) error {
+	if err := h.TicketingService.DeleteTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no")); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
@@ -777,6 +834,14 @@ func isViewerConflict(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "已存在") || strings.Contains(msg, "已被") || strings.Contains(msg, "Duplicate entry")
+}
+
+func isOrganizerApplyConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "正在审核中") || strings.Contains(msg, "已通过")
 }
 
 func page(c *gin.Context) int {

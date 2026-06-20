@@ -209,17 +209,18 @@ type NoteStats struct {
 }
 
 type NoteDetail struct {
-	ID          int64           `json:"id"`
-	UserID      int64           `json:"user_id"`
-	Title       string          `json:"title"`
-	Content     string          `json:"content"`
-	TopicIDs    []Topic         `json:"topic"`
-	Activity    *MerchantDetail `json:"activity"`
-	Location    Location        `json:"location"`
-	MediaData   []NoteMedia     `json:"media_data"`
-	Type        int             `json:"type"`
-	Status      int             `json:"status"`
-	VisibleConf int             `json:"visible_conf"`
+	ID          int64         `json:"id"`
+	UserID      int64         `json:"user_id"`
+	Title       string        `json:"title"`
+	Content     string        `json:"content"`
+	TopicIDs    []Topic       `json:"topic"`
+	ActivityID  int           `json:"activity_id"`
+	Activity    *NoteActivity `json:"activity,omitempty"`
+	Location    Location      `json:"location"`
+	MediaData   []NoteMedia   `json:"media_data"`
+	Type        int           `json:"type"`
+	Status      int           `json:"status"`
+	VisibleConf int           `json:"visible_conf"`
 
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`
@@ -240,6 +241,27 @@ type NoteDetail struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type NoteActivity struct {
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	ShareTitle    string    `json:"share_title"`
+	Description   string    `json:"description"`
+	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
+	Address       string    `json:"address"`
+	Latitude      float64   `json:"latitude"`
+	Longitude     float64   `json:"longitude"`
+	PosterList    string    `json:"poster_list"`
+	PosterDetail  string    `json:"poster_detail"`
+	Status        int8      `json:"status"`
+	DetailURL     string    `json:"detail_url"`
+	IsSubscribe   bool      `json:"is_subscribe"`
+	OrganizerID   int64     `json:"organizer_id"`
+	OrganizerName string    `json:"organizer_name,omitempty"`
+	OrganizerLogo string    `json:"organizer_logo,omitempty"`
+}
+
 type CommentPreview struct {
 	TotalCount int64              `json:"total_count"` // 评论总数
 	Comments   []*CommentResponse `json:"comments"`    // 前3条评论

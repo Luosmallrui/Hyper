@@ -8,6 +8,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	stdcontext "context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Merchant struct {
@@ -522,6 +524,14 @@ func (pc *Merchant) subscribeParty(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 	userId := c.GetInt("user_id")
+	if pc.isActivityID(c.Request.Context(), req.PartyId) {
+		sub := models.ActivitySubscription{ActivityID: req.PartyId, UserID: int64(userId)}
+		if err := pc.DB.WithContext(c.Request.Context()).Clauses(clause.OnConflict{DoNothing: true}).Create(&sub).Error; err != nil {
+			return response.NewError(http.StatusInternalServerError, "订阅失败")
+		}
+		response.Success(c, "订阅成功")
+		return nil
+	}
 	err := pc.MerchantService.SubcribParty(c.Request.Context(), userId, int(req.PartyId))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
@@ -542,10 +552,25 @@ func (pc *Merchant) UnsubcribParty(c *gin.Context) error {
 	} else {
 		userId = c.GetInt("user_id")
 	}
+	if pc.isActivityID(c.Request.Context(), req.PartyId) {
+		if err := pc.DB.WithContext(c.Request.Context()).
+			Where("activity_id = ? AND user_id = ?", req.PartyId, userId).
+			Delete(&models.ActivitySubscription{}).Error; err != nil {
+			return response.NewError(http.StatusInternalServerError, "取消订阅失败")
+		}
+		response.Success(c, "取消订阅成功")
+		return nil
+	}
 	err := pc.MerchantService.UnsubcribParty(c.Request.Context(), int(userId), int(req.PartyId))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, "取消订阅成功")
 	return nil
+}
+
+func (pc *Merchant) isActivityID(ctx stdcontext.Context, id int64) bool {
+	var count int64
+	_ = pc.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ?", id).Count(&count).Error
+	return count > 0
 }

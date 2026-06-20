@@ -96,17 +96,8 @@ Authorization: Bearer <token>
   "code": 200,
   "data": {
     "notes": [],
-    "next_cursor": 0,
+    "next_cursor": 0, 
     "has_more": false
   }
 }
-```
-
-## 4. 数据库迁移
-
-已有环境需要执行：
-
-```sql
-ALTER TABLE `notes` ADD COLUMN `store_id` bigint NOT NULL DEFAULT 0 COMMENT '关联门店/场地ID' AFTER `activity_id`;
-ALTER TABLE `notes` ADD KEY `idx_store_id` (`store_id`);
 ```

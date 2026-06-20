@@ -252,6 +252,18 @@ CREATE TABLE IF NOT EXISTS `ticket_specs`
     KEY `idx_ticket_spec_activity` (`activity_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票券规格表';
 
+CREATE TABLE IF NOT EXISTS `activity_subscriptions`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订阅ID',
+    `activity_id` bigint unsigned NOT NULL COMMENT '活动ID',
+    `user_id`     bigint unsigned NOT NULL COMMENT '用户ID',
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_activity_user` (`activity_id`, `user_id`) USING BTREE,
+    KEY `idx_activity_subscription_activity` (`activity_id`) USING BTREE,
+    KEY `idx_activity_subscription_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动订阅表';
+
 CREATE TABLE IF NOT EXISTS `ticket_orders`
 (
     `id`              bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单ID',
@@ -273,6 +285,7 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     `qr_code`         varchar(255)    NOT NULL DEFAULT '',
     `qr_code_url`     varchar(255)    NOT NULL DEFAULT '' COMMENT '取票二维码图片URL',
     `cancel_reason`   varchar(100)    NOT NULL DEFAULT '',
+    `user_deleted_at` datetime        NULL COMMENT '用户侧删除/隐藏时间',
     `created_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`      datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
@@ -285,6 +298,7 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_amount` bigint NOT NULL DEFAULT 0 COMMENT '抵扣积分数量' AFTER `actual_price`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_discount` bigint NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)' AFTER `points_amount`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `qr_code_url` varchar(255) NOT NULL DEFAULT '' COMMENT '取票二维码图片URL' AFTER `qr_code`;
+-- ALTER TABLE `ticket_orders` ADD COLUMN `user_deleted_at` datetime NULL COMMENT '用户侧删除/隐藏时间' AFTER `cancel_reason`;
 
 CREATE TABLE IF NOT EXISTS `ticket_order_viewers`
 (
