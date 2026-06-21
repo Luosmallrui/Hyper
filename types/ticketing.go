@@ -82,6 +82,12 @@ type OrganizerCollectionRequest struct {
 	ActivityIDs []int64 `json:"activity_ids"`
 }
 
+type OrganizerCollectionDetail struct {
+	ActivityCollectionItem
+	ActivityIDs []int64            `json:"activity_ids"`
+	Activities  []ActivityListItem `json:"activities"`
+}
+
 type OrganizerMessageItem struct {
 	ID        int64      `json:"id"`
 	Title     string     `json:"title"`
@@ -91,6 +97,100 @@ type OrganizerMessageItem struct {
 	IsRead    bool       `json:"is_read"`
 	ReadAt    *time.Time `json:"read_at"`
 	CreatedAt time.Time  `json:"created_at"`
+}
+
+type OrganizerReadAllResponse struct {
+	UpdatedCount int64 `json:"updated_count"`
+}
+
+type OrganizerSubscriptionSummary struct {
+	TotalSubscriptions int64 `json:"total_subscriptions"`
+	TodaySubscriptions int64 `json:"today_subscriptions"`
+}
+
+type OrganizerProfileRequest struct {
+	Name          string   `json:"name"`
+	Logo          string   `json:"logo"`
+	CoverImage    string   `json:"cover_image"`
+	Gallery       []string `json:"gallery"`
+	Description   string   `json:"description"`
+	BusinessHours string   `json:"business_hours"`
+	ContactName   string   `json:"contact_name"`
+	ServicePhone  string   `json:"service_phone"`
+	Province      string   `json:"province"`
+	City          string   `json:"city"`
+	District      string   `json:"district"`
+	Address       string   `json:"address"`
+	Latitude      float64  `json:"latitude"`
+	Longitude     float64  `json:"longitude"`
+	AverageSpend  int64    `json:"average_spend"`
+}
+
+type OrganizerProfileResponse struct {
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Logo          string   `json:"logo"`
+	CoverImage    string   `json:"cover_image"`
+	Gallery       []string `json:"gallery"`
+	Description   string   `json:"description"`
+	BusinessHours string   `json:"business_hours"`
+	ContactName   string   `json:"contact_name"`
+	ServicePhone  string   `json:"service_phone"`
+	Province      string   `json:"province"`
+	City          string   `json:"city"`
+	District      string   `json:"district"`
+	Address       string   `json:"address"`
+	Latitude      float64  `json:"latitude"`
+	Longitude     float64  `json:"longitude"`
+	AverageSpend  int64    `json:"average_spend"`
+}
+
+type OrganizerUserLookupResponse struct {
+	UserID   int64  `json:"user_id"`
+	Phone    string `json:"phone"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+	Status   int8   `json:"status"`
+}
+
+type OrganizerPostRequest struct {
+	Title       string      `json:"title" binding:"required"`
+	Content     string      `json:"content"`
+	Images      []string    `json:"images"`
+	MediaData   []NoteMedia `json:"media_data"`
+	Location    *Location   `json:"location"`
+	Type        int         `json:"type"`
+	Status      int         `json:"status"`
+	VisibleConf int         `json:"visible_conf"`
+	ActivityID  int         `json:"activity_id"`
+	StoreID     int64       `json:"store_id"`
+}
+
+type OrganizerPostVisibilityRequest struct {
+	Visible *bool `json:"visible"`
+	Status  *int  `json:"status"`
+}
+
+type OrganizerPostItem struct {
+	ID           uint64      `json:"id,string"`
+	UserID       uint64      `json:"user_id"`
+	Title        string      `json:"title"`
+	Content      string      `json:"content"`
+	MediaData    []NoteMedia `json:"media_data"`
+	Location     Location    `json:"location"`
+	Type         int         `json:"type"`
+	Status       int         `json:"status"`
+	VisibleConf  int         `json:"visible_conf"`
+	ActivityID   int         `json:"activity_id"`
+	ActivityName string      `json:"activity_name,omitempty"`
+	StoreID      int64       `json:"store_id"`
+	StoreName    string      `json:"store_name,omitempty"`
+	LikeCount    int64       `json:"like_count"`
+	CollCount    int64       `json:"coll_count"`
+	ShareCount   int64       `json:"share_count"`
+	CommentCount int64       `json:"comment_count"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 type OrganizerFinanceSummary struct {

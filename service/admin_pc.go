@@ -287,6 +287,20 @@ func (s *AdminService) ListVerifiers(ctx context.Context, page, pageSize int, ke
 	return adminMapPage(query.Order("v.id desc"), page, pageSize)
 }
 
+func (s *AdminService) UpdateVerifierStatus(ctx context.Context, id int64, status int8) error {
+	if status != models.VerifierStatusInactive && status != models.VerifierStatusActive {
+		return errors.New("核销员状态无效")
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Verifier{}).Where("id = ?", id).Update("status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func (s *AdminService) ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	query := s.DB.WithContext(ctx).Table("verification_records vr").
@@ -411,6 +425,71 @@ func (s *AdminService) AuditBankAccount(ctx context.Context, id int64, req types
 		}
 		return nil
 	})
+}
+
+func (s *AdminService) ListOrganizerLevelRules(ctx context.Context) ([]models.OrganizerLevelRule, error) {
+	if err := s.ensureDefaultOrganizerLevelRules(ctx); err != nil {
+		return nil, err
+	}
+	var rules []models.OrganizerLevelRule
+	err := s.DB.WithContext(ctx).Order("level ASC").Find(&rules).Error
+	return rules, err
+}
+
+func (s *AdminService) SaveOrganizerLevelRule(ctx context.Context, id int64, req types.OrganizerLevelRuleRequest) (int64, error) {
+	if req.Level <= 0 {
+		return 0, errors.New("等级必须大于0")
+	}
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("LV%d", req.Level)
+	}
+	rule := models.OrganizerLevelRule{
+		Level:                 req.Level,
+		Name:                  req.Name,
+		FeeRate:               req.FeeRate,
+		RequiredActivityCount: req.RequiredActivityCount,
+		Description:           req.Description,
+		Benefits:              req.Benefits,
+		Status:                req.Status,
+	}
+	if id > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.OrganizerLevelRule{}).Where("id = ?", id).Updates(map[string]any{
+			"level": req.Level, "name": req.Name, "fee_rate": req.FeeRate,
+			"required_activity_count": req.RequiredActivityCount, "description": req.Description,
+			"benefits": req.Benefits, "status": req.Status,
+		})
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		return id, nil
+	}
+	if err := s.DB.WithContext(ctx).Create(&rule).Error; err != nil {
+		return 0, err
+	}
+	return rule.ID, nil
+}
+
+func (s *AdminService) DeleteOrganizerLevelRule(ctx context.Context, id int64) error {
+	result := s.DB.WithContext(ctx).Delete(&models.OrganizerLevelRule{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *AdminService) ensureDefaultOrganizerLevelRules(ctx context.Context) error {
+	for _, rule := range defaultOrganizerLevelRules() {
+		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error) {

@@ -91,6 +91,25 @@ type OrganizerMessageRead struct {
 
 func (OrganizerMessageRead) TableName() string { return "organizer_message_reads" }
 
+type OrganizerProfile struct {
+	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID   int64     `gorm:"column:organizer_id;not null;uniqueIndex" json:"organizer_id"`
+	CoverImage    string    `gorm:"column:cover_image;size:255" json:"cover_image"`
+	Gallery       string    `gorm:"column:gallery;type:text" json:"gallery"`
+	Description   string    `gorm:"column:description;type:text" json:"description"`
+	BusinessHours string    `gorm:"column:business_hours;size:100" json:"business_hours"`
+	ContactName   string    `gorm:"column:contact_name;size:50" json:"contact_name"`
+	ServicePhone  string    `gorm:"column:service_phone;size:20" json:"service_phone"`
+	Address       string    `gorm:"column:address;size:255" json:"address"`
+	Latitude      float64   `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
+	Longitude     float64   `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
+	AverageSpend  int64     `gorm:"column:average_spend;not null;default:0" json:"average_spend"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerProfile) TableName() string { return "organizer_profiles" }
+
 type OrganizerWithdraw struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID     int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`

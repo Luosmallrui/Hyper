@@ -67,6 +67,7 @@ type IAdminService interface {
 	SaveActivityCollection(ctx context.Context, id int64, req types.ActivityCollectionRequest) (int64, error)
 	DeleteActivityCollection(ctx context.Context, id int64) error
 	ListVerifiers(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	UpdateVerifierStatus(ctx context.Context, id int64, status int8) error
 	ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error)
 	UpdateNoteStatus(ctx context.Context, noteID int64, status int) error
@@ -76,6 +77,9 @@ type IAdminService interface {
 	AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error
 	ListBankAccountAudits(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	AuditBankAccount(ctx context.Context, id int64, req types.BankAccountAuditRequest) error
+	ListOrganizerLevelRules(ctx context.Context) ([]models.OrganizerLevelRule, error)
+	SaveOrganizerLevelRule(ctx context.Context, id int64, req types.OrganizerLevelRuleRequest) (int64, error)
+	DeleteOrganizerLevelRule(ctx context.Context, id int64) error
 	ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error)
 	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
 }

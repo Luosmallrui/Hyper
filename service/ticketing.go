@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"Hyper/models"
 	"Hyper/pkg/log"
+	"Hyper/pkg/snowflake"
 	"Hyper/types"
 	"bytes"
 	"context"
@@ -34,10 +35,20 @@ type ITicketingService interface {
 	ListOrganizerWithdraws(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[models.OrganizerWithdraw], error)
 	CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error)
 	ListOrganizerCollections(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.ActivityCollectionItem], error)
+	GetOrganizerCollection(ctx context.Context, userID, collectionID int64) (*types.OrganizerCollectionDetail, error)
 	SaveOrganizerCollection(ctx context.Context, userID, collectionID int64, req types.OrganizerCollectionRequest) (int64, error)
 	DeleteOrganizerCollection(ctx context.Context, userID, collectionID int64) error
 	ListOrganizerMessages(ctx context.Context, userID int64, page, size int, unreadOnly bool) (*types.PageResponse[types.OrganizerMessageItem], error)
 	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
+	MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error)
+	GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error)
+	GetOrganizerProfile(ctx context.Context, userID int64) (*types.OrganizerProfileResponse, error)
+	UpdateOrganizerProfile(ctx context.Context, userID int64, req types.OrganizerProfileRequest) error
+	LookupOrganizerUser(ctx context.Context, userID int64, phone string) (*types.OrganizerUserLookupResponse, error)
+	ListOrganizerPosts(ctx context.Context, userID int64, page, size int, keyword string, status *int, activityID int, storeID int64) (*types.PageResponse[types.OrganizerPostItem], error)
+	SaveOrganizerPost(ctx context.Context, userID int64, postID uint64, req types.OrganizerPostRequest) (uint64, error)
+	UpdateOrganizerPostVisibility(ctx context.Context, userID int64, postID uint64, req types.OrganizerPostVisibilityRequest) error
+	DeleteOrganizerPost(ctx context.Context, userID int64, postID uint64) error
 	GetOrganizerFinanceSummary(ctx context.Context, userID int64) (*types.OrganizerFinanceSummary, error)
 	ListOrganizerFinanceFlows(ctx context.Context, userID int64, page, size int, flowType string) (*types.PageResponse[types.OrganizerFinanceFlowItem], error)
 	ListOrganizerLevelRules(ctx context.Context, userID int64) ([]models.OrganizerLevelRule, error)
@@ -80,6 +91,7 @@ type ITicketingService interface {
 	CancelRefund(ctx context.Context, userID int64, refundNo string) error
 	ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.Verifier], error)
 	AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error
+	UpdateVerifierStatus(ctx context.Context, userID, verifierID int64, status int8) error
 	DeleteVerifier(ctx context.Context, userID, verifierID int64) error
 	GetVerifierActivationQR(ctx context.Context, userID, verifierID int64) (map[string]string, error)
 	GetVerifierActivationInfo(ctx context.Context, verifierID int64) (*types.VerifierActivationInfoResponse, error)
@@ -367,6 +379,59 @@ func (s *TicketingService) ListOrganizerCollections(ctx context.Context, userID 
 	return &types.PageResponse[types.ActivityCollectionItem]{List: rows, Total: total}, nil
 }
 
+func (s *TicketingService) GetOrganizerCollection(ctx context.Context, userID, collectionID int64) (*types.OrganizerCollectionDetail, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var item types.ActivityCollectionItem
+	if err := s.DB.WithContext(ctx).Model(&models.ActivityCollection{}).
+		Select("id, organizer_id, title, share_title, description, share_image, status, created_at, updated_at").
+		Where("id = ? AND organizer_id = ?", collectionID, org.ID).Scan(&item).Error; err != nil {
+		return nil, err
+	}
+	if item.ID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	item.OrganizerName = org.Name
+
+	var links []models.ActivityCollectionItem
+	if err := s.DB.WithContext(ctx).Where("collection_id = ?", collectionID).Order("sort ASC, id ASC").Find(&links).Error; err != nil {
+		return nil, err
+	}
+	activityIDs := make([]int64, 0, len(links))
+	for _, link := range links {
+		activityIDs = append(activityIDs, link.ActivityID)
+	}
+	item.ActivityCount = len(activityIDs)
+
+	detail := &types.OrganizerCollectionDetail{ActivityCollectionItem: item, ActivityIDs: activityIDs, Activities: []types.ActivityListItem{}}
+	if len(activityIDs) == 0 {
+		return detail, nil
+	}
+	var acts []models.Activity
+	if err := s.DB.WithContext(ctx).Where("id IN ?", activityIDs).Find(&acts).Error; err != nil {
+		return nil, err
+	}
+	actMap := make(map[int64]models.Activity, len(acts))
+	for _, act := range acts {
+		actMap[act.ID] = act
+	}
+	for _, id := range activityIDs {
+		if act, ok := actMap[id]; ok {
+			detail.Activities = append(detail.Activities, types.ActivityListItem{
+				ID:         act.ID,
+				Name:       act.Name,
+				PosterList: act.PosterList,
+				StartTime:  act.StartTime,
+				EndTime:    act.EndTime,
+				Status:     act.Status,
+			})
+		}
+	}
+	return detail, nil
+}
+
 func (s *TicketingService) SaveOrganizerCollection(ctx context.Context, userID, collectionID int64, req types.OrganizerCollectionRequest) (int64, error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
@@ -487,6 +552,346 @@ func (s *TicketingService) MarkOrganizerMessageRead(ctx context.Context, userID,
 	now := time.Now()
 	row := models.OrganizerMessageRead{OrganizerID: org.ID, MessageID: messageID, IsRead: 1, ReadAt: &now}
 	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&row).Error
+}
+
+func (s *TicketingService) MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var messageIDs []int64
+	if err := s.DB.WithContext(ctx).Model(&models.PlatformMessage{}).
+		Where("status = 1 AND (target IN ? OR target = ?)", []string{"merchant", "organizer", "business", "all"}, "").
+		Pluck("id", &messageIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(messageIDs) == 0 {
+		return &types.OrganizerReadAllResponse{UpdatedCount: 0}, nil
+	}
+	now := time.Now()
+	rows := make([]models.OrganizerMessageRead, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		rows = append(rows, models.OrganizerMessageRead{OrganizerID: org.ID, MessageID: messageID, IsRead: 1, ReadAt: &now})
+	}
+	if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&rows).Error; err != nil {
+		return nil, err
+	}
+	return &types.OrganizerReadAllResponse{UpdatedCount: int64(len(messageIDs))}, nil
+}
+
+func (s *TicketingService) GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerSubscriptionSummary{}
+	base := func() *gorm.DB {
+		return s.DB.WithContext(ctx).Table("activity_subscriptions sub").
+			Joins("JOIN activities a ON a.id = sub.activity_id").
+			Where("a.organizer_id = ?", org.ID)
+	}
+	if err := base().Count(&resp.TotalSubscriptions).Error; err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if err := base().Where("sub.created_at >= ?", today).Count(&resp.TodaySubscriptions).Error; err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64) (*types.OrganizerProfileResponse, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var profile models.OrganizerProfile
+	err = s.DB.WithContext(ctx).Where("organizer_id = ?", org.ID).First(&profile).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	resp := &types.OrganizerProfileResponse{
+		ID:            org.ID,
+		Name:          org.Name,
+		Logo:          org.Logo,
+		Province:      org.Province,
+		City:          org.City,
+		District:      org.District,
+		CoverImage:    profile.CoverImage,
+		Description:   profile.Description,
+		BusinessHours: profile.BusinessHours,
+		ContactName:   profile.ContactName,
+		ServicePhone:  profile.ServicePhone,
+		Address:       profile.Address,
+		Latitude:      profile.Latitude,
+		Longitude:     profile.Longitude,
+		AverageSpend:  profile.AverageSpend,
+		Gallery:       []string{},
+	}
+	if profile.Gallery != "" {
+		_ = json.Unmarshal([]byte(profile.Gallery), &resp.Gallery)
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID int64, req types.OrganizerProfileRequest) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if req.Latitude != 0 || req.Longitude != 0 {
+		if req.Latitude < 18 || req.Latitude > 54 || req.Longitude < 73 || req.Longitude > 135 {
+			return errors.New("经纬度不在中国大陆常用范围内")
+		}
+	}
+	gallery, _ := json.Marshal(req.Gallery)
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		orgUpdates := map[string]any{}
+		if strings.TrimSpace(req.Name) != "" {
+			orgUpdates["name"] = req.Name
+		}
+		if req.Logo != "" {
+			orgUpdates["logo"] = req.Logo
+		}
+		if req.Province != "" {
+			orgUpdates["province"] = req.Province
+		}
+		if req.City != "" {
+			orgUpdates["city"] = req.City
+		}
+		if req.District != "" {
+			orgUpdates["district"] = req.District
+		}
+		if len(orgUpdates) > 0 {
+			if err := tx.Model(&models.Organizer{}).Where("id = ?", org.ID).Updates(orgUpdates).Error; err != nil {
+				return err
+			}
+		}
+		profile := models.OrganizerProfile{
+			OrganizerID:   org.ID,
+			CoverImage:    req.CoverImage,
+			Gallery:       string(gallery),
+			Description:   req.Description,
+			BusinessHours: req.BusinessHours,
+			ContactName:   req.ContactName,
+			ServicePhone:  req.ServicePhone,
+			Address:       req.Address,
+			Latitude:      req.Latitude,
+			Longitude:     req.Longitude,
+			AverageSpend:  req.AverageSpend,
+		}
+		updates := map[string]any{
+			"cover_image": req.CoverImage, "gallery": string(gallery), "description": req.Description,
+			"business_hours": req.BusinessHours, "contact_name": req.ContactName, "service_phone": req.ServicePhone,
+			"address": req.Address, "latitude": req.Latitude, "longitude": req.Longitude, "average_spend": req.AverageSpend,
+			"updated_at": time.Now(),
+		}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}}, DoUpdates: clause.Assignments(updates)}).Create(&profile).Error; err != nil {
+			return err
+		}
+		return s.createOrganizerLog(tx, org.ID, userID, "update_profile", "organizer_profile", "", "", "")
+	})
+}
+
+func (s *TicketingService) LookupOrganizerUser(ctx context.Context, userID int64, phone string) (*types.OrganizerUserLookupResponse, error) {
+	if _, err := s.findOrganizerByUser(ctx, userID); err != nil {
+		return nil, err
+	}
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil, errors.New("手机号不能为空")
+	}
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("mobile = ?", phone).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &types.OrganizerUserLookupResponse{
+		UserID:   int64(user.Id),
+		Phone:    user.Mobile,
+		Nickname: user.Nickname,
+		Avatar:   user.Avatar,
+		Status:   user.Status,
+	}, nil
+}
+
+func (s *TicketingService) ListOrganizerPosts(ctx context.Context, userID int64, page, size int, keyword string, status *int, activityID int, storeID int64) (*types.PageResponse[types.OrganizerPostItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("notes n").
+		Select("n.*, ns.like_count, ns.coll_count, ns.share_count, ns.comment_count, a.name AS activity_name, os.name AS store_name").
+		Joins("LEFT JOIN note_stats ns ON ns.note_id = n.id").
+		Joins("LEFT JOIN activities a ON a.id = n.activity_id").
+		Joins("LEFT JOIN organizer_stores os ON os.id = n.store_id").
+		Where("n.user_id = ? AND n.status <> ?", org.UserID, -1)
+	if status != nil {
+		query = query.Where("n.status = ?", *status)
+	}
+	if activityID > 0 {
+		query = query.Where("n.activity_id = ?", activityID)
+	}
+	if storeID > 0 {
+		query = query.Where("n.store_id = ?", storeID)
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("n.title LIKE ? OR n.content LIKE ?", like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		models.Note
+		LikeCount    int64
+		CollCount    int64
+		ShareCount   int64
+		CommentCount int64
+		ActivityName string
+		StoreName    string
+	}
+	if err := query.Order("n.created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.OrganizerPostItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, buildOrganizerPostItem(row.Note, row.LikeCount, row.CollCount, row.ShareCount, row.CommentCount, row.ActivityName, row.StoreName))
+	}
+	return &types.PageResponse[types.OrganizerPostItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) SaveOrganizerPost(ctx context.Context, userID int64, postID uint64, req types.OrganizerPostRequest) (uint64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return 0, errors.New("动态标题不能为空")
+	}
+	if err := s.ensureOrganizerPostRelations(ctx, org.ID, req.ActivityID, req.StoreID); err != nil {
+		return 0, err
+	}
+	if req.Type == 0 {
+		req.Type = 1
+	}
+	if req.Type != 1 && req.Type != 2 {
+		return 0, errors.New("动态类型无效")
+	}
+	if req.VisibleConf == 0 {
+		req.VisibleConf = types.VisibleConfPublic
+	}
+	if req.Status == 0 {
+		req.Status = 1
+	}
+	if req.MediaData == nil && len(req.Images) > 0 {
+		req.MediaData = make([]types.NoteMedia, 0, len(req.Images))
+		for _, image := range req.Images {
+			req.MediaData = append(req.MediaData, types.NoteMedia{URL: image})
+		}
+	}
+	mediaJSON, _ := json.Marshal(req.MediaData)
+	locationJSON := "{}"
+	if req.Location != nil {
+		if b, err := json.Marshal(req.Location); err == nil {
+			locationJSON = string(b)
+		}
+	}
+	now := time.Now()
+	if postID > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.Note{}).
+			Where("id = ? AND user_id = ? AND status <> ?", postID, org.UserID, -1).
+			Updates(map[string]any{
+				"title": req.Title, "content": req.Content, "media_data": string(mediaJSON), "location": locationJSON,
+				"type": req.Type, "status": req.Status, "visible_conf": req.VisibleConf,
+				"activity_id": req.ActivityID, "store_id": req.StoreID, "updated_at": now,
+			})
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_post", "post", "", "", fmt.Sprintf("post_id=%d", postID))
+		return postID, nil
+	}
+	note := models.Note{
+		ID:          uint64(snowflake.GenUserID()),
+		UserID:      uint64(org.UserID),
+		Title:       req.Title,
+		Content:     req.Content,
+		TopicIDs:    "[]",
+		Location:    locationJSON,
+		MediaData:   string(mediaJSON),
+		Type:        req.Type,
+		Status:      req.Status,
+		VisibleConf: req.VisibleConf,
+		ActivityID:  req.ActivityID,
+		StoreID:     req.StoreID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&note).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.NoteStats{NoteID: note.ID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			return err
+		}
+		return s.createOrganizerLog(tx, org.ID, userID, "save_post", "post", "", "", fmt.Sprintf("post_id=%d", note.ID))
+	})
+	return note.ID, err
+}
+
+func (s *TicketingService) UpdateOrganizerPostVisibility(ctx context.Context, userID int64, postID uint64, req types.OrganizerPostVisibilityRequest) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	status := 0
+	if req.Status != nil {
+		status = *req.Status
+	} else if req.Visible != nil {
+		if *req.Visible {
+			status = 1
+		} else {
+			status = 2
+		}
+	} else {
+		return errors.New("请提交 visible 或 status")
+	}
+	if status != 0 && status != 1 && status != 2 && status != 3 {
+		return errors.New("动态状态无效")
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Note{}).
+		Where("id = ? AND user_id = ? AND status <> ?", postID, org.UserID, -1).
+		Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "update_post_visibility", "post", "", "", fmt.Sprintf("post_id=%d,status=%d", postID, status))
+}
+
+func (s *TicketingService) DeleteOrganizerPost(ctx context.Context, userID int64, postID uint64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Note{}).
+		Where("id = ? AND user_id = ? AND status <> ?", postID, org.UserID, -1).
+		Updates(map[string]any{"status": -1, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "delete_post", "post", "", "", fmt.Sprintf("post_id=%d", postID))
 }
 
 func (s *TicketingService) GetOrganizerFinanceSummary(ctx context.Context, userID int64) (*types.OrganizerFinanceSummary, error) {
@@ -1965,6 +2370,24 @@ func (s *TicketingService) AddVerifier(ctx context.Context, userID int64, req ty
 	}).Error
 }
 
+func (s *TicketingService) UpdateVerifierStatus(ctx context.Context, userID, verifierID int64, status int8) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if status != models.VerifierStatusInactive && status != models.VerifierStatusActive {
+		return errors.New("核销员状态无效")
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Verifier{}).Where("id = ? AND organizer_id = ?", verifierID, org.ID).Update("status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "update_verifier_status", "verifier", "", "", fmt.Sprintf("verifier_id=%d,status=%d", verifierID, status))
+}
+
 func (s *TicketingService) DeleteVerifier(ctx context.Context, userID, verifierID int64) error {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
@@ -2421,17 +2844,72 @@ func (s *TicketingService) ensureActivitiesBelongToOrganizer(ctx context.Context
 }
 
 func (s *TicketingService) ensureDefaultLevelRules(ctx context.Context) error {
-	defaults := []models.OrganizerLevelRule{
-		{Level: 1, Name: "LV1", FeeRate: 0.05, RequiredActivityCount: 0, Description: "默认等级", Benefits: "基础商家权益", Status: 1},
-		{Level: 2, Name: "LV2", FeeRate: 0.03, RequiredActivityCount: 5, Description: "办理5场活动升级", Benefits: "手续费降至3%", Status: 1},
-		{Level: 3, Name: "LV3", FeeRate: 0, RequiredActivityCount: 10, Description: "办理10场活动升级", Benefits: "手续费0%", Status: 1},
-	}
-	for _, rule := range defaults {
+	for _, rule := range defaultOrganizerLevelRules() {
 		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func defaultOrganizerLevelRules() []models.OrganizerLevelRule {
+	return []models.OrganizerLevelRule{
+		{Level: 1, Name: "LV1", FeeRate: 0.05, RequiredActivityCount: 0, Description: "默认等级", Benefits: "基础商家权益", Status: 1},
+		{Level: 2, Name: "LV2", FeeRate: 0.03, RequiredActivityCount: 5, Description: "办理5场活动升级", Benefits: "手续费降至3%", Status: 1},
+		{Level: 3, Name: "LV3", FeeRate: 0, RequiredActivityCount: 10, Description: "办理10场活动升级", Benefits: "手续费0%", Status: 1},
+	}
+}
+
+func (s *TicketingService) ensureOrganizerPostRelations(ctx context.Context, organizerID int64, activityID int, storeID int64) error {
+	if activityID > 0 {
+		var count int64
+		if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ? AND organizer_id = ?", activityID, organizerID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return errors.New("关联活动不存在或无权限")
+		}
+	}
+	if storeID > 0 {
+		var count int64
+		if err := s.DB.WithContext(ctx).Model(&models.OrganizerStore{}).Where("id = ? AND organizer_id = ?", storeID, organizerID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return errors.New("关联门店不存在或无权限")
+		}
+	}
+	return nil
+}
+
+func buildOrganizerPostItem(note models.Note, likeCount, collCount, shareCount, commentCount int64, activityName, storeName string) types.OrganizerPostItem {
+	item := types.OrganizerPostItem{
+		ID:           note.ID,
+		UserID:       note.UserID,
+		Title:        note.Title,
+		Content:      note.Content,
+		Type:         note.Type,
+		Status:       note.Status,
+		VisibleConf:  note.VisibleConf,
+		ActivityID:   note.ActivityID,
+		ActivityName: activityName,
+		StoreID:      note.StoreID,
+		StoreName:    storeName,
+		LikeCount:    likeCount,
+		CollCount:    collCount,
+		ShareCount:   shareCount,
+		CommentCount: commentCount,
+		CreatedAt:    note.CreatedAt,
+		UpdatedAt:    note.UpdatedAt,
+		MediaData:    []types.NoteMedia{},
+	}
+	if note.MediaData != "" {
+		_ = json.Unmarshal([]byte(note.MediaData), &item.MediaData)
+	}
+	if note.Location != "" {
+		_ = json.Unmarshal([]byte(note.Location), &item.Location)
+	}
+	return item
 }
 
 func sortFinanceFlows(flows []types.OrganizerFinanceFlowItem) {
