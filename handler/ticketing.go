@@ -39,6 +39,27 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
 		organizer.GET("/withdraws", h.wrap(h.ListOrganizerWithdraws))
 		organizer.POST("/withdraws", h.wrap(h.CreateOrganizerWithdraw))
+		organizer.GET("/collections", h.wrap(h.ListOrganizerCollections))
+		organizer.POST("/collections", h.wrap(h.CreateOrganizerCollection))
+		organizer.PUT("/collections/:id", h.wrap(h.UpdateOrganizerCollection))
+		organizer.DELETE("/collections/:id", h.wrap(h.DeleteOrganizerCollection))
+		organizer.GET("/messages", h.wrap(h.ListOrganizerMessages))
+		organizer.POST("/messages/:id/read", h.wrap(h.MarkOrganizerMessageRead))
+		organizer.GET("/finance/summary", h.wrap(h.GetOrganizerFinanceSummary))
+		organizer.GET("/finance/flows", h.wrap(h.ListOrganizerFinanceFlows))
+		organizer.GET("/level-rules", h.wrap(h.ListOrganizerLevelRules))
+		organizer.POST("/level-rules", h.wrap(h.CreateOrganizerLevelRule))
+		organizer.PUT("/level-rules/:id", h.wrap(h.UpdateOrganizerLevelRule))
+		organizer.DELETE("/level-rules/:id", h.wrap(h.DeleteOrganizerLevelRule))
+		organizer.GET("/roles", h.wrap(h.ListOrganizerRoles))
+		organizer.POST("/roles", h.wrap(h.CreateOrganizerRole))
+		organizer.PUT("/roles/:id", h.wrap(h.UpdateOrganizerRole))
+		organizer.DELETE("/roles/:id", h.wrap(h.DeleteOrganizerRole))
+		organizer.GET("/staff", h.wrap(h.ListOrganizerStaff))
+		organizer.POST("/staff", h.wrap(h.CreateOrganizerStaff))
+		organizer.PUT("/staff/:id", h.wrap(h.UpdateOrganizerStaff))
+		organizer.DELETE("/staff/:id", h.wrap(h.DeleteOrganizerStaff))
+		organizer.GET("/operation-logs", h.wrap(h.ListOrganizerOperationLogs))
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
 		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
@@ -207,6 +228,259 @@ func (h *Ticketing) CreateOrganizerWithdraw(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerCollections(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerCollections(c.Request.Context(), currentUserID(c), page(c), size(c), c.Query("keyword"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerCollection(c *gin.Context) error {
+	var req types.OrganizerCollectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.SaveOrganizerCollection(c.Request.Context(), currentUserID(c), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerCollection(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerCollectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	savedID, err := h.TicketingService.SaveOrganizerCollection(c.Request.Context(), currentUserID(c), id, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": savedID})
+	return nil
+}
+
+func (h *Ticketing) DeleteOrganizerCollection(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteOrganizerCollection(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerMessages(c *gin.Context) error {
+	unreadOnly := c.Query("unread_only") == "1" || c.Query("unread_only") == "true"
+	resp, err := h.TicketingService.ListOrganizerMessages(c.Request.Context(), currentUserID(c), page(c), size(c), unreadOnly)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) MarkOrganizerMessageRead(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.MarkOrganizerMessageRead(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerFinanceSummary(c *gin.Context) error {
+	resp, err := h.TicketingService.GetOrganizerFinanceSummary(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerFinanceFlows(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerFinanceFlows(c.Request.Context(), currentUserID(c), page(c), size(c), c.Query("type"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerLevelRules(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerLevelRules(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"list": resp})
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerLevelRule(c *gin.Context) error {
+	var req types.OrganizerLevelRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.SaveOrganizerLevelRule(c.Request.Context(), currentUserID(c), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerLevelRule(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerLevelRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	savedID, err := h.TicketingService.SaveOrganizerLevelRule(c.Request.Context(), currentUserID(c), id, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": savedID})
+	return nil
+}
+
+func (h *Ticketing) DeleteOrganizerLevelRule(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteOrganizerLevelRule(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerRoles(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerRoles(c.Request.Context(), currentUserID(c), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerRole(c *gin.Context) error {
+	var req types.OrganizerRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.SaveOrganizerRole(c.Request.Context(), currentUserID(c), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerRole(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	savedID, err := h.TicketingService.SaveOrganizerRole(c.Request.Context(), currentUserID(c), id, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": savedID})
+	return nil
+}
+
+func (h *Ticketing) DeleteOrganizerRole(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteOrganizerRole(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerStaff(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerStaff(c.Request.Context(), currentUserID(c), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerStaff(c *gin.Context) error {
+	var req types.OrganizerStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.SaveOrganizerStaff(c.Request.Context(), currentUserID(c), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerStaff(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	savedID, err := h.TicketingService.SaveOrganizerStaff(c.Request.Context(), currentUserID(c), id, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": savedID})
+	return nil
+}
+
+func (h *Ticketing) DeleteOrganizerStaff(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteOrganizerStaff(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerOperationLogs(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerOperationLogs(c.Request.Context(), currentUserID(c), page(c), size(c), c.Query("keyword"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
 	return nil
 }
 

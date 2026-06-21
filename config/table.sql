@@ -546,6 +546,85 @@ CREATE TABLE IF NOT EXISTS `platform_messages`
     PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台消息表';
 
+CREATE TABLE IF NOT EXISTS `organizer_message_reads`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '商家消息阅读ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `message_id`   bigint unsigned NOT NULL COMMENT '消息ID',
+    `is_read`      tinyint         NOT NULL DEFAULT 0 COMMENT '1已读 0未读',
+    `read_at`      datetime        NULL COMMENT '阅读时间',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_org_msg` (`organizer_id`, `message_id`) USING BTREE,
+    KEY `idx_org_msg_message` (`message_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家消息阅读表';
+
+CREATE TABLE IF NOT EXISTS `organizer_level_rules`
+(
+    `id`                      bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '等级规则ID',
+    `level`                   int             NOT NULL COMMENT '等级',
+    `name`                    varchar(50)     NOT NULL COMMENT '等级名称',
+    `fee_rate`                decimal(5,4)    NOT NULL DEFAULT 0 COMMENT '手续费比例',
+    `required_activity_count` bigint          NOT NULL DEFAULT 0 COMMENT '升级所需活动数',
+    `description`             text            NULL COMMENT '等级说明',
+    `benefits`                text            NULL COMMENT '等级权益',
+    `status`                  tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at`              datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`              datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_org_level_rule_level` (`level`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家等级规则表';
+
+CREATE TABLE IF NOT EXISTS `organizer_roles`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '商家角色ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `name`         varchar(50)     NOT NULL COMMENT '角色名称',
+    `description`  varchar(255)    NOT NULL DEFAULT '' COMMENT '角色说明',
+    `permissions`  text            NULL COMMENT '权限JSON数组',
+    `status`       tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_org_role_organizer` (`organizer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家角色表';
+
+CREATE TABLE IF NOT EXISTS `organizer_staff`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '商家子账号ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `user_id`      bigint unsigned NOT NULL DEFAULT 0 COMMENT '绑定用户ID',
+    `role_id`      bigint unsigned NOT NULL DEFAULT 0 COMMENT '角色ID',
+    `name`         varchar(50)     NOT NULL COMMENT '姓名',
+    `phone`        varchar(20)     NOT NULL COMMENT '手机号',
+    `status`       tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0禁用',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_org_staff_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_org_staff_role` (`role_id`) USING BTREE,
+    KEY `idx_org_staff_phone` (`phone`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家子账号表';
+
+CREATE TABLE IF NOT EXISTS `organizer_operation_logs`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '商家操作日志ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `operator_id`  bigint unsigned NOT NULL DEFAULT 0 COMMENT '操作用户ID',
+    `operator`     varchar(50)     NOT NULL DEFAULT '' COMMENT '操作人',
+    `action`       varchar(100)    NOT NULL COMMENT '动作',
+    `resource`     varchar(100)    NOT NULL DEFAULT '' COMMENT '资源',
+    `method`       varchar(20)     NOT NULL DEFAULT '' COMMENT 'HTTP方法',
+    `path`         varchar(255)    NOT NULL DEFAULT '' COMMENT '请求路径',
+    `ip`           varchar(50)     NOT NULL DEFAULT '' COMMENT 'IP',
+    `remark`       varchar(255)    NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_org_log_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_org_log_operator` (`operator_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家操作日志表';
+
 CREATE TABLE IF NOT EXISTS `organizer_withdraws`
 (
     `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '提现ID',

@@ -73,6 +73,70 @@ type CreateOrganizerWithdrawRequest struct {
 	Remark string `json:"remark"`
 }
 
+type OrganizerCollectionRequest struct {
+	Title       string  `json:"title" binding:"required"`
+	ShareTitle  string  `json:"share_title"`
+	Description string  `json:"description"`
+	ShareImage  string  `json:"share_image"`
+	Status      int8    `json:"status"`
+	ActivityIDs []int64 `json:"activity_ids"`
+}
+
+type OrganizerMessageItem struct {
+	ID        int64      `json:"id"`
+	Title     string     `json:"title"`
+	Content   string     `json:"content"`
+	Type      string     `json:"type"`
+	Target    string     `json:"target"`
+	IsRead    bool       `json:"is_read"`
+	ReadAt    *time.Time `json:"read_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type OrganizerFinanceSummary struct {
+	GrossAmount    int64 `json:"gross_amount"`
+	RefundAmount   int64 `json:"refund_amount"`
+	SettleAmount   int64 `json:"settle_amount"`
+	WithdrawAmount int64 `json:"withdraw_amount"`
+	OrderCount     int64 `json:"order_count"`
+}
+
+type OrganizerFinanceFlowItem struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Amount      int64     `json:"amount"`
+	OrderNo     string    `json:"order_no,omitempty"`
+	RefundNo    string    `json:"refund_no,omitempty"`
+	ActivityID  int64     `json:"activity_id,omitempty"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type OrganizerLevelRuleRequest struct {
+	Level                 int     `json:"level" binding:"required"`
+	Name                  string  `json:"name"`
+	FeeRate               float64 `json:"fee_rate"`
+	RequiredActivityCount int64   `json:"required_activity_count"`
+	Description           string  `json:"description"`
+	Benefits              string  `json:"benefits"`
+	Status                int8    `json:"status"`
+}
+
+type OrganizerRoleRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	Status      int8     `json:"status"`
+}
+
+type OrganizerStaffRequest struct {
+	UserID int64  `json:"user_id"`
+	RoleID int64  `json:"role_id"`
+	Name   string `json:"name" binding:"required"`
+	Phone  string `json:"phone" binding:"required"`
+	Status int8   `json:"status"`
+}
+
 type OrganizerInfoResponse struct {
 	ID                     int64   `json:"id"`
 	Type                   string  `json:"type"`

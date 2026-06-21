@@ -79,6 +79,18 @@ type PlatformMessage struct {
 
 func (PlatformMessage) TableName() string { return "platform_messages" }
 
+type OrganizerMessageRead struct {
+	ID          int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64      `gorm:"column:organizer_id;not null;uniqueIndex:uk_org_msg,priority:1;index" json:"organizer_id"`
+	MessageID   int64      `gorm:"column:message_id;not null;uniqueIndex:uk_org_msg,priority:2;index" json:"message_id"`
+	IsRead      int8       `gorm:"column:is_read;not null;default:0" json:"is_read"`
+	ReadAt      *time.Time `gorm:"column:read_at" json:"read_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerMessageRead) TableName() string { return "organizer_message_reads" }
+
 type OrganizerWithdraw struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID     int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
@@ -115,3 +127,61 @@ type OrganizerBankAccountAudit struct {
 }
 
 func (OrganizerBankAccountAudit) TableName() string { return "organizer_bank_account_audits" }
+
+type OrganizerLevelRule struct {
+	ID                    int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Level                 int       `gorm:"column:level;not null;uniqueIndex" json:"level"`
+	Name                  string    `gorm:"column:name;size:50;not null" json:"name"`
+	FeeRate               float64   `gorm:"column:fee_rate;type:decimal(5,4);not null;default:0" json:"fee_rate"`
+	RequiredActivityCount int64     `gorm:"column:required_activity_count;not null;default:0" json:"required_activity_count"`
+	Description           string    `gorm:"column:description;type:text" json:"description"`
+	Benefits              string    `gorm:"column:benefits;type:text" json:"benefits"`
+	Status                int8      `gorm:"column:status;not null;default:1" json:"status"`
+	CreatedAt             time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerLevelRule) TableName() string { return "organizer_level_rules" }
+
+type OrganizerRole struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Name        string    `gorm:"column:name;size:50;not null" json:"name"`
+	Description string    `gorm:"column:description;size:255" json:"description"`
+	Permissions string    `gorm:"column:permissions;type:text" json:"permissions"`
+	Status      int8      `gorm:"column:status;not null;default:1" json:"status"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerRole) TableName() string { return "organizer_roles" }
+
+type OrganizerStaff struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	UserID      int64     `gorm:"column:user_id;not null;default:0;index" json:"user_id"`
+	RoleID      int64     `gorm:"column:role_id;not null;default:0;index" json:"role_id"`
+	Name        string    `gorm:"column:name;size:50;not null" json:"name"`
+	Phone       string    `gorm:"column:phone;size:20;not null;index" json:"phone"`
+	Status      int8      `gorm:"column:status;not null;default:1" json:"status"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerStaff) TableName() string { return "organizer_staff" }
+
+type OrganizerOperationLog struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	OperatorID  int64     `gorm:"column:operator_id;not null;default:0;index" json:"operator_id"`
+	Operator    string    `gorm:"column:operator;size:50" json:"operator"`
+	Action      string    `gorm:"column:action;size:100;not null" json:"action"`
+	Resource    string    `gorm:"column:resource;size:100" json:"resource"`
+	Method      string    `gorm:"column:method;size:20" json:"method"`
+	Path        string    `gorm:"column:path;size:255" json:"path"`
+	IP          string    `gorm:"column:ip;size:50" json:"ip"`
+	Remark      string    `gorm:"column:remark;size:255" json:"remark"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (OrganizerOperationLog) TableName() string { return "organizer_operation_logs" }
