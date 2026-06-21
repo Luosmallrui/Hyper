@@ -39,18 +39,21 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
 		organizer.GET("/withdraws", h.wrap(h.ListOrganizerWithdraws))
 		organizer.POST("/withdraws", h.wrap(h.CreateOrganizerWithdraw))
+		organizer.GET("/profile", h.wrap(h.GetOrganizerProfile))
+		organizer.PUT("/profile", h.wrap(h.UpdateOrganizerProfile))
+		organizer.GET("/subscription/summary", h.wrap(h.GetOrganizerSubscriptionSummary))
+		organizer.GET("/users/lookup", h.wrap(h.LookupOrganizerUser))
 		organizer.GET("/collections", h.wrap(h.ListOrganizerCollections))
+		organizer.GET("/collections/:id", h.wrap(h.GetOrganizerCollection))
 		organizer.POST("/collections", h.wrap(h.CreateOrganizerCollection))
 		organizer.PUT("/collections/:id", h.wrap(h.UpdateOrganizerCollection))
 		organizer.DELETE("/collections/:id", h.wrap(h.DeleteOrganizerCollection))
 		organizer.GET("/messages", h.wrap(h.ListOrganizerMessages))
+		organizer.POST("/messages/read-all", h.wrap(h.MarkAllOrganizerMessagesRead))
 		organizer.POST("/messages/:id/read", h.wrap(h.MarkOrganizerMessageRead))
 		organizer.GET("/finance/summary", h.wrap(h.GetOrganizerFinanceSummary))
 		organizer.GET("/finance/flows", h.wrap(h.ListOrganizerFinanceFlows))
 		organizer.GET("/level-rules", h.wrap(h.ListOrganizerLevelRules))
-		organizer.POST("/level-rules", h.wrap(h.CreateOrganizerLevelRule))
-		organizer.PUT("/level-rules/:id", h.wrap(h.UpdateOrganizerLevelRule))
-		organizer.DELETE("/level-rules/:id", h.wrap(h.DeleteOrganizerLevelRule))
 		organizer.GET("/roles", h.wrap(h.ListOrganizerRoles))
 		organizer.POST("/roles", h.wrap(h.CreateOrganizerRole))
 		organizer.PUT("/roles/:id", h.wrap(h.UpdateOrganizerRole))
@@ -60,12 +63,18 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/staff/:id", h.wrap(h.UpdateOrganizerStaff))
 		organizer.DELETE("/staff/:id", h.wrap(h.DeleteOrganizerStaff))
 		organizer.GET("/operation-logs", h.wrap(h.ListOrganizerOperationLogs))
+		organizer.GET("/posts", h.wrap(h.ListOrganizerPosts))
+		organizer.POST("/posts", h.wrap(h.CreateOrganizerPost))
+		organizer.PUT("/posts/:id", h.wrap(h.UpdateOrganizerPost))
+		organizer.PATCH("/posts/:id/visibility", h.wrap(h.UpdateOrganizerPostVisibility))
+		organizer.DELETE("/posts/:id", h.wrap(h.DeleteOrganizerPost))
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
 		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
 		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
+		organizer.PATCH("/verifier/:id/status", h.wrap(h.UpdateVerifierStatus))
 		organizer.DELETE("/verifier/:id", h.wrap(h.DeleteVerifier))
 		organizer.GET("/verifier/:id/activation-qr", h.wrap(h.GetVerifierActivationQR))
 		organizer.GET("/stores", h.wrap(h.ListStores))
@@ -240,6 +249,19 @@ func (h *Ticketing) ListOrganizerCollections(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) GetOrganizerCollection(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.GetOrganizerCollection(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) CreateOrganizerCollection(c *gin.Context) error {
 	var req types.OrganizerCollectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -301,6 +323,54 @@ func (h *Ticketing) MarkOrganizerMessageRead(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) MarkAllOrganizerMessagesRead(c *gin.Context) error {
+	resp, err := h.TicketingService.MarkAllOrganizerMessagesRead(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerSubscriptionSummary(c *gin.Context) error {
+	resp, err := h.TicketingService.GetOrganizerSubscriptionSummary(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerProfile(c *gin.Context) error {
+	resp, err := h.TicketingService.GetOrganizerProfile(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerProfile(c *gin.Context) error {
+	var req types.OrganizerProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.UpdateOrganizerProfile(c.Request.Context(), currentUserID(c), req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) LookupOrganizerUser(c *gin.Context) error {
+	resp, err := h.TicketingService.LookupOrganizerUser(c.Request.Context(), currentUserID(c), c.Query("phone"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
 	return nil
 }
 
@@ -481,6 +551,97 @@ func (h *Ticketing) ListOrganizerOperationLogs(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerPosts(c *gin.Context) error {
+	var status *int
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		status = &value
+	}
+	activityID := 0
+	if raw := c.Query("activity_id"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return err
+		}
+		activityID = value
+	}
+	var storeID int64
+	if raw := c.Query("store_id"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return err
+		}
+		storeID = value
+	}
+	resp, err := h.TicketingService.ListOrganizerPosts(c.Request.Context(), currentUserID(c), page(c), size(c), c.Query("keyword"), status, activityID, storeID)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) CreateOrganizerPost(c *gin.Context) error {
+	var req types.OrganizerPostRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := h.TicketingService.SaveOrganizerPost(c.Request.Context(), currentUserID(c), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerPost(c *gin.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerPostRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	savedID, err := h.TicketingService.SaveOrganizerPost(c.Request.Context(), currentUserID(c), id, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": savedID})
+	return nil
+}
+
+func (h *Ticketing) UpdateOrganizerPostVisibility(c *gin.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return err
+	}
+	var req types.OrganizerPostVisibilityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.UpdateOrganizerPostVisibility(c.Request.Context(), currentUserID(c), id, req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) DeleteOrganizerPost(c *gin.Context) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.DeleteOrganizerPost(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
 	return nil
 }
 
@@ -985,6 +1146,24 @@ func (h *Ticketing) AddVerifier(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.AddVerifier(c.Request.Context(), currentUserID(c), req); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (h *Ticketing) UpdateVerifierStatus(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Status int8 `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	if err := h.TicketingService.UpdateVerifierStatus(c.Request.Context(), currentUserID(c), id, req.Status); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

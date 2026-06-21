@@ -560,6 +560,26 @@ CREATE TABLE IF NOT EXISTS `organizer_message_reads`
     KEY `idx_org_msg_message` (`message_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家消息阅读表';
 
+CREATE TABLE IF NOT EXISTS `organizer_profiles`
+(
+    `id`             bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '商家资料ID',
+    `organizer_id`   bigint unsigned NOT NULL COMMENT '主办方ID',
+    `cover_image`    varchar(255)    NOT NULL DEFAULT '' COMMENT '封面图',
+    `gallery`        text            NULL COMMENT '组图JSON数组',
+    `description`    text            NULL COMMENT '简介',
+    `business_hours` varchar(100)    NOT NULL DEFAULT '' COMMENT '营业时间',
+    `contact_name`   varchar(50)     NOT NULL DEFAULT '' COMMENT '联系人',
+    `service_phone`  varchar(20)     NOT NULL DEFAULT '' COMMENT '客服电话',
+    `address`        varchar(255)    NOT NULL DEFAULT '' COMMENT '详细地址',
+    `latitude`       decimal(10, 6)  NOT NULL DEFAULT 0 COMMENT '纬度',
+    `longitude`      decimal(10, 6)  NOT NULL DEFAULT 0 COMMENT '经度',
+    `average_spend`  bigint          NOT NULL DEFAULT 0 COMMENT '人均消费金额(分)',
+    `created_at`     datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`     datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_organizer_profile` (`organizer_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家扩展资料表';
+
 CREATE TABLE IF NOT EXISTS `organizer_level_rules`
 (
     `id`                      bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '等级规则ID',
