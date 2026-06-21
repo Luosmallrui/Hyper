@@ -9,10 +9,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +33,23 @@ type ITicketingService interface {
 	UpdateWithdrawInfo(ctx context.Context, userID int64, req types.OrganizerWithdrawRequest) error
 	ListOrganizerWithdraws(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[models.OrganizerWithdraw], error)
 	CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error)
+	ListOrganizerCollections(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.ActivityCollectionItem], error)
+	SaveOrganizerCollection(ctx context.Context, userID, collectionID int64, req types.OrganizerCollectionRequest) (int64, error)
+	DeleteOrganizerCollection(ctx context.Context, userID, collectionID int64) error
+	ListOrganizerMessages(ctx context.Context, userID int64, page, size int, unreadOnly bool) (*types.PageResponse[types.OrganizerMessageItem], error)
+	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
+	GetOrganizerFinanceSummary(ctx context.Context, userID int64) (*types.OrganizerFinanceSummary, error)
+	ListOrganizerFinanceFlows(ctx context.Context, userID int64, page, size int, flowType string) (*types.PageResponse[types.OrganizerFinanceFlowItem], error)
+	ListOrganizerLevelRules(ctx context.Context, userID int64) ([]models.OrganizerLevelRule, error)
+	SaveOrganizerLevelRule(ctx context.Context, userID, ruleID int64, req types.OrganizerLevelRuleRequest) (int64, error)
+	DeleteOrganizerLevelRule(ctx context.Context, userID, ruleID int64) error
+	ListOrganizerRoles(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.OrganizerRole], error)
+	SaveOrganizerRole(ctx context.Context, userID, roleID int64, req types.OrganizerRoleRequest) (int64, error)
+	DeleteOrganizerRole(ctx context.Context, userID, roleID int64) error
+	ListOrganizerStaff(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.OrganizerStaff], error)
+	SaveOrganizerStaff(ctx context.Context, userID, staffID int64, req types.OrganizerStaffRequest) (int64, error)
+	DeleteOrganizerStaff(ctx context.Context, userID, staffID int64) error
+	ListOrganizerOperationLogs(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[models.OrganizerOperationLog], error)
 	GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error)
 	SubscribeActivity(ctx context.Context, userID, activityID int64) error
 	UnsubscribeActivity(ctx context.Context, userID, activityID int64) error
@@ -302,6 +321,456 @@ func (s *TicketingService) CreateOrganizerWithdraw(ctx context.Context, userID i
 		return 0, err
 	}
 	return withdraw.ID, nil
+}
+
+func (s *TicketingService) ListOrganizerCollections(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.ActivityCollectionItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.ActivityCollection{}).Where("organizer_id = ?", org.ID)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		query = query.Where("title LIKE ? OR share_title LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []types.ActivityCollectionItem
+	if err := query.Select("id, organizer_id, title, share_title, description, share_image, status, created_at, updated_at").
+		Order("created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	if len(ids) > 0 {
+		var counts []struct {
+			CollectionID int64
+			Count        int
+		}
+		if err := s.DB.WithContext(ctx).Model(&models.ActivityCollectionItem{}).
+			Select("collection_id, COUNT(*) AS count").Where("collection_id IN ?", ids).Group("collection_id").Scan(&counts).Error; err != nil {
+			return nil, err
+		}
+		countMap := map[int64]int{}
+		for _, c := range counts {
+			countMap[c.CollectionID] = c.Count
+		}
+		for i := range rows {
+			rows[i].OrganizerName = org.Name
+			rows[i].ActivityCount = countMap[rows[i].ID]
+		}
+	}
+	return &types.PageResponse[types.ActivityCollectionItem]{List: rows, Total: total}, nil
+}
+
+func (s *TicketingService) SaveOrganizerCollection(ctx context.Context, userID, collectionID int64, req types.OrganizerCollectionRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return 0, errors.New("合集标题不能为空")
+	}
+	status := req.Status
+	if status == 0 {
+		status = 1
+	}
+	if err := s.ensureActivitiesBelongToOrganizer(ctx, org.ID, req.ActivityIDs); err != nil {
+		return 0, err
+	}
+	var savedID int64
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		collection := models.ActivityCollection{
+			OrganizerID: org.ID,
+			Title:       req.Title,
+			ShareTitle:  req.ShareTitle,
+			Description: req.Description,
+			ShareImage:  req.ShareImage,
+			Status:      status,
+		}
+		if collectionID > 0 {
+			result := tx.Model(&models.ActivityCollection{}).Where("id = ? AND organizer_id = ?", collectionID, org.ID).Updates(map[string]any{
+				"title": req.Title, "share_title": req.ShareTitle, "description": req.Description, "share_image": req.ShareImage, "status": status,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			savedID = collectionID
+			if err := tx.Where("collection_id = ?", collectionID).Delete(&models.ActivityCollectionItem{}).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Create(&collection).Error; err != nil {
+				return err
+			}
+			savedID = collection.ID
+		}
+		for i, activityID := range req.ActivityIDs {
+			if err := tx.Create(&models.ActivityCollectionItem{CollectionID: savedID, ActivityID: activityID, Sort: i}).Error; err != nil {
+				return err
+			}
+		}
+		return s.createOrganizerLog(tx, org.ID, userID, "save_collection", "activity_collection", "", "", fmt.Sprintf("collection_id=%d", savedID))
+	})
+	return savedID, err
+}
+
+func (s *TicketingService) DeleteOrganizerCollection(ctx context.Context, userID, collectionID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var collection models.ActivityCollection
+		if err := tx.Where("id = ? AND organizer_id = ?", collectionID, org.ID).First(&collection).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("collection_id = ?", collectionID).Delete(&models.ActivityCollectionItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&collection).Error; err != nil {
+			return err
+		}
+		return s.createOrganizerLog(tx, org.ID, userID, "delete_collection", "activity_collection", "", "", fmt.Sprintf("collection_id=%d", collectionID))
+	})
+}
+
+func (s *TicketingService) ListOrganizerMessages(ctx context.Context, userID int64, page, size int, unreadOnly bool) (*types.PageResponse[types.OrganizerMessageItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("platform_messages pm").
+		Joins("LEFT JOIN organizer_message_reads omr ON omr.message_id = pm.id AND omr.organizer_id = ?", org.ID).
+		Where("pm.status = 1 AND (pm.target IN ? OR pm.target = ?)", []string{"merchant", "organizer", "business", "all"}, "")
+	if unreadOnly {
+		query = query.Where("COALESCE(omr.is_read,0) = 0")
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		ID        int64
+		Title     string
+		Content   string
+		Type      string
+		Target    string
+		IsRead    int8
+		ReadAt    *time.Time
+		CreatedAt time.Time
+	}
+	if err := query.Select("pm.id, pm.title, pm.content, pm.type, pm.target, COALESCE(omr.is_read,0) AS is_read, omr.read_at, pm.created_at").
+		Order("pm.created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.OrganizerMessageItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, types.OrganizerMessageItem{ID: row.ID, Title: row.Title, Content: row.Content, Type: row.Type, Target: row.Target, IsRead: row.IsRead == 1, ReadAt: row.ReadAt, CreatedAt: row.CreatedAt})
+	}
+	return &types.PageResponse[types.OrganizerMessageItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	row := models.OrganizerMessageRead{OrganizerID: org.ID, MessageID: messageID, IsRead: 1, ReadAt: &now}
+	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&row).Error
+}
+
+func (s *TicketingService) GetOrganizerFinanceSummary(ctx context.Context, userID int64) (*types.OrganizerFinanceSummary, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerFinanceSummary{}
+	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
+	if err := s.DB.WithContext(ctx).Table("ticket_orders o").Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND o.status IN ?", org.ID, paidStatuses).
+		Select("COALESCE(SUM(o.actual_price),0), COUNT(o.id)").Row().Scan(&resp.GrossAmount, &resp.OrderCount); err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Table("refunds r").Joins("JOIN ticket_orders o ON o.id = r.order_id").Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND r.status = ?", org.ID, models.RefundStatusSuccess).
+		Select("COALESCE(SUM(r.refund_amount),0)").Scan(&resp.RefundAmount).Error; err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("organizer_id = ? AND status = 1", org.ID).Select("COALESCE(SUM(amount),0)").Scan(&resp.WithdrawAmount).Error; err != nil {
+		return nil, err
+	}
+	resp.SettleAmount = resp.GrossAmount - resp.RefundAmount - resp.WithdrawAmount
+	return resp, nil
+}
+
+func (s *TicketingService) ListOrganizerFinanceFlows(ctx context.Context, userID int64, page, size int, flowType string) (*types.PageResponse[types.OrganizerFinanceFlowItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	flows := make([]types.OrganizerFinanceFlowItem, 0)
+	if flowType == "" || flowType == "order" {
+		var orders []models.TicketOrder
+		_ = s.DB.WithContext(ctx).Joins("JOIN activities a ON a.id = ticket_orders.activity_id").
+			Where("a.organizer_id = ? AND ticket_orders.status IN ?", org.ID, []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}).
+			Order("ticket_orders.created_at DESC").Find(&orders).Error
+		for _, order := range orders {
+			flows = append(flows, types.OrganizerFinanceFlowItem{ID: fmt.Sprintf("order-%s", order.OrderNo), Type: "order", Amount: order.ActualPrice, OrderNo: order.OrderNo, ActivityID: order.ActivityID, Description: "票务订单收入", CreatedAt: order.CreatedAt})
+		}
+	}
+	if flowType == "" || flowType == "refund" {
+		var rows []struct {
+			RefundNo     string
+			RefundAmount int64
+			OrderNo      string
+			ActivityID   int64
+			CreatedAt    time.Time
+		}
+		_ = s.DB.WithContext(ctx).Table("refunds r").Select("r.refund_no, r.refund_amount, o.order_no, o.activity_id, r.created_at").
+			Joins("JOIN ticket_orders o ON o.id = r.order_id").Joins("JOIN activities a ON a.id = o.activity_id").
+			Where("a.organizer_id = ? AND r.status = ?", org.ID, models.RefundStatusSuccess).Scan(&rows).Error
+		for _, row := range rows {
+			flows = append(flows, types.OrganizerFinanceFlowItem{ID: fmt.Sprintf("refund-%s", row.RefundNo), Type: "refund", Amount: -row.RefundAmount, OrderNo: row.OrderNo, RefundNo: row.RefundNo, ActivityID: row.ActivityID, Description: "订单退款", CreatedAt: row.CreatedAt})
+		}
+	}
+	if flowType == "" || flowType == "withdraw" {
+		var withdraws []models.OrganizerWithdraw
+		_ = s.DB.WithContext(ctx).Where("organizer_id = ?", org.ID).Find(&withdraws).Error
+		for _, w := range withdraws {
+			flows = append(flows, types.OrganizerFinanceFlowItem{ID: fmt.Sprintf("withdraw-%d", w.ID), Type: "withdraw", Amount: -w.Amount, Description: "商家提现", CreatedAt: w.CreatedAt})
+		}
+	}
+	sortFinanceFlows(flows)
+	total := int64(len(flows))
+	start := (page - 1) * size
+	if start >= len(flows) {
+		return &types.PageResponse[types.OrganizerFinanceFlowItem]{List: []types.OrganizerFinanceFlowItem{}, Total: total}, nil
+	}
+	end := start + size
+	if end > len(flows) {
+		end = len(flows)
+	}
+	return &types.PageResponse[types.OrganizerFinanceFlowItem]{List: flows[start:end], Total: total}, nil
+}
+
+func (s *TicketingService) ListOrganizerLevelRules(ctx context.Context, userID int64) ([]models.OrganizerLevelRule, error) {
+	if _, err := s.findOrganizerByUser(ctx, userID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureDefaultLevelRules(ctx); err != nil {
+		return nil, err
+	}
+	var rules []models.OrganizerLevelRule
+	err := s.DB.WithContext(ctx).Order("level ASC").Find(&rules).Error
+	return rules, err
+}
+
+func (s *TicketingService) SaveOrganizerLevelRule(ctx context.Context, userID, ruleID int64, req types.OrganizerLevelRuleRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if req.Level <= 0 {
+		return 0, errors.New("等级必须大于0")
+	}
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("LV%d", req.Level)
+	}
+	status := req.Status
+	if status == 0 {
+		status = 1
+	}
+	rule := models.OrganizerLevelRule{Level: req.Level, Name: req.Name, FeeRate: req.FeeRate, RequiredActivityCount: req.RequiredActivityCount, Description: req.Description, Benefits: req.Benefits, Status: status}
+	if ruleID > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.OrganizerLevelRule{}).Where("id = ?", ruleID).Updates(rule)
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_level_rule", "level_rule", "", "", fmt.Sprintf("rule_id=%d", ruleID))
+		return ruleID, nil
+	}
+	if err := s.DB.WithContext(ctx).Create(&rule).Error; err != nil {
+		return 0, err
+	}
+	_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_level_rule", "level_rule", "", "", fmt.Sprintf("rule_id=%d", rule.ID))
+	return rule.ID, nil
+}
+
+func (s *TicketingService) DeleteOrganizerLevelRule(ctx context.Context, userID, ruleID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if err := s.DB.WithContext(ctx).Delete(&models.OrganizerLevelRule{}, ruleID).Error; err != nil {
+		return err
+	}
+	return s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "delete_level_rule", "level_rule", "", "", fmt.Sprintf("rule_id=%d", ruleID))
+}
+
+func (s *TicketingService) ListOrganizerRoles(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.OrganizerRole], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.OrganizerRole{}).Where("organizer_id = ?", org.ID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []models.OrganizerRole
+	err = query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return &types.PageResponse[models.OrganizerRole]{List: list, Total: total}, err
+}
+
+func (s *TicketingService) SaveOrganizerRole(ctx context.Context, userID, roleID int64, req types.OrganizerRoleRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	permissions, _ := json.Marshal(req.Permissions)
+	status := req.Status
+	if status == 0 {
+		status = 1
+	}
+	role := models.OrganizerRole{OrganizerID: org.ID, Name: req.Name, Description: req.Description, Permissions: string(permissions), Status: status}
+	if roleID > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.OrganizerRole{}).Where("id = ? AND organizer_id = ?", roleID, org.ID).Updates(map[string]any{"name": req.Name, "description": req.Description, "permissions": string(permissions), "status": status})
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_role", "role", "", "", fmt.Sprintf("role_id=%d", roleID))
+		return roleID, nil
+	}
+	if err := s.DB.WithContext(ctx).Create(&role).Error; err != nil {
+		return 0, err
+	}
+	_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_role", "role", "", "", fmt.Sprintf("role_id=%d", role.ID))
+	return role.ID, nil
+}
+
+func (s *TicketingService) DeleteOrganizerRole(ctx context.Context, userID, roleID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.OrganizerStaff{}).Where("organizer_id = ? AND role_id = ?", org.ID, roleID).Update("role_id", 0).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND organizer_id = ?", roleID, org.ID).Delete(&models.OrganizerRole{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return s.createOrganizerLog(tx, org.ID, userID, "delete_role", "role", "", "", fmt.Sprintf("role_id=%d", roleID))
+	})
+}
+
+func (s *TicketingService) ListOrganizerStaff(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.OrganizerStaff], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.OrganizerStaff{}).Where("organizer_id = ?", org.ID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []models.OrganizerStaff
+	err = query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return &types.PageResponse[models.OrganizerStaff]{List: list, Total: total}, err
+}
+
+func (s *TicketingService) SaveOrganizerStaff(ctx context.Context, userID, staffID int64, req types.OrganizerStaffRequest) (int64, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if req.RoleID > 0 {
+		var count int64
+		if err := s.DB.WithContext(ctx).Model(&models.OrganizerRole{}).Where("id = ? AND organizer_id = ?", req.RoleID, org.ID).Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count == 0 {
+			return 0, errors.New("角色不存在")
+		}
+	}
+	status := req.Status
+	if status == 0 {
+		status = 1
+	}
+	staff := models.OrganizerStaff{OrganizerID: org.ID, UserID: req.UserID, RoleID: req.RoleID, Name: req.Name, Phone: req.Phone, Status: status}
+	if staffID > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.OrganizerStaff{}).Where("id = ? AND organizer_id = ?", staffID, org.ID).Updates(map[string]any{"user_id": req.UserID, "role_id": req.RoleID, "name": req.Name, "phone": req.Phone, "status": status})
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_staff", "staff", "", "", fmt.Sprintf("staff_id=%d", staffID))
+		return staffID, nil
+	}
+	if err := s.DB.WithContext(ctx).Create(&staff).Error; err != nil {
+		return 0, err
+	}
+	_ = s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "save_staff", "staff", "", "", fmt.Sprintf("staff_id=%d", staff.ID))
+	return staff.ID, nil
+}
+
+func (s *TicketingService) DeleteOrganizerStaff(ctx context.Context, userID, staffID int64) error {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	result := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", staffID, org.ID).Delete(&models.OrganizerStaff{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "delete_staff", "staff", "", "", fmt.Sprintf("staff_id=%d", staffID))
+}
+
+func (s *TicketingService) ListOrganizerOperationLogs(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[models.OrganizerOperationLog], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Model(&models.OrganizerOperationLog{}).Where("organizer_id = ?", org.ID)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		query = query.Where("action LIKE ? OR resource LIKE ? OR remark LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []models.OrganizerOperationLog
+	err = query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&list).Error
+	return &types.PageResponse[models.OrganizerOperationLog]{List: list, Total: total}, err
 }
 
 func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error) {
@@ -1935,6 +2404,52 @@ func (s *TicketingService) findOrganizerByUser(ctx context.Context, userID int64
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	return &org, err
+}
+
+func (s *TicketingService) ensureActivitiesBelongToOrganizer(ctx context.Context, organizerID int64, activityIDs []int64) error {
+	if len(activityIDs) == 0 {
+		return nil
+	}
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id IN ? AND organizer_id = ?", activityIDs, organizerID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != int64(len(activityIDs)) {
+		return errors.New("合集包含无权限活动")
+	}
+	return nil
+}
+
+func (s *TicketingService) ensureDefaultLevelRules(ctx context.Context) error {
+	defaults := []models.OrganizerLevelRule{
+		{Level: 1, Name: "LV1", FeeRate: 0.05, RequiredActivityCount: 0, Description: "默认等级", Benefits: "基础商家权益", Status: 1},
+		{Level: 2, Name: "LV2", FeeRate: 0.03, RequiredActivityCount: 5, Description: "办理5场活动升级", Benefits: "手续费降至3%", Status: 1},
+		{Level: 3, Name: "LV3", FeeRate: 0, RequiredActivityCount: 10, Description: "办理10场活动升级", Benefits: "手续费0%", Status: 1},
+	}
+	for _, rule := range defaults {
+		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortFinanceFlows(flows []types.OrganizerFinanceFlowItem) {
+	sort.Slice(flows, func(i, j int) bool {
+		return flows[i].CreatedAt.After(flows[j].CreatedAt)
+	})
+}
+
+func (s *TicketingService) createOrganizerLog(tx *gorm.DB, organizerID, operatorID int64, action, resource, method, path, remark string) error {
+	return tx.Create(&models.OrganizerOperationLog{
+		OrganizerID: organizerID,
+		OperatorID:  operatorID,
+		Action:      action,
+		Resource:    resource,
+		Method:      method,
+		Path:        path,
+		Remark:      remark,
+	}).Error
 }
 
 func (s *TicketingService) ensureActivityOwner(ctx context.Context, userID, activityID int64) error {
