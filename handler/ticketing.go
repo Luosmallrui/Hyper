@@ -439,6 +439,12 @@ func (h *Ticketing) CancelTicketOrder(c *gin.Context) error {
 		return err
 	}
 	if err := h.TicketingService.CancelTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no"), req.ReasonID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "订单不存在、已删除或不属于当前用户")
+		}
+		if err.Error() == "当前订单不可取消" {
+			return response.NewError(http.StatusBadRequest, err.Error())
+		}
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
@@ -447,6 +453,12 @@ func (h *Ticketing) CancelTicketOrder(c *gin.Context) error {
 
 func (h *Ticketing) DeleteTicketOrder(c *gin.Context) error {
 	if err := h.TicketingService.DeleteTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no")); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "订单不存在、已删除或不属于当前用户")
+		}
+		if err.Error() == "当前订单不可删除" {
+			return response.NewError(http.StatusBadRequest, err.Error())
+		}
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
