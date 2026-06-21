@@ -1002,7 +1002,7 @@ func (s *TicketingService) ListCancelReasons(ctx context.Context) ([]models.Canc
 func (s *TicketingService) CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND user_id = ? AND user_deleted_at IS NULL", orderNo, userID).First(&order).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ? AND user_id = ?", orderNo, userID).First(&order).Error; err != nil {
 			return err
 		}
 		if order.Status != models.TicketOrderStatusPending {
