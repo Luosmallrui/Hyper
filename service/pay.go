@@ -246,9 +246,12 @@ func (p *PayService) prepayTicketOrder(
 		if order.Status != models.TicketOrderStatusPending {
 			return fmt.Errorf("当前订单状态不可支付")
 		}
-		//if !order.ExpireTime.IsZero() && time.Now().After(order.ExpireTime) {
-		//	return fmt.Errorf("订单已过期")
-		//}
+		if !order.ExpireTime.IsZero() && time.Now().After(order.ExpireTime) {
+			if err := cancelPendingTicketOrderTx(tx, &order, "超时未支付自动取消"); err != nil {
+				return err
+			}
+			return fmt.Errorf("订单已超时取消")
+		}
 		if err := tx.First(&activity, order.ActivityID).Error; err != nil {
 			return fmt.Errorf("活动不存在: %w", err)
 		}
@@ -509,8 +512,14 @@ func (p *PayService) ApplyWechatRefund(ctx context.Context, weChatClient *core.C
 			Where("id = ?", refund.OrderID).First(&order).Error; err != nil {
 			return fmt.Errorf("订单不存在: %w", err)
 		}
-		if order.Status != models.TicketOrderStatusRefunding {
+		if order.Status != models.TicketOrderStatusUsable && order.Status != models.TicketOrderStatusRefunding {
 			return fmt.Errorf("订单状态不可退款")
+		}
+		if order.Status == models.TicketOrderStatusUsable {
+			if err := tx.Model(&order).Update("status", models.TicketOrderStatusRefunding).Error; err != nil {
+				return err
+			}
+			order.Status = models.TicketOrderStatusRefunding
 		}
 		if order.ActualPrice > 0 {
 			err := tx.Where("order_sn = ?", order.OrderNo).First(&payRecord).Error

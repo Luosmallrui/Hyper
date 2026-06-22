@@ -1691,6 +1691,9 @@ func (s *TicketingService) resolveOrderViewers(tx *gorm.DB, userID int64, req ty
 }
 
 func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error) {
+	if err := s.expireUserPendingTicketOrders(ctx, userID); err != nil {
+		return nil, err
+	}
 	var order models.TicketOrder
 	if err := s.DB.WithContext(ctx).Where("order_no = ? AND user_id = ? AND user_deleted_at IS NULL", orderNo, userID).First(&order).Error; err != nil {
 		return nil, err
@@ -1720,6 +1723,9 @@ func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo,
 }
 
 func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, refundStatus string, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
+	if err := s.expireUserPendingTicketOrders(ctx, userID); err != nil {
+		return nil, err
+	}
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ? AND user_deleted_at IS NULL", userID)
 	if status != nil {
@@ -1884,11 +1890,7 @@ func (s *TicketingService) CancelTicketOrder(ctx context.Context, userID int64, 
 		}
 		var reason models.CancelReason
 		_ = tx.First(&reason, reasonID).Error
-		if err := tx.Model(&models.TicketSpec{}).Where("id = ?", order.TicketSpecID).
-			UpdateColumn("sold_count", gorm.Expr("GREATEST(sold_count - ?, 0)", order.Quantity)).Error; err != nil {
-			return err
-		}
-		return tx.Model(&order).Updates(map[string]any{"status": models.TicketOrderStatusCancelled, "cancel_reason": reason.Reason}).Error
+		return cancelPendingTicketOrderTx(tx, &order, reason.Reason)
 	})
 }
 
@@ -1948,7 +1950,7 @@ func (s *TicketingService) ApplyRefund(ctx context.Context, userID int64, req ty
 		if err := tx.Create(&models.RefundLog{RefundID: refund.ID, Status: "审核中", Description: "退款申请已提交"}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&order).Update("status", models.TicketOrderStatusRefunding).Error
+		return nil
 	})
 	return refundNo, err
 }
@@ -2526,6 +2528,11 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	if order.Status != models.TicketOrderStatusUsable {
 		return &types.ScanOrderResponse{Success: false, ErrorCode: "INVALID_QR"}, nil
 	}
+	if hasActiveRefund, err := s.hasActiveRefund(ctx, order.ID); err != nil {
+		return &types.ScanOrderResponse{Success: false, ErrorCode: "INVALID_QR"}, nil
+	} else if hasActiveRefund {
+		return &types.ScanOrderResponse{Success: false, ErrorCode: "REFUND_PENDING"}, nil
+	}
 	var activity models.Activity
 	_ = s.DB.WithContext(ctx).First(&activity, order.ActivityID).Error
 	if !activity.StartTime.IsZero() && time.Now().Before(activity.StartTime.Add(-24*time.Hour)) {
@@ -2568,6 +2575,13 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 		}
 		if order.Status != models.TicketOrderStatusUsable {
 			return errors.New("订单不可核销")
+		}
+		var refundCount int64
+		if err := tx.Model(&models.Refund{}).Where("order_id = ? AND status IN ?", order.ID, []int8{models.RefundStatusAuditing, models.RefundStatusRunning}).Count(&refundCount).Error; err != nil {
+			return err
+		}
+		if refundCount > 0 {
+			return errors.New("订单售后处理中，暂不可核销")
 		}
 		if err := tx.Model(&order).Update("status", models.TicketOrderStatusUsed).Error; err != nil {
 			return err
@@ -3060,6 +3074,95 @@ func (s *TicketingService) markZeroPayOrderUsable(ctx context.Context, orderID i
 			"pay_method": payMethod,
 			"pay_time":   nowPaid,
 		}).Error
+}
+
+func (s *TicketingService) expireUserPendingTicketOrders(ctx context.Context, userID int64) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var orders []models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND status = ? AND actual_price > 0 AND expire_time <= ?", userID, models.TicketOrderStatusPending, time.Now()).
+			Find(&orders).Error; err != nil {
+			return err
+		}
+		for i := range orders {
+			if err := cancelPendingTicketOrderTx(tx, &orders[i], "超时未支付自动取消"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func cancelPendingTicketOrderTx(tx *gorm.DB, order *models.TicketOrder, reason string) error {
+	if order.Status != models.TicketOrderStatusPending {
+		return errors.New("当前订单不可取消")
+	}
+	if err := tx.Model(&models.TicketSpec{}).Where("id = ?", order.TicketSpecID).
+		UpdateColumn("sold_count", gorm.Expr("GREATEST(sold_count - ?, 0)", order.Quantity)).Error; err != nil {
+		return err
+	}
+	if err := returnOrderDeductedPointsTx(tx, *order); err != nil {
+		return err
+	}
+	if err := tx.Model(&models.PayRecord{}).Where("order_sn = ? AND pay_status = 0", order.OrderNo).Update("pay_status", 4).Error; err != nil {
+		return err
+	}
+	return tx.Model(order).Updates(map[string]any{
+		"status":        models.TicketOrderStatusCancelled,
+		"cancel_reason": reason,
+	}).Error
+}
+
+func returnOrderDeductedPointsTx(tx *gorm.DB, order models.TicketOrder) error {
+	if order.PointsAmount <= 0 {
+		return nil
+	}
+	var exists int64
+	if err := tx.Model(&models.PointsLog{}).
+		Where("user_id = ? AND source_id = ? AND change_type = ?", uint64(order.UserID), order.OrderNo, models.TypeOrderRefund).
+		Count(&exists).Error; err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	var account models.UserPoint
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uint64(order.UserID)).First(&account).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		account = models.UserPoint{UserID: uint64(order.UserID), Balance: 0}
+		if err := tx.Create(&account).Error; err != nil {
+			return err
+		}
+	}
+	newBalance := account.Balance + order.PointsAmount
+	if err := tx.Model(&models.UserPoint{}).Where("user_id = ?", uint64(order.UserID)).Updates(map[string]any{
+		"balance":    newBalance,
+		"total_used": gorm.Expr("GREATEST(total_used - ?, 0)", order.PointsAmount),
+	}).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.PointsLog{
+		UserID:     uint64(order.UserID),
+		Amount:     order.PointsAmount,
+		Balance:    newBalance,
+		ChangeType: models.TypeOrderRefund,
+		SourceID:   order.OrderNo,
+		Remark:     "待支付订单取消返还积分抵扣",
+		Status:     1,
+	}).Error
+}
+
+func (s *TicketingService) hasActiveRefund(ctx context.Context, orderID int64) (bool, error) {
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.Refund{}).
+		Where("order_id = ? AND status IN ?", orderID, []int8{models.RefundStatusAuditing, models.RefundStatusRunning}).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func zeroPayMethod(pointsAmount int64) string {
