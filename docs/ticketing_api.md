@@ -1504,6 +1504,9 @@ POST /api/v1/pay/prepay
 
 - 票务支付只需要传 `order_no`
 - 后端会从 `ticket_orders` 读取金额，前端不需要传 `amount`
+- 仅 `status=0` 待支付订单可发起预支付
+- 若订单已超过 `expire_time`，后端会自动取消订单、关闭待支付流水、返还抵扣积分，并返回错误
+- 同一 `order_no` 作为微信 `out_trade_no`，微信侧不会产生两笔同订单支付；后端支付回调也按订单状态幂等处理
 - 微信支付成功回调后，后端会把 `ticket_orders.status` 从 `0` 更新为 `1`
 - `pay_method` 会写入微信回调里的交易类型，`pay_time` 写入回调处理时间
 
@@ -1638,6 +1641,24 @@ POST /api/v1/order/:order_no/cancel
   "reason_id": 1
 }
 ```
+
+说明：
+
+- 仅 `status=0` 待支付订单允许用户主动取消。
+- 取消后订单状态更新为 `3` 已取消。
+- 后端会回滚票券 `sold_count`。
+- 如果下单时使用了积分抵扣，后端会把 `points_amount` 返还到积分余额，并写入积分流水。
+- 同一订单积分返还按 `order_no + TypeOrderRefund` 做幂等，避免重复返还。
+
+### 待支付订单自动取消
+
+规则：
+
+- 创建票务订单时 `expire_time = created_at + 15 分钟`。
+- API 服务启动后每分钟扫描过期票务订单，自动取消 `status=0 AND actual_price>0 AND expire_time<=now` 的订单。
+- 用户查询订单列表、查询订单详情、继续支付时，也会兜底触发当前用户过期待支付订单取消。
+- 自动取消同样会回滚票券销量、关闭待支付流水、返还抵扣积分。
+- 过期后调用 `POST /api/v1/pay/prepay` 会返回错误，不再创建新的微信预支付。
 
 ### 删除订单
 
@@ -1851,11 +1872,18 @@ Authorization: Bearer <access_token>
 后端处理逻辑：
 
 - 校验退款单必须是 `status=0` 审核中
-- 校验对应票务订单必须是 `status=4` 退款中
+- 校验对应票务订单必须是 `status=1` 待使用或 `status=4` 退款中
+- 审核通过发起微信退款时，后端才会把订单状态更新为 `4` 退款中
 - 校验支付流水 `pay_records.pay_status=2`
 - 调用微信支付退款 API：`/v3/refund/domestic/refunds`
 - 微信受理后把 `refunds.status` 更新为 `1` 退款中
 - 微信退款成功回调后把 `refunds.status` 更新为 `2`，订单状态更新为 `5`
+
+### 退款状态展示口径
+
+- 用户提交退款申请后，主订单 `status` 暂不改成 `4`；列表/详情通过 `refund_status=pending_review` 和 `refund_status_text=待审核` 展示售后状态。
+- 商家/管理员审核通过并发起退款后，主订单 `status` 才进入 `4` 退款中，同时 `refund_status=refunding`。
+- 核销时如果订单存在 `待审核` 或 `退款中` 退款单，后端会拒绝核销。
 
 ### 同步微信退款状态
 

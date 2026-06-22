@@ -1,11 +1,14 @@
 package server
 
 import (
+	"Hyper/models"
 	"Hyper/pkg/log"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // StartOrderCancelTask 启动定时取消超时未支付订单的后台任务
@@ -17,6 +20,7 @@ func StartOrderCancelTask(db *gorm.DB, expireMinutes int) {
 
 		for range ticker.C {
 			cancelExpiredOrders(db, expireMinutes)
+			cancelExpiredTicketOrders(db)
 		}
 	}()
 }
@@ -60,4 +64,86 @@ func cancelExpiredOrders(db *gorm.DB, expireMinutes int) {
 			log.L.Error("取消过期订单失败", zap.String("order_sn", orderSn), zap.Error(err))
 		}
 	}
+}
+
+func cancelExpiredTicketOrders(db *gorm.DB) {
+	var orders []models.TicketOrder
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("status = ? AND actual_price > 0 AND expire_time <= ?", models.TicketOrderStatusPending, time.Now()).
+		Find(&orders).Error; err != nil {
+		log.L.Error("查询过期票务订单失败", zap.Error(err))
+		return
+	}
+	for i := range orders {
+		order := orders[i]
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var locked models.TicketOrder
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", order.ID).First(&locked).Error; err != nil {
+				return err
+			}
+			if locked.Status != models.TicketOrderStatusPending {
+				return nil
+			}
+			if err := tx.Model(&models.TicketSpec{}).Where("id = ?", locked.TicketSpecID).
+				UpdateColumn("sold_count", gorm.Expr("GREATEST(sold_count - ?, 0)", locked.Quantity)).Error; err != nil {
+				return err
+			}
+			if err := returnTicketOrderPoints(tx, locked); err != nil {
+				return err
+			}
+			if err := tx.Model(&locked).Updates(map[string]any{
+				"status":        models.TicketOrderStatusCancelled,
+				"cancel_reason": "超时未支付自动取消",
+			}).Error; err != nil {
+				return err
+			}
+			tx.Model(&models.PayRecord{}).Where("order_sn = ? AND pay_status = 0", locked.OrderNo).Update("pay_status", 4)
+			return nil
+		})
+		if err != nil {
+			log.L.Error("取消过期票务订单失败", zap.String("order_no", order.OrderNo), zap.Error(err))
+		}
+	}
+}
+
+func returnTicketOrderPoints(tx *gorm.DB, order models.TicketOrder) error {
+	if order.PointsAmount <= 0 {
+		return nil
+	}
+	var exists int64
+	if err := tx.Model(&models.PointsLog{}).
+		Where("user_id = ? AND source_id = ? AND change_type = ?", uint64(order.UserID), order.OrderNo, models.TypeOrderRefund).
+		Count(&exists).Error; err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	var account models.UserPoint
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uint64(order.UserID)).First(&account).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		account = models.UserPoint{UserID: uint64(order.UserID), Balance: 0}
+		if err := tx.Create(&account).Error; err != nil {
+			return err
+		}
+	}
+	newBalance := account.Balance + order.PointsAmount
+	if err := tx.Model(&models.UserPoint{}).Where("user_id = ?", uint64(order.UserID)).Updates(map[string]any{
+		"balance":    newBalance,
+		"total_used": gorm.Expr("GREATEST(total_used - ?, 0)", order.PointsAmount),
+	}).Error; err != nil {
+		return err
+	}
+	return tx.Create(&models.PointsLog{
+		UserID:     uint64(order.UserID),
+		Amount:     order.PointsAmount,
+		Balance:    newBalance,
+		ChangeType: models.TypeOrderRefund,
+		SourceID:   order.OrderNo,
+		Remark:     "待支付订单超时取消返还积分抵扣",
+		Status:     1,
+	}).Error
 }

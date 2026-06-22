@@ -365,6 +365,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	appProvider := &server.AppProvider{
 		Config: cfg,
 		Engine: engine,
+		DB:     db,
 	}
 	return appProvider
 }

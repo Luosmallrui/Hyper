@@ -20,11 +20,13 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 )
 
 type AppProvider struct {
 	Config *config.Config
 	Engine *gin.Engine
+	DB     *gorm.DB
 }
 
 var (
@@ -132,6 +134,9 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 		zap.Int("port", app.Config.Server.Http),
 		zap.String("env", "prod"),
 	)
+	if app.DB != nil {
+		StartOrderCancelTask(app.DB, 15)
+	}
 
 	return run(c, eg, groupCtx, app)
 }
