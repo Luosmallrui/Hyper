@@ -21,7 +21,7 @@ func (s *AdminService) GetAdminProfile(ctx context.Context, adminID int64) (*typ
 	if err := s.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
 		return nil, err
 	}
-	return &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, Status: admin.Status, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}, nil
+	return &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, RoleID: admin.RoleID, Status: admin.Status, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}, nil
 }
 
 func (s *AdminService) UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error {
@@ -72,7 +72,10 @@ func (s *AdminService) CreateAdmin(ctx context.Context, req types.AdminAccountRe
 	if req.Status == 0 {
 		req.Status = models.AdminStatusNormal
 	}
-	admin := models.Admin{Username: req.Username, Password: encrypt.HashPassword(req.Password), Avatar: req.Avatar, Mobile: req.Mobile, Email: req.Email, Status: req.Status}
+	if err := s.validateAdminRole(ctx, req.RoleID); err != nil {
+		return 0, err
+	}
+	admin := models.Admin{Username: req.Username, Password: encrypt.HashPassword(req.Password), Avatar: req.Avatar, Mobile: req.Mobile, Email: req.Email, RoleID: req.RoleID, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&admin).Error; err != nil {
 		return 0, err
 	}
@@ -80,7 +83,10 @@ func (s *AdminService) CreateAdmin(ctx context.Context, req types.AdminAccountRe
 }
 
 func (s *AdminService) UpdateAdmin(ctx context.Context, id int64, req types.AdminAccountRequest) error {
-	updates := map[string]any{"username": req.Username, "avatar": req.Avatar, "mobile": req.Mobile, "email": req.Email}
+	if err := s.validateAdminRole(ctx, req.RoleID); err != nil {
+		return err
+	}
+	updates := map[string]any{"username": req.Username, "avatar": req.Avatar, "mobile": req.Mobile, "email": req.Email, "role_id": req.RoleID}
 	if req.Status != 0 {
 		updates["status"] = req.Status
 	}
@@ -88,6 +94,20 @@ func (s *AdminService) UpdateAdmin(ctx context.Context, id int64, req types.Admi
 		updates["password"] = encrypt.HashPassword(req.Password)
 	}
 	return s.DB.WithContext(ctx).Model(&models.Admin{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (s *AdminService) validateAdminRole(ctx context.Context, roleID int64) error {
+	if roleID == 0 {
+		return nil
+	}
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.AdminRole{}).Where("id = ? AND status = 1", roleID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("管理员角色不存在或已停用")
+	}
+	return nil
 }
 
 func (s *AdminService) DeleteAdmin(ctx context.Context, id int64) error {
@@ -148,6 +168,84 @@ func (s *AdminService) ListOperationLogs(ctx context.Context, page, pageSize int
 		return nil, err
 	}
 	return &types.AdminPageResponse[models.AdminOperationLog]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) RecordOperationLog(ctx context.Context, item models.AdminOperationLog) error {
+	return s.DB.WithContext(ctx).Create(&item).Error
+}
+
+func (s *AdminService) CheckPermission(ctx context.Context, adminID int64, method, path string) error {
+	var admin models.Admin
+	if err := s.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
+		return err
+	}
+	if admin.Status != models.AdminStatusNormal {
+		return errors.New("管理员账号已停用")
+	}
+	if admin.RoleID == 0 {
+		return nil
+	}
+	var role models.AdminRole
+	if err := s.DB.WithContext(ctx).Where("id = ? AND status = 1", admin.RoleID).First(&role).Error; err != nil {
+		return errors.New("管理员角色不存在或已停用")
+	}
+	permissions := parsePermissions(role.Permissions)
+	if permissions["*"] || permissions[strings.ToUpper(method)+":"+path] || permissions[adminPermissionModule(path)] {
+		return nil
+	}
+	return errors.New("无权执行该操作")
+}
+
+func parsePermissions(raw string) map[string]bool {
+	result := map[string]bool{}
+	var values []string
+	if json.Unmarshal([]byte(raw), &values) != nil {
+		values = strings.Split(raw, ",")
+	}
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result[value] = true
+		}
+	}
+	return result
+}
+
+func adminPermissionModule(path string) string {
+	trimmed := strings.TrimPrefix(path, "/v1/admin/")
+	module := strings.SplitN(trimmed, "/", 2)[0]
+	if module == "" {
+		return "admin"
+	}
+	return "admin." + module
+}
+
+func (s *AdminService) GetPointsRule(ctx context.Context) (*types.PointsRule, error) {
+	return loadPointsRule(ctx, s.DB)
+}
+
+func (s *AdminService) UpdatePointsRule(ctx context.Context, req types.UpdatePointsRuleRequest) error {
+	if req.DiscountCentsPerPoint <= 0 || req.RewardCentsPerPoint <= 0 {
+		return errors.New("积分规则必须大于 0")
+	}
+	settings := []models.PlatformSetting{
+		{Key: pointsDiscountSettingKey, Value: fmt.Sprintf("%d", req.DiscountCentsPerPoint), Remark: "每积分可抵扣金额，单位分"},
+		{Key: pointsRewardSettingKey, Value: fmt.Sprintf("%d", req.RewardCentsPerPoint), Remark: "消费多少分奖励1积分"},
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, setting := range settings {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "setting_key"}},
+				DoUpdates: clause.Assignments(map[string]any{
+					"setting_value": setting.Value,
+					"remark":        setting.Remark,
+					"updated_at":    time.Now(),
+				}),
+			}).Create(&setting).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *AdminService) ListCategories(ctx context.Context, page, pageSize int, categoryType string) (*types.AdminPageResponse[models.AdminCategory], error) {
@@ -351,6 +449,22 @@ func (s *AdminService) ListNoteRecords(ctx context.Context, recordType string, p
 	}
 }
 
+func (s *AdminService) UpdateCommentStatus(ctx context.Context, noteID, commentID int64, status int8) error {
+	if status != -1 && status != 0 && status != 1 {
+		return errors.New("评论状态仅支持 -1删除、0隐藏、1公开")
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Comment{}).
+		Where("id = ? AND note_id = ?", commentID, noteID).
+		Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func (s *AdminService) ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	query := s.DB.WithContext(ctx).Table("point_logs pl").Select("pl.*, u.nickname, u.mobile").Joins("LEFT JOIN users u ON u.id = pl.user_id")
@@ -504,26 +618,45 @@ func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int) (*t
 	return &types.AdminPageResponse[models.PlatformMessage]{List: list, Total: total, Page: page, PageSize: pageSize}, err
 }
 
+func (s *AdminService) ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, status *int8) (*types.AdminPageResponse[map[string]any], error) {
+	page, pageSize = normalizeAdminPage(page, pageSize)
+	query := s.DB.WithContext(ctx).Table("platform_message_deliveries d").
+		Select("d.*, u.nickname, u.avatar, u.mobile").
+		Joins("LEFT JOIN users u ON u.id = d.user_id").
+		Where("d.message_id = ?", messageID)
+	if status != nil {
+		query = query.Where("d.status = ?", *status)
+	}
+	return adminMapPage(query.Order("d.id desc"), page, pageSize)
+}
+
 func (s *AdminService) CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error) {
 	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, Type: req.Type, Target: req.Target, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&msg).Error; err != nil {
 		return 0, err
 	}
 	if req.Status == 1 {
-		if err := s.publishPlatformMessage(ctx, msg, req); err != nil {
+		targetIDs, err := s.resolvePlatformMessageTargets(ctx, req)
+		if err != nil {
+			return msg.ID, err
+		}
+		deliveries := make([]models.PlatformMessageDelivery, 0, len(targetIDs))
+		for _, targetID := range targetIDs {
+			deliveries = append(deliveries, models.PlatformMessageDelivery{MessageID: msg.ID, UserID: targetID})
+		}
+		if err := s.DB.WithContext(ctx).Create(&deliveries).Error; err != nil {
+			return msg.ID, err
+		}
+		if err := s.publishPlatformMessage(ctx, msg, targetIDs); err != nil {
 			return msg.ID, err
 		}
 	}
 	return msg.ID, nil
 }
 
-func (s *AdminService) publishPlatformMessage(ctx context.Context, msg models.PlatformMessage, req types.PlatformMessageRequest) error {
+func (s *AdminService) publishPlatformMessage(ctx context.Context, msg models.PlatformMessage, targetIDs []int64) error {
 	if s.MqProducer == nil {
 		return errors.New("消息队列未初始化")
-	}
-	targetIDs, err := s.resolvePlatformMessageTargets(ctx, req)
-	if err != nil {
-		return err
 	}
 	for _, targetID := range targetIDs {
 		payload := types.PlatformMessagePayload{
@@ -539,8 +672,15 @@ func (s *AdminService) publishPlatformMessage(ctx context.Context, msg models.Pl
 		event := types.SystemMessage{Type: "platform_message", Data: json.RawMessage(data)}
 		body, _ := json.Marshal(event)
 		if _, err := s.MqProducer.Send(ctx, &rmq_client.Message{Topic: types.SystemMessageTopic, Body: body}); err != nil {
+			_ = s.DB.WithContext(ctx).Model(&models.PlatformMessageDelivery{}).
+				Where("message_id = ? AND user_id = ?", msg.ID, targetID).
+				Updates(map[string]any{"status": 2, "error": err.Error()}).Error
 			return err
 		}
+		now := time.Now()
+		_ = s.DB.WithContext(ctx).Model(&models.PlatformMessageDelivery{}).
+			Where("message_id = ? AND user_id = ?", msg.ID, targetID).
+			Updates(map[string]any{"status": 1, "sent_at": now, "error": ""}).Error
 	}
 	return nil
 }

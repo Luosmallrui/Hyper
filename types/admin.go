@@ -1,6 +1,9 @@
 package types
 
-import "Hyper/models"
+import (
+	"Hyper/models"
+	"time"
+)
 
 // AdminLoginRequest 管理员登录请求
 type AdminLoginRequest struct {
@@ -175,6 +178,7 @@ type AdminOrganizerItem struct {
 	Name           string  `json:"name"`
 	Logo           string  `json:"logo"`
 	Status         int8    `json:"status"`
+	Enabled        int8    `json:"enabled"`
 	RejectReason   string  `json:"reject_reason"`
 	Level          string  `json:"level"`
 	ServiceFeeRate float64 `json:"service_fee_rate"`
@@ -183,6 +187,16 @@ type AdminOrganizerItem struct {
 	District       string  `json:"district"`
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
+}
+
+type AdminActivityFilter struct {
+	Status        *int8
+	Keyword       string
+	OrganizerID   int64
+	PublishedFrom *time.Time
+	PublishedTo   *time.Time
+	ActivityFrom  *time.Time
+	ActivityTo    *time.Time
 }
 
 // AdminOrganizerDetail 管理后台入驻申请详情

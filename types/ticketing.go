@@ -10,6 +10,15 @@ type PageResponse[T any] struct {
 	Total int64 `json:"total"`
 }
 
+type ActivityListFilter struct {
+	Keyword       string
+	Status        *int8
+	PublishedFrom *time.Time
+	PublishedTo   *time.Time
+	ActivityFrom  *time.Time
+	ActivityTo    *time.Time
+}
+
 type OrganizerApplyRequest struct {
 	Name     string `json:"name" binding:"required"`
 	Type     string `json:"type" binding:"required,oneof=venue merchant"`
@@ -26,8 +35,10 @@ type OrganizerApplyResponse struct {
 }
 
 type OrganizerAuditStatusResponse struct {
+	OrganizerID  int64      `json:"organizer_id,omitempty"`
 	Type         string     `json:"type,omitempty"`
 	Status       int8       `json:"status"`
+	Enabled      int8       `json:"enabled"`
 	RejectReason string     `json:"reject_reason"`
 	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
 	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`

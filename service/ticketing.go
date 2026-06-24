@@ -16,6 +16,7 @@ import (
 	"image/color"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 type ITicketingService interface {
 	GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error)
+	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
 	ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) (*types.OrganizerApplyResponse, error)
 	GetOrganizerAuditStatus(ctx context.Context, userID int64) (*types.OrganizerAuditStatusResponse, error)
 	UpdateOrganizerBasic(ctx context.Context, userID int64, req types.OrganizerBasicRequest) error
@@ -66,7 +68,7 @@ type ITicketingService interface {
 	UnsubscribeActivity(ctx context.Context, userID, activityID int64) error
 	ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
 	SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error)
-	GetMyActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
+	GetMyActivities(ctx context.Context, userID int64, page, size int, filter types.ActivityListFilter) (*types.PageResponse[types.ActivityListItem], error)
 	SearchActivities(ctx context.Context, keyword string) ([]types.ActivityListItem, error)
 	DeleteActivity(ctx context.Context, userID, activityID int64) error
 	SubmitActivityAudit(ctx context.Context, userID, activityID int64) error
@@ -119,11 +121,11 @@ type TicketingService struct {
 var _ ITicketingService = (*TicketingService)(nil)
 
 func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error) {
-	org, err := s.findOrganizerByUser(ctx, userID)
-	if err != nil {
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error; err != nil {
 		return nil, err
 	}
-	resp := buildOrganizerInfo(org)
+	resp := buildOrganizerInfo(&org)
 	if err := s.fillOrganizerLevelInfo(ctx, org.ID, resp); err != nil {
 		return nil, err
 	}
@@ -192,8 +194,10 @@ func (s *TicketingService) GetOrganizerAuditStatus(ctx context.Context, userID i
 		return nil, err
 	}
 	resp := &types.OrganizerAuditStatusResponse{
+		OrganizerID:  org.ID,
 		Type:         org.Type,
 		Status:       org.Status,
+		Enabled:      org.Enabled,
 		RejectReason: org.RejectReason,
 		SubmittedAt:  &org.CreatedAt,
 	}
@@ -515,7 +519,8 @@ func (s *TicketingService) ListOrganizerMessages(ctx context.Context, userID int
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Table("platform_messages pm").
 		Joins("LEFT JOIN organizer_message_reads omr ON omr.message_id = pm.id AND omr.organizer_id = ?", org.ID).
-		Where("pm.status = 1 AND (pm.target IN ? OR pm.target = ?)", []string{"merchant", "organizer", "business", "all"}, "")
+		Joins("LEFT JOIN platform_message_deliveries pmd ON pmd.message_id = pm.id AND pmd.user_id = ?", userID).
+		Where("pm.status = 1 AND (pm.target IN ? OR pm.target = ?) AND (pmd.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM platform_message_deliveries any_delivery WHERE any_delivery.message_id = pm.id))", []string{"merchant", "organizer", "business", "all"}, "")
 	if unreadOnly {
 		query = query.Where("COALESCE(omr.is_read,0) = 0")
 	}
@@ -551,7 +556,14 @@ func (s *TicketingService) MarkOrganizerMessageRead(ctx context.Context, userID,
 	}
 	now := time.Now()
 	row := models.OrganizerMessageRead{OrganizerID: org.ID, MessageID: messageID, IsRead: 1, ReadAt: &now}
-	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&row).Error
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&row).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.PlatformMessageDelivery{}).
+			Where("message_id = ? AND user_id = ?", messageID, userID).
+			Updates(map[string]any{"status": 3, "read_at": now}).Error
+	})
 }
 
 func (s *TicketingService) MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error) {
@@ -561,7 +573,7 @@ func (s *TicketingService) MarkAllOrganizerMessagesRead(ctx context.Context, use
 	}
 	var messageIDs []int64
 	if err := s.DB.WithContext(ctx).Model(&models.PlatformMessage{}).
-		Where("status = 1 AND (target IN ? OR target = ?)", []string{"merchant", "organizer", "business", "all"}, "").
+		Where("status = 1 AND (target IN ? OR target = ?) AND (EXISTS (SELECT 1 FROM platform_message_deliveries d WHERE d.message_id = platform_messages.id AND d.user_id = ?) OR NOT EXISTS (SELECT 1 FROM platform_message_deliveries any_delivery WHERE any_delivery.message_id = platform_messages.id))", []string{"merchant", "organizer", "business", "all"}, "", userID).
 		Pluck("id", &messageIDs).Error; err != nil {
 		return nil, err
 	}
@@ -574,6 +586,11 @@ func (s *TicketingService) MarkAllOrganizerMessagesRead(ctx context.Context, use
 		rows = append(rows, models.OrganizerMessageRead{OrganizerID: org.ID, MessageID: messageID, IsRead: 1, ReadAt: &now})
 	}
 	if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}, {Name: "message_id"}}, DoUpdates: clause.Assignments(map[string]any{"is_read": 1, "read_at": now, "updated_at": now})}).Create(&rows).Error; err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.PlatformMessageDelivery{}).
+		Where("message_id IN ? AND user_id = ?", messageIDs, userID).
+		Updates(map[string]any{"status": 3, "read_at": now}).Error; err != nil {
 		return nil, err
 	}
 	return &types.OrganizerReadAllResponse{UpdatedCount: int64(len(messageIDs))}, nil
@@ -1300,7 +1317,7 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 	return &types.PageResponse[types.ActivityListItem]{List: list, Total: total}, nil
 }
 
-func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error) {
+func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, page, size int, filter types.ActivityListFilter) (*types.PageResponse[types.ActivityListItem], error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1309,6 +1326,25 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 		return nil, err
 	}
 	query := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("organizer_id = ?", org.ID)
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("name LIKE ? OR address LIKE ?", like, like)
+	}
+	if filter.Status != nil {
+		query = query.Where("status = ?", *filter.Status)
+	}
+	if filter.PublishedFrom != nil {
+		query = query.Where("created_at >= ?", *filter.PublishedFrom)
+	}
+	if filter.PublishedTo != nil {
+		query = query.Where("created_at <= ?", *filter.PublishedTo)
+	}
+	if filter.ActivityFrom != nil {
+		query = query.Where("end_time >= ?", *filter.ActivityFrom)
+	}
+	if filter.ActivityTo != nil {
+		query = query.Where("start_time <= ?", *filter.ActivityTo)
+	}
 	return s.listActivities(query, page, size)
 }
 
@@ -1502,7 +1538,11 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 				return errors.New("积分抵扣数量必须大于0")
 			}
 			pointsAmount = req.PointsAmount
-			pointsDiscount = pointsAmount * 10
+			rule, err := loadPointsRule(ctx, tx)
+			if err != nil {
+				return err
+			}
+			pointsDiscount = pointsAmount * rule.DiscountCentsPerPoint
 			if pointsDiscount > totalPrice {
 				return errors.New("积分抵扣金额超过订单金额")
 			}
@@ -1591,6 +1631,41 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		return nil
 	})
 	return result, err
+}
+
+const (
+	pointsDiscountSettingKey = "points_discount_cents_per_point"
+	pointsRewardSettingKey   = "points_reward_cents_per_point"
+)
+
+func (s *TicketingService) GetPointsRule(ctx context.Context) (*types.PointsRule, error) {
+	return loadPointsRule(ctx, s.DB)
+}
+
+func loadPointsRule(ctx context.Context, db *gorm.DB) (*types.PointsRule, error) {
+	rule := &types.PointsRule{
+		DiscountCentsPerPoint: 10,
+		RewardCentsPerPoint:   1000,
+	}
+	var rows []models.PlatformSetting
+	if err := db.WithContext(ctx).
+		Where("setting_key IN ?", []string{pointsDiscountSettingKey, pointsRewardSettingKey}).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		value, err := strconv.ParseInt(strings.TrimSpace(row.Value), 10, 64)
+		if err != nil || value <= 0 {
+			continue
+		}
+		switch row.Key {
+		case pointsDiscountSettingKey:
+			rule.DiscountCentsPerPoint = value
+		case pointsRewardSettingKey:
+			rule.RewardCentsPerPoint = value
+		}
+	}
+	return rule, nil
 }
 
 func (s *TicketingService) resolveOrderViewers(tx *gorm.DB, userID int64, req types.CreateTicketOrderRequest, quantity int, realNameMode, minorCheck bool) ([]models.TicketOrderViewer, error) {
@@ -2840,6 +2915,14 @@ func (s *TicketingService) DeleteStore(ctx context.Context, userID, storeID int6
 func (s *TicketingService) findOrganizerByUser(ctx context.Context, userID int64) (*models.Organizer, error) {
 	var org models.Organizer
 	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
+	if err == nil {
+		if org.Status != models.OrganizerStatusApproved {
+			return &org, errors.New("商家尚未审核通过")
+		}
+		if org.Enabled != 1 {
+			return &org, errors.New("商家账号已停用")
+		}
+	}
 	return &org, err
 }
 

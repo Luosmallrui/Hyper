@@ -79,6 +79,20 @@ type PlatformMessage struct {
 
 func (PlatformMessage) TableName() string { return "platform_messages" }
 
+type PlatformMessageDelivery struct {
+	ID        int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	MessageID int64      `gorm:"column:message_id;not null;uniqueIndex:uk_message_user,priority:1;index" json:"message_id"`
+	UserID    int64      `gorm:"column:user_id;not null;uniqueIndex:uk_message_user,priority:2;index" json:"user_id"`
+	Status    int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	SentAt    *time.Time `gorm:"column:sent_at" json:"sent_at"`
+	ReadAt    *time.Time `gorm:"column:read_at" json:"read_at"`
+	Error     string     `gorm:"column:error;size:255" json:"error"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (PlatformMessageDelivery) TableName() string { return "platform_message_deliveries" }
+
 type OrganizerMessageRead struct {
 	ID          int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID int64      `gorm:"column:organizer_id;not null;uniqueIndex:uk_org_msg,priority:1;index" json:"organizer_id"`

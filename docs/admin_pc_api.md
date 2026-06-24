@@ -172,6 +172,7 @@ other             其它分类
 | 商家列表 | GET | `/organizers?status=&type=` |
 | 商家详情 | GET | `/organizers/:id` |
 | 商家审核 | PUT | `/organizers/:id/audit` |
+| 商家启停 | PATCH | `/organizers/:id/status` |
 | 删除商家 | DELETE | `/organizers/:id` |
 | 活动列表 | GET | `/activities?status=&keyword=&organizer_id=` |
 | 活动详情 | GET | `/activities/:id` |
@@ -242,6 +243,7 @@ other             其它分类
 | 收藏记录 | GET | `/notes/:id/records/collections` |
 | 评论记录 | GET | `/notes/:id/records/comments` |
 | 分享记录 | GET | `/notes/:id/records/shares` |
+| 评论隐藏/公开/删除 | PATCH | `/notes/:id/comments/:comment_id/status` |
 
 更新动态状态：
 
@@ -257,6 +259,7 @@ other             其它分类
 |---|---|---|
 | 消息列表 | GET | `/messages` |
 | 发布消息 | POST | `/messages` |
+| 消息发送/阅读记录 | GET | `/messages/:id/records` |
 
 请求：
 
@@ -314,6 +317,8 @@ POST /api/v1/admin/messages
 | 功能 | 方法 | 路径 |
 |---|---|---|
 | 积分流水 | GET | `/points/logs?user_id=` |
+| 积分规则 | GET | `/points/rules` |
+| 更新积分规则 | PUT | `/points/rules` |
 | 财务汇总 | GET | `/finance/summary` |
 | 商家对账 | GET | `/finance/settlements?organizer_id=` |
 | 商家提现列表 | GET | `/withdraws?status=&organizer_id=` |

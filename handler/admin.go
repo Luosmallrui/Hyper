@@ -3,12 +3,15 @@ package handler
 import (
 	"Hyper/config"
 	"Hyper/middleware"
+	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
 	"errors"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +31,8 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 
 	authorized := g.Group("")
 	authorized.Use(adminAuth)
+	authorized.Use(a.permissionMiddleware())
+	authorized.Use(a.operationLogMiddleware())
 	{
 		// 入驻申请管理
 		authorized.GET("/profile", context.Wrap(a.GetProfile))
@@ -50,6 +55,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/organizers", context.Wrap(a.GetOrganizerList))
 		authorized.GET("/organizers/:id", context.Wrap(a.GetOrganizerDetail))
 		authorized.PUT("/organizers/:id/audit", context.Wrap(a.AuditOrganizer))
+		authorized.PATCH("/organizers/:id/status", context.Wrap(a.UpdateOrganizerEnabled))
 		authorized.DELETE("/organizers/:id", context.Wrap(a.DeleteOrganizer))
 		authorized.POST("/wechat-subscribe", context.Wrap(a.BindWechatSubscribe))
 
@@ -94,7 +100,10 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/notes", context.Wrap(a.ListNotes))
 		authorized.PUT("/notes/:id/status", context.Wrap(a.UpdateNoteStatus))
 		authorized.GET("/notes/:id/records/:type", context.Wrap(a.ListNoteRecords))
+		authorized.PATCH("/notes/:id/comments/:comment_id/status", context.Wrap(a.UpdateCommentStatus))
 		authorized.GET("/points/logs", context.Wrap(a.ListPointLogs))
+		authorized.GET("/points/rules", context.Wrap(a.GetPointsRule))
+		authorized.PUT("/points/rules", context.Wrap(a.UpdatePointsRule))
 		authorized.GET("/withdraws", context.Wrap(a.ListWithdraws))
 		authorized.PUT("/withdraws/:id/audit", context.Wrap(a.AuditWithdraw))
 		authorized.GET("/bank-account-audits", context.Wrap(a.ListBankAccountAudits))
@@ -105,6 +114,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.DELETE("/organizer-level-rules/:id", context.Wrap(a.DeleteOrganizerLevelRule))
 		authorized.GET("/messages", context.Wrap(a.ListMessages))
 		authorized.POST("/messages", context.Wrap(a.CreateMessage))
+		authorized.GET("/messages/:id/records", context.Wrap(a.ListMessageDeliveries))
 
 		// 内容管理
 		authorized.GET("/banners", context.Wrap(a.ListBanners))
@@ -119,6 +129,38 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 
 		// 数据概览
 		authorized.GET("/dashboard", context.Wrap(a.GetDashboard))
+	}
+}
+
+func (a *Admin) permissionMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := a.AdminService.CheckPermission(c.Request.Context(), int64(c.GetInt("admin_id")), c.Request.Method, c.FullPath()); err != nil {
+			response.Abort(c, http.StatusForbidden, err.Error())
+			return
+		}
+		c.Next()
+	}
+}
+
+func (a *Admin) operationLogMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+		if c.Request.Method == http.MethodGet || c.Writer.Status() >= http.StatusBadRequest {
+			return
+		}
+		adminID := int64(c.GetInt("admin_id"))
+		if adminID == 0 {
+			return
+		}
+		_ = a.AdminService.RecordOperationLog(c.Request.Context(), models.AdminOperationLog{
+			AdminID:  adminID,
+			Action:   strings.ToLower(c.Request.Method),
+			Resource: c.FullPath(),
+			Method:   c.Request.Method,
+			Path:     c.Request.URL.Path,
+			IP:       c.ClientIP(),
+			Remark:   "status=" + strconv.Itoa(c.Writer.Status()),
+		})
 	}
 }
 
@@ -463,12 +505,52 @@ func (a *Admin) ListNoteRecords(c *gin.Context) error {
 	return nil
 }
 
+func (a *Admin) UpdateCommentStatus(c *gin.Context) error {
+	var req types.AdminCommentStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	commentID, err := strconv.ParseInt(c.Param("comment_id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "评论ID无效")
+	}
+	if err := a.AdminService.UpdateCommentStatus(c.Request.Context(), adminParamID(c), commentID, req.Status); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "评论不存在")
+		}
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
 func (a *Admin) ListPointLogs(c *gin.Context) error {
 	resp, err := a.AdminService.ListPointLogs(c.Request.Context(), adminPage(c), adminPageSize(c), adminQueryInt64(c, "user_id"))
 	if err != nil {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetPointsRule(c *gin.Context) error {
+	resp, err := a.AdminService.GetPointsRule(c.Request.Context())
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) UpdatePointsRule(c *gin.Context) error {
+	var req types.UpdatePointsRuleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.UpdatePointsRule(c.Request.Context(), req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
 	return nil
 }
 
@@ -597,6 +679,24 @@ func (a *Admin) CreateMessage(c *gin.Context) error {
 	return nil
 }
 
+func (a *Admin) ListMessageDeliveries(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "投递状态无效")
+		}
+		parsed := int8(value)
+		status = &parsed
+	}
+	resp, err := a.AdminService.ListMessageDeliveries(c.Request.Context(), adminParamID(c), adminPage(c), adminPageSize(c), status)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 // GetOrganizerList 获取入驻申请列表
 // GET /api/v1/admin/organizers?page=1&pageSize=20&status=1&type=venue
 func (a *Admin) GetOrganizerList(c *gin.Context) error {
@@ -650,6 +750,23 @@ func (a *Admin) AuditOrganizer(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, "审核完成")
+	return nil
+}
+
+func (a *Admin) UpdateOrganizerEnabled(c *gin.Context) error {
+	var req struct {
+		Enabled int8 `json:"enabled" binding:"oneof=0 1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := a.AdminService.UpdateOrganizerEnabled(c.Request.Context(), adminParamID(c), req.Enabled); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "商家不存在")
+		}
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"success": true, "enabled": req.Enabled})
 	return nil
 }
 
@@ -751,7 +868,16 @@ func (a *Admin) GetActivityList(c *gin.Context) error {
 		organizerID = v
 	}
 
-	result, err := a.AdminService.GetActivityList(c.Request.Context(), page, pageSize, status, keyword, organizerID)
+	filter := types.AdminActivityFilter{
+		Status:        status,
+		Keyword:       keyword,
+		OrganizerID:   organizerID,
+		PublishedFrom: adminQueryTime(c, "published_from"),
+		PublishedTo:   adminQueryTime(c, "published_to"),
+		ActivityFrom:  adminQueryTime(c, "activity_from"),
+		ActivityTo:    adminQueryTime(c, "activity_to"),
+	}
+	result, err := a.AdminService.GetActivityList(c.Request.Context(), page, pageSize, filter)
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}
@@ -1077,4 +1203,17 @@ func adminParamID(c *gin.Context) int64 {
 func adminQueryInt64(c *gin.Context, key string) int64 {
 	id, _ := strconv.ParseInt(c.Query(key), 10, 64)
 	return id
+}
+
+func adminQueryTime(c *gin.Context, key string) *time.Time {
+	raw := c.Query(key)
+	if raw == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		if value, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return &value
+		}
+	}
+	return nil
 }
