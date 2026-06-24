@@ -16,6 +16,7 @@ type AdminProfileResponse struct {
 	Mobile    string    `json:"mobile"`
 	Email     string    `json:"email"`
 	Motto     string    `json:"motto"`
+	RoleID    int64     `json:"role_id"`
 	Status    int8      `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -39,6 +40,7 @@ type AdminAccountRequest struct {
 	Avatar   string `json:"avatar"`
 	Mobile   string `json:"mobile"`
 	Email    string `json:"email"`
+	RoleID   int64  `json:"role_id"`
 	Status   int8   `json:"status"`
 }
 
@@ -104,4 +106,8 @@ type WithdrawAuditRequest struct {
 type BankAccountAuditRequest struct {
 	Status       int8   `json:"status" binding:"required"`
 	RejectReason string `json:"reject_reason"`
+}
+
+type AdminCommentStatusRequest struct {
+	Status int8 `json:"status" binding:"oneof=-1 0 1"`
 }

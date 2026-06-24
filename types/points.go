@@ -75,3 +75,13 @@ type ListPointRecordsReq struct {
 	Cursor int64 `form:"cursor"`                       // 分页游标 (ID)
 	Limit  int   `form:"limit,default=10"`             // 每页数量
 }
+
+type PointsRule struct {
+	DiscountCentsPerPoint int64 `json:"discount_cents_per_point"`
+	RewardCentsPerPoint   int64 `json:"reward_cents_per_point"`
+}
+
+type UpdatePointsRuleRequest struct {
+	DiscountCentsPerPoint int64 `json:"discount_cents_per_point" binding:"required,min=1"`
+	RewardCentsPerPoint   int64 `json:"reward_cents_per_point" binding:"required,min=1"`
+}

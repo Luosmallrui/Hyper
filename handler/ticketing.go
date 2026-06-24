@@ -30,6 +30,7 @@ type Ticketing struct {
 func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	auth := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	v1 := r.Group("/v1")
+	v1.GET("/points/rules", auth, h.wrap(h.GetPointsRule))
 
 	organizer := v1.Group("/organizer", auth)
 	{
@@ -139,6 +140,15 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	}
 
 	v1.POST("/upload", auth, h.wrap(h.UploadFile))
+}
+
+func (h *Ticketing) GetPointsRule(c *gin.Context) error {
+	resp, err := h.TicketingService.GetPointsRule(c.Request.Context())
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
 }
 
 func (h *Ticketing) wrap(fn func(*gin.Context) error) gin.HandlerFunc {
@@ -720,11 +730,41 @@ func (h *Ticketing) ListSubscribedActivities(c *gin.Context) error {
 }
 
 func (h *Ticketing) GetMyActivities(c *gin.Context) error {
-	resp, err := h.TicketingService.GetMyActivities(c.Request.Context(), currentUserID(c), page(c), size(c))
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "活动状态无效")
+		}
+		parsed := int8(value)
+		status = &parsed
+	}
+	filter := types.ActivityListFilter{
+		Keyword:       c.Query("keyword"),
+		Status:        status,
+		PublishedFrom: queryTime(c, "published_from"),
+		PublishedTo:   queryTime(c, "published_to"),
+		ActivityFrom:  queryTime(c, "activity_from"),
+		ActivityTo:    queryTime(c, "activity_to"),
+	}
+	resp, err := h.TicketingService.GetMyActivities(c.Request.Context(), currentUserID(c), page(c), size(c), filter)
 	if err != nil {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func queryTime(c *gin.Context, key string) *time.Time {
+	raw := c.Query(key)
+	if raw == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		if value, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return &value
+		}
+	}
 	return nil
 }
 

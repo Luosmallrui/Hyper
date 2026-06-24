@@ -25,7 +25,8 @@ type IAdminService interface {
 	GetPartyList(ctx context.Context, page, pageSize int, keyword, partyType string) (*types.AdminPartyListResponse, error)
 	GetPartyDetail(ctx context.Context, partyID int64) (*types.AdminPartyDetail, error)
 	UpdatePartyStatus(ctx context.Context, partyID int64, status string) error
-	GetActivityList(ctx context.Context, page, pageSize int, status *int8, keyword string, organizerID int64) (*types.AdminActivityListResponse, error)
+	GetActivityList(ctx context.Context, page, pageSize int, filter types.AdminActivityFilter) (*types.AdminActivityListResponse, error)
+	UpdateOrganizerEnabled(ctx context.Context, organizerID int64, enabled int8) error
 	GetActivityDetail(ctx context.Context, activityID int64) (*types.AdminActivityDetail, error)
 	AuditActivity(ctx context.Context, activityID int64, req types.AdminAuditActivityRequest) error
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
@@ -58,6 +59,8 @@ type IAdminService interface {
 	SaveRole(ctx context.Context, id int64, req types.AdminRoleRequest) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	ListOperationLogs(ctx context.Context, page, pageSize int, adminID int64, keyword string) (*types.AdminPageResponse[models.AdminOperationLog], error)
+	RecordOperationLog(ctx context.Context, log models.AdminOperationLog) error
+	CheckPermission(ctx context.Context, adminID int64, method, path string) error
 	ListCategories(ctx context.Context, page, pageSize int, categoryType string) (*types.AdminPageResponse[models.AdminCategory], error)
 	SaveCategory(ctx context.Context, id int64, req types.AdminCategoryRequest) (int64, error)
 	DeleteCategory(ctx context.Context, id int64) error
@@ -72,6 +75,7 @@ type IAdminService interface {
 	ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error)
 	UpdateNoteStatus(ctx context.Context, noteID int64, status int) error
 	ListNoteRecords(ctx context.Context, recordType string, page, pageSize int, noteID int64) (*types.AdminPageResponse[map[string]any], error)
+	UpdateCommentStatus(ctx context.Context, noteID, commentID int64, status int8) error
 	ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error)
 	ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error
@@ -81,7 +85,10 @@ type IAdminService interface {
 	SaveOrganizerLevelRule(ctx context.Context, id int64, req types.OrganizerLevelRuleRequest) (int64, error)
 	DeleteOrganizerLevelRule(ctx context.Context, id int64) error
 	ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error)
+	ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, status *int8) (*types.AdminPageResponse[map[string]any], error)
 	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
+	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
+	UpdatePointsRule(ctx context.Context, req types.UpdatePointsRuleRequest) error
 }
 
 type AdminService struct {
@@ -172,6 +179,7 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 			Name:           org.Name,
 			Logo:           org.Logo,
 			Status:         org.Status,
+			Enabled:        org.Enabled,
 			RejectReason:   org.RejectReason,
 			Level:          org.Level,
 			ServiceFeeRate: org.ServiceFeeRate,
@@ -189,6 +197,27 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 		list = append(list, item)
 	}
 	return &types.AdminOrganizerListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) UpdateOrganizerEnabled(ctx context.Context, organizerID int64, enabled int8) error {
+	if enabled != 0 && enabled != 1 {
+		return errors.New("商家启停状态仅支持 0 或 1")
+	}
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).Where("id = ?", organizerID).First(&org).Error; err != nil {
+		return err
+	}
+	if enabled == 1 && org.Status != models.OrganizerStatusApproved {
+		return errors.New("只有审核通过的商家可以启用")
+	}
+	result := s.DB.WithContext(ctx).Model(&org).Updates(map[string]any{
+		"enabled":    enabled,
+		"updated_at": time.Now(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	return nil
 }
 
 func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64) (*types.AdminOrganizerDetail, error) {
@@ -217,6 +246,9 @@ func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, re
 		"status":        req.Status,
 		"reject_reason": "",
 		"updated_at":    time.Now(),
+	}
+	if req.Status == models.OrganizerStatusApproved {
+		updates["enabled"] = 1
 	}
 	if req.Status == models.OrganizerStatusRejected {
 		updates["reject_reason"] = req.RejectReason
@@ -416,7 +448,7 @@ func (s *AdminService) UpdatePartyStatus(ctx context.Context, partyID int64, sta
 	return nil
 }
 
-func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, status *int8, keyword string, organizerID int64) (*types.AdminActivityListResponse, error) {
+func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, filter types.AdminActivityFilter) (*types.AdminActivityListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -428,17 +460,29 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 	}
 
 	query := s.DB.WithContext(ctx).Model(&models.Activity{})
-	if status != nil {
-		query = query.Where("status = ?", *status)
+	if filter.Status != nil {
+		query = query.Where("status = ?", *filter.Status)
 	} else {
 		query = query.Where("status <> ?", models.ActivityStatusDraft)
 	}
-	if keyword != "" {
-		like := "%" + keyword + "%"
+	if filter.Keyword != "" {
+		like := "%" + filter.Keyword + "%"
 		query = query.Where("name LIKE ? OR address LIKE ?", like, like)
 	}
-	if organizerID > 0 {
-		query = query.Where("organizer_id = ?", organizerID)
+	if filter.OrganizerID > 0 {
+		query = query.Where("organizer_id = ?", filter.OrganizerID)
+	}
+	if filter.PublishedFrom != nil {
+		query = query.Where("created_at >= ?", *filter.PublishedFrom)
+	}
+	if filter.PublishedTo != nil {
+		query = query.Where("created_at <= ?", *filter.PublishedTo)
+	}
+	if filter.ActivityFrom != nil {
+		query = query.Where("end_time >= ?", *filter.ActivityFrom)
+	}
+	if filter.ActivityTo != nil {
+		query = query.Where("start_time <= ?", *filter.ActivityTo)
 	}
 
 	var total int64

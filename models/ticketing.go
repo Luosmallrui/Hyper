@@ -42,6 +42,7 @@ type Organizer struct {
 	Name            string    `gorm:"column:name;size:100;not null" json:"name"`
 	Logo            string    `gorm:"column:logo;size:255" json:"logo"`
 	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
+	Enabled         int8      `gorm:"column:enabled;not null;default:1" json:"enabled"`
 	RejectReason    string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
 	Level           string    `gorm:"column:level;size:10;default:LV1" json:"level"`
 	ServiceFeeRate  float64   `gorm:"column:service_fee_rate;type:decimal(5,2);default:0" json:"service_fee_rate"`

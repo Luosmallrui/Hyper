@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS `admin`
     `mobile`     varchar(11)  NOT NULL DEFAULT '' COMMENT '手机号',
     `email`      varchar(50)  NOT NULL DEFAULT '' COMMENT '邮箱',
     `motto`      varchar(500) NOT NULL DEFAULT '' COMMENT '座右铭',
+    `role_id`    bigint unsigned NOT NULL DEFAULT 0 COMMENT '后台角色ID',
     `status`     tinyint      NOT NULL DEFAULT 1 COMMENT '状态 1:正常 2:停用',
     `created_at` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -162,6 +163,10 @@ CREATE TABLE IF NOT EXISTS `admin`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='管理员表';
+
+-- Existing admin table migration:
+-- ALTER TABLE `admin` ADD COLUMN `role_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '后台角色ID' AFTER `motto`;
+-- ALTER TABLE `admin` ADD KEY `idx_admin_role` (`role_id`);
 
 CREATE TABLE IF NOT EXISTS `admin_wechat_subscribers`
 (
@@ -184,6 +189,7 @@ CREATE TABLE IF NOT EXISTS `organizers`
     `name`              varchar(100)    NOT NULL COMMENT '主办方名称',
     `logo`              varchar(255)    NOT NULL DEFAULT '' COMMENT 'Logo',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1审核中 2已认证 3未通过',
+    `enabled`           tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0停用，与审核状态分离',
     `reject_reason`     varchar(500)    NOT NULL DEFAULT '' COMMENT '拒绝原因',
     `level`             varchar(10)     NOT NULL DEFAULT 'LV1' COMMENT '等级',
     `service_fee_rate`  decimal(5,2)    NOT NULL DEFAULT 0.00 COMMENT '服务费比例',
@@ -201,6 +207,7 @@ CREATE TABLE IF NOT EXISTS `organizers`
 
 -- 如已有 organizers 表，执行以下 ALTER 添加 type 字段:
 -- ALTER TABLE `organizers` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'venue' COMMENT '入驻类型: venue场地 merchant商家' AFTER `user_id`;
+-- ALTER TABLE `organizers` ADD COLUMN `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用' AFTER `status`;
 
 CREATE TABLE IF NOT EXISTS `activities`
 (
@@ -464,6 +471,10 @@ CREATE TABLE IF NOT EXISTS `platform_settings`
     UNIQUE KEY `uk_platform_setting_key` (`setting_key`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台设置表';
 
+INSERT IGNORE INTO `platform_settings` (`setting_key`, `setting_value`, `remark`) VALUES
+('points_discount_cents_per_point', '10', '每积分可抵扣金额，单位分'),
+('points_reward_cents_per_point', '1000', '消费多少分奖励1积分');
+
 CREATE TABLE IF NOT EXISTS `admin_roles`
 (
     `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '角色ID',
@@ -559,6 +570,23 @@ CREATE TABLE IF NOT EXISTS `organizer_message_reads`
     UNIQUE KEY `uk_org_msg` (`organizer_id`, `message_id`) USING BTREE,
     KEY `idx_org_msg_message` (`message_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='商家消息阅读表';
+
+CREATE TABLE IF NOT EXISTS `platform_message_deliveries`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '投递记录ID',
+    `message_id` bigint unsigned NOT NULL COMMENT '平台消息ID',
+    `user_id`    bigint unsigned NOT NULL COMMENT '目标用户ID',
+    `status`     tinyint         NOT NULL DEFAULT 0 COMMENT '0待发送 1已发送 2失败 3已读',
+    `sent_at`    datetime        NULL COMMENT '发送时间',
+    `read_at`    datetime        NULL COMMENT '阅读时间',
+    `error`      varchar(255)    NOT NULL DEFAULT '' COMMENT '失败原因',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_message_user` (`message_id`, `user_id`) USING BTREE,
+    KEY `idx_delivery_user` (`user_id`) USING BTREE,
+    KEY `idx_delivery_status` (`status`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台消息投递与阅读记录';
 
 CREATE TABLE IF NOT EXISTS `organizer_profiles`
 (

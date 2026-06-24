@@ -450,7 +450,11 @@ func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, t
 }
 
 func (p *PayService) rewardTicketOrderPoints(tx *gorm.DB, order models.TicketOrder) error {
-	reward := (order.ActualPrice + 500) / 1000
+	rule, err := loadPointsRule(tx.Statement.Context, tx)
+	if err != nil {
+		return err
+	}
+	reward := (order.ActualPrice + rule.RewardCentsPerPoint/2) / rule.RewardCentsPerPoint
 	if reward <= 0 {
 		return nil
 	}
@@ -464,7 +468,7 @@ func (p *PayService) rewardTicketOrderPoints(tx *gorm.DB, order models.TicketOrd
 		return nil
 	}
 	var account models.UserPoint
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uint64(order.UserID)).First(&account).Error
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", uint64(order.UserID)).First(&account).Error
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
