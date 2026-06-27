@@ -33,6 +33,12 @@ type PasswordLoginRequest struct {
 type SetPasswordRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
+
+type ResetPasswordRequest struct {
+	Phone    string `json:"phone" binding:"required"`
+	Code     string `json:"code" binding:"required,len=6"`
+	Password string `json:"password" binding:"required,min=6"`
+}
 type WxSessionResponse struct {
 	OpenID     string `json:"openid"`
 	SessionKey string `json:"session_key"`

@@ -235,7 +235,47 @@ POST /api/v1/organizer/messages/read-all
 
 定向发布给指定 `organizer_ids` 时，只有对应商家能在消息列表看到该消息。历史消息没有投递明细时仍按旧规则兼容展示。
 
-### 1.7 积分规则配置
+### 1.7 找回密码
+
+发送验证码沿用现有接口：
+
+```http
+POST /api/v1/auth/send-code
+```
+
+```json
+{
+  "phone": "13800000000"
+}
+```
+
+重置密码：
+
+```http
+POST /api/v1/auth/reset-password
+```
+
+```json
+{
+  "phone": "13800000000",
+  "code": "123456",
+  "password": "newPassword123"
+}
+```
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": "密码重置成功"
+}
+```
+
+说明：该接口不需要登录态，后端会校验手机号格式、短信验证码、账号是否存在，并将新密码加密后写入用户表。
+
+### 1.8 积分规则配置
 
 客户端读取积分规则：
 
@@ -361,4 +401,3 @@ VALUES
 - `types/ticketing.go`
 - `types/points.go`
 - `config/table.sql`
-

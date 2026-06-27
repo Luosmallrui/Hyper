@@ -38,6 +38,7 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/login", context.Wrap(u.SMSLogin))
 	auth.POST("/login-password", context.Wrap(u.PasswordLogin))
 	auth.POST("/set-password", authorize, context.Wrap(u.SetPassword))
+	auth.POST("/reset-password", context.Wrap(u.ResetPassword))
 	auth.POST("/send-code", context.Wrap(u.SendCode))
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
@@ -346,6 +347,30 @@ func (u *Auth) SetPassword(c *gin.Context) error {
 	}
 
 	response.Success(c, "密码设置成功")
+	return nil
+}
+
+// ResetPassword 找回密码（手机号 + 验证码 + 新密码）
+// POST /api/v1/auth/reset-password
+func (u *Auth) ResetPassword(c *gin.Context) error {
+	var req types.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	if !isValidPhone(req.Phone) {
+		return response.NewError(400, "手机号格式不正确")
+	}
+
+	valid, err := u.SmsService.VerifyCode(c.Request.Context(), req.Phone, req.Code)
+	if err != nil || !valid {
+		return response.NewError(400, "验证码错误或已过期")
+	}
+
+	if err := u.UserService.ResetPassword(c.Request.Context(), req.Phone, req.Password); err != nil {
+		return response.NewError(400, err.Error())
+	}
+
+	response.Success(c, "密码重置成功")
 	return nil
 }
 

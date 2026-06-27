@@ -27,6 +27,7 @@ type IUserService interface {
 	Forget(opt *UserForgetOpt) (bool, error)
 	UpdatePassword(uid int, oldPassword string, password string) error
 	SetPassword(ctx context.Context, uid int, password string) error
+	ResetPassword(ctx context.Context, mobile string, password string) error
 	UpdateMobile(ctx context.Context, UserId int, PhoneNumber string) error
 	Update(ctx context.Context, userID int, req *types.UpdateUserReq) error
 	BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile
@@ -187,6 +188,18 @@ func (s *UserService) UpdatePassword(uid int, oldPassword string, password strin
 func (s *UserService) SetPassword(ctx context.Context, uid int, password string) error {
 	hashed := encrypt.HashPassword(password)
 	return s.UsersRepo.UpdateById(ctx, int64(uid), map[string]any{
+		"password":   hashed,
+		"updated_at": time.Now(),
+	})
+}
+
+func (s *UserService) ResetPassword(ctx context.Context, mobile string, password string) error {
+	user, err := s.UsersRepo.FindByMobile(ctx, mobile)
+	if err != nil || user.Id == 0 {
+		return errors.New("账号不存在")
+	}
+	hashed := encrypt.HashPassword(password)
+	return s.UsersRepo.UpdateById(ctx, int64(user.Id), map[string]any{
 		"password":   hashed,
 		"updated_at": time.Now(),
 	})
