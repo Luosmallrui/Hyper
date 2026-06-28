@@ -271,6 +271,18 @@ CREATE TABLE IF NOT EXISTS `activity_subscriptions`
     KEY `idx_activity_subscription_user` (`user_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动订阅表';
 
+CREATE TABLE IF NOT EXISTS `venue_subscriptions`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '场地订阅ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '场地主办方ID',
+    `user_id`      bigint unsigned NOT NULL COMMENT '用户ID',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_venue_user` (`organizer_id`, `user_id`) USING BTREE,
+    KEY `idx_venue_subscription_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_venue_subscription_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='场地订阅表';
+
 CREATE TABLE IF NOT EXISTS `ticket_orders`
 (
     `id`              bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订单ID',

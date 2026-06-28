@@ -125,6 +125,80 @@ type OrganizerSubscriptionSummary struct {
 	TodaySubscriptions int64 `json:"today_subscriptions"`
 }
 
+type VenueListItem struct {
+	ID             int64     `json:"id"`
+	UserID         int64     `json:"user_id"`
+	Name           string    `json:"name"`
+	Logo           string    `json:"logo"`
+	CoverImage     string    `json:"cover_image"`
+	Description    string    `json:"description"`
+	BusinessHours  string    `json:"business_hours"`
+	ServicePhone   string    `json:"service_phone"`
+	Province       string    `json:"province"`
+	City           string    `json:"city"`
+	District       string    `json:"district"`
+	Address        string    `json:"address"`
+	Latitude       float64   `json:"latitude"`
+	Longitude      float64   `json:"longitude"`
+	AverageSpend   int64     `json:"average_spend"`
+	IsFollow       bool      `json:"is_follow"`
+	IsSubscribe    bool      `json:"is_subscribe"`
+	FollowCount    int64     `json:"follow_count"`
+	SubscribeCount int64     `json:"subscribe_count"`
+	PostCount      int64     `json:"post_count"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type VenueDetailResponse struct {
+	VenueListItem
+	Gallery []string                `json:"gallery"`
+	Stores  []models.OrganizerStore `json:"stores"`
+}
+
+type VenueNoteItem struct {
+	ID           int64       `json:"id,string"`
+	UserID       int64       `json:"user_id"`
+	Title        string      `json:"title"`
+	Content      string      `json:"content"`
+	Type         int         `json:"type"`
+	MediaData    []NoteMedia `json:"media_data"`
+	LikeCount    int64       `json:"like_count"`
+	CollCount    int64       `json:"coll_count"`
+	ShareCount   int64       `json:"share_count"`
+	CommentCount int64       `json:"comment_count"`
+	ViewCount    int64       `json:"view_count,omitempty"`
+	ActivityID   int         `json:"activity_id"`
+	StoreID      int64       `json:"store_id"`
+	Avatar       string      `json:"avatar"`
+	Nickname     string      `json:"nickname"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	TimeStamp    int64       `json:"time_stamp"`
+}
+
+type VenueNotesResponse struct {
+	Notes      []VenueNoteItem `json:"notes"`
+	NextCursor int64           `json:"next_cursor"`
+	HasMore    bool            `json:"has_more"`
+}
+
+type SubscriptionListItem struct {
+	ID           string         `json:"id"`
+	Source       string         `json:"source"`
+	SourceID     int64          `json:"source_id"`
+	Title        string         `json:"title"`
+	CoverImage   string         `json:"cover_image"`
+	Description  string         `json:"description,omitempty"`
+	StartTime    *time.Time     `json:"start_time,omitempty"`
+	EndTime      *time.Time     `json:"end_time,omitempty"`
+	Status       any            `json:"status,omitempty"`
+	Address      string         `json:"address,omitempty"`
+	Latitude     float64        `json:"latitude,omitempty"`
+	Longitude    float64        `json:"longitude,omitempty"`
+	Extra        map[string]any `json:"extra,omitempty"`
+	SubscribedAt time.Time      `json:"subscribed_at"`
+}
+
 type OrganizerProfileRequest struct {
 	Name          string   `json:"name"`
 	Logo          string   `json:"logo"`
