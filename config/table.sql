@@ -473,7 +473,8 @@ CREATE TABLE IF NOT EXISTS `platform_settings`
 
 INSERT IGNORE INTO `platform_settings` (`setting_key`, `setting_value`, `remark`) VALUES
 ('points_discount_cents_per_point', '10', '每积分可抵扣金额，单位分'),
-('points_reward_cents_per_point', '1000', '消费多少分奖励1积分');
+('points_reward_cents_per_point', '1000', '消费多少分奖励1积分'),
+('withdraw_arrival_cycle', 'T+1 到 T+3 个工作日', '商家提现到账周期展示文案');
 
 CREATE TABLE IF NOT EXISTS `admin_roles`
 (

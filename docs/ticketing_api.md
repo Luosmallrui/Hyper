@@ -470,6 +470,12 @@ Authorization: Bearer <organizer_token>
     "bank_account_no": "6222...",
     "bank_name": "招商银行",
     "can_withdraw": true,
+    "gross_amount": 50000,
+    "refund_amount": 10000,
+    "withdraw_amount": 20000,
+    "pending_withdraw_amount": 5000,
+    "available_amount": 15000,
+    "arrival_cycle": "T+1 到 T+3 个工作日",
     "pending_audit": null,
     "latest_audit": {
       "id": 12,
@@ -491,7 +497,13 @@ Authorization: Bearer <organizer_token>
 | 字段 | 说明 |
 |---|---|
 | bank_account_name/bank_account_no/bank_name | 当前已审核通过、可用于提现的正式收款账户 |
-| can_withdraw | 是否已有正式收款账户，可发起提现 |
+| can_withdraw | 是否已有正式收款账户且可提现金额大于 0 |
+| gross_amount | 可结算订单实收总额，单位分 |
+| refund_amount | 已成功退款金额，单位分 |
+| withdraw_amount | 已审核通过提现金额，单位分 |
+| pending_withdraw_amount | 待审核提现冻结金额，单位分 |
+| available_amount | 当前可提现金额，单位分，计算公式为 `gross_amount - refund_amount - withdraw_amount - pending_withdraw_amount` |
+| arrival_cycle | 提现到账周期展示文案，读取平台配置 `withdraw_arrival_cycle`，默认 `T+1 到 T+3 个工作日` |
 | pending_audit | 当前待审核申请；没有则为 `null` 或不返回 |
 | latest_audit.status | `0` 待审核；`1` 通过；`2` 拒绝 |
 
@@ -591,8 +603,11 @@ Authorization: Bearer <organizer_token>
 
 - `amount` 单位为分。
 - 只有收款账户审核通过后才能发起提现。
+- `amount` 必须大于 0，且不能超过 `GET /api/v1/organizer/withdraw-info` 返回的 `available_amount`。
 - 提交提现时会快照当前正式收款账户到提现记录中，避免后续改卡影响历史打款记录。
 - 同一商家存在待审核提现申请时，不允许重复提交。
+- 提交成功后会生成 `status=0` 的提现记录，商家端通过 `GET /api/v1/organizer/withdraws` 查看申请记录。
+- 待审核提现金额会计入 `pending_withdraw_amount`，从 `available_amount` 中冻结。
 
 成功响应：
 

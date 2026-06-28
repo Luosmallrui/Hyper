@@ -71,12 +71,18 @@ type OrganizerBankAuditInfo struct {
 }
 
 type OrganizerWithdrawInfoResponse struct {
-	BankAccountName string                  `json:"bank_account_name"`
-	BankAccountNo   string                  `json:"bank_account_no"`
-	BankName        string                  `json:"bank_name"`
-	CanWithdraw     bool                    `json:"can_withdraw"`
-	PendingAudit    *OrganizerBankAuditInfo `json:"pending_audit,omitempty"`
-	LatestAudit     *OrganizerBankAuditInfo `json:"latest_audit,omitempty"`
+	BankAccountName       string                  `json:"bank_account_name"`
+	BankAccountNo         string                  `json:"bank_account_no"`
+	BankName              string                  `json:"bank_name"`
+	CanWithdraw           bool                    `json:"can_withdraw"`
+	GrossAmount           int64                   `json:"gross_amount"`
+	RefundAmount          int64                   `json:"refund_amount"`
+	WithdrawAmount        int64                   `json:"withdraw_amount"`
+	PendingWithdrawAmount int64                   `json:"pending_withdraw_amount"`
+	AvailableAmount       int64                   `json:"available_amount"`
+	ArrivalCycle          string                  `json:"arrival_cycle"`
+	PendingAudit          *OrganizerBankAuditInfo `json:"pending_audit,omitempty"`
+	LatestAudit           *OrganizerBankAuditInfo `json:"latest_audit,omitempty"`
 }
 
 type CreateOrganizerWithdrawRequest struct {
