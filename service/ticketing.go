@@ -229,11 +229,21 @@ func (s *TicketingService) GetWithdrawInfo(ctx context.Context, userID int64) (*
 	if err != nil {
 		return nil, err
 	}
+	funds, err := s.getOrganizerWithdrawFunds(ctx, s.DB.WithContext(ctx), org.ID)
+	if err != nil {
+		return nil, err
+	}
 	resp := &types.OrganizerWithdrawInfoResponse{
-		BankAccountName: org.BankAccountName,
-		BankAccountNo:   org.BankAccountNo,
-		BankName:        org.BankName,
-		CanWithdraw:     org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "",
+		BankAccountName:       org.BankAccountName,
+		BankAccountNo:         org.BankAccountNo,
+		BankName:              org.BankName,
+		CanWithdraw:           org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "" && funds.AvailableAmount > 0,
+		GrossAmount:           funds.GrossAmount,
+		RefundAmount:          funds.RefundAmount,
+		WithdrawAmount:        funds.WithdrawAmount,
+		PendingWithdrawAmount: funds.PendingWithdrawAmount,
+		AvailableAmount:       funds.AvailableAmount,
+		ArrivalCycle:          s.getPlatformSetting(ctx, "withdraw_arrival_cycle", "T+1 到 T+3 个工作日"),
 	}
 
 	var latest models.OrganizerBankAccountAudit
@@ -308,35 +318,58 @@ func (s *TicketingService) ListOrganizerWithdraws(ctx context.Context, userID in
 }
 
 func (s *TicketingService) CreateOrganizerWithdraw(ctx context.Context, userID int64, req types.CreateOrganizerWithdrawRequest) (int64, error) {
-	org, err := s.findOrganizerByUser(ctx, userID)
+	var withdrawID int64
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var org models.Organizer
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND status = ? AND enabled = 1", userID, models.OrganizerStatusApproved).
+			First(&org).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("商家不存在、未通过审核或已被停用")
+			}
+			return err
+		}
+		if org.BankAccountName == "" || org.BankAccountNo == "" || org.BankName == "" {
+			return errors.New("收款账户审核通过后才能提现")
+		}
+		var pending int64
+		if err := tx.Model(&models.OrganizerWithdraw{}).
+			Where("organizer_id = ? AND status = 0", org.ID).
+			Count(&pending).Error; err != nil {
+			return err
+		}
+		if pending > 0 {
+			return errors.New("已有待审核提现申请，请勿重复提交")
+		}
+		funds, err := s.getOrganizerWithdrawFunds(ctx, tx, org.ID)
+		if err != nil {
+			return err
+		}
+		if funds.AvailableAmount <= 0 {
+			return errors.New("暂无可提现金额")
+		}
+		if req.Amount > funds.AvailableAmount {
+			return fmt.Errorf("提现金额不能超过可提现金额，可提现金额为%.2f元", float64(funds.AvailableAmount)/100)
+		}
+		withdraw := models.OrganizerWithdraw{
+			OrganizerID:     org.ID,
+			Amount:          req.Amount,
+			BankAccountName: org.BankAccountName,
+			BankAccountNo:   org.BankAccountNo,
+			BankName:        org.BankName,
+			Status:          0,
+			Remark:          req.Remark,
+		}
+		if err := tx.Create(&withdraw).Error; err != nil {
+			return err
+		}
+		withdrawID = withdraw.ID
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	if org.BankAccountName == "" || org.BankAccountNo == "" || org.BankName == "" {
-		return 0, errors.New("收款账户审核通过后才能提现")
-	}
-	var pending int64
-	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).
-		Where("organizer_id = ? AND status = 0", org.ID).
-		Count(&pending).Error; err != nil {
-		return 0, err
-	}
-	if pending > 0 {
-		return 0, errors.New("已有待审核提现申请，请勿重复提交")
-	}
-	withdraw := models.OrganizerWithdraw{
-		OrganizerID:     org.ID,
-		Amount:          req.Amount,
-		BankAccountName: org.BankAccountName,
-		BankAccountNo:   org.BankAccountNo,
-		BankName:        org.BankName,
-		Status:          0,
-		Remark:          req.Remark,
-	}
-	if err := s.DB.WithContext(ctx).Create(&withdraw).Error; err != nil {
-		return 0, err
-	}
-	return withdraw.ID, nil
+	return withdrawID, nil
 }
 
 func (s *TicketingService) ListOrganizerCollections(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.ActivityCollectionItem], error) {
@@ -916,22 +949,56 @@ func (s *TicketingService) GetOrganizerFinanceSummary(ctx context.Context, userI
 	if err != nil {
 		return nil, err
 	}
-	resp := &types.OrganizerFinanceSummary{}
+	funds, err := s.getOrganizerWithdrawFunds(ctx, s.DB.WithContext(ctx), org.ID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerFinanceSummary{
+		GrossAmount:    funds.GrossAmount,
+		RefundAmount:   funds.RefundAmount,
+		WithdrawAmount: funds.WithdrawAmount,
+		SettleAmount:   funds.GrossAmount - funds.RefundAmount - funds.WithdrawAmount,
+	}
 	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
 	if err := s.DB.WithContext(ctx).Table("ticket_orders o").Joins("JOIN activities a ON a.id = o.activity_id").
 		Where("a.organizer_id = ? AND o.status IN ?", org.ID, paidStatuses).
-		Select("COALESCE(SUM(o.actual_price),0), COUNT(o.id)").Row().Scan(&resp.GrossAmount, &resp.OrderCount); err != nil {
+		Select("COUNT(o.id)").Scan(&resp.OrderCount).Error; err != nil {
 		return nil, err
 	}
-	if err := s.DB.WithContext(ctx).Table("refunds r").Joins("JOIN ticket_orders o ON o.id = r.order_id").Joins("JOIN activities a ON a.id = o.activity_id").
-		Where("a.organizer_id = ? AND r.status = ?", org.ID, models.RefundStatusSuccess).
+	return resp, nil
+}
+
+type organizerWithdrawFunds struct {
+	GrossAmount           int64
+	RefundAmount          int64
+	WithdrawAmount        int64
+	PendingWithdrawAmount int64
+	AvailableAmount       int64
+}
+
+func (s *TicketingService) getOrganizerWithdrawFunds(ctx context.Context, db *gorm.DB, organizerID int64) (*organizerWithdrawFunds, error) {
+	resp := &organizerWithdrawFunds{}
+	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
+	if err := db.WithContext(ctx).Table("ticket_orders o").Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND o.status IN ?", organizerID, paidStatuses).
+		Select("COALESCE(SUM(o.actual_price),0)").Scan(&resp.GrossAmount).Error; err != nil {
+		return nil, err
+	}
+	if err := db.WithContext(ctx).Table("refunds r").Joins("JOIN ticket_orders o ON o.id = r.order_id").Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND r.status = ?", organizerID, models.RefundStatusSuccess).
 		Select("COALESCE(SUM(r.refund_amount),0)").Scan(&resp.RefundAmount).Error; err != nil {
 		return nil, err
 	}
-	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("organizer_id = ? AND status = 1", org.ID).Select("COALESCE(SUM(amount),0)").Scan(&resp.WithdrawAmount).Error; err != nil {
+	if err := db.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("organizer_id = ? AND status = 1", organizerID).Select("COALESCE(SUM(amount),0)").Scan(&resp.WithdrawAmount).Error; err != nil {
 		return nil, err
 	}
-	resp.SettleAmount = resp.GrossAmount - resp.RefundAmount - resp.WithdrawAmount
+	if err := db.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("organizer_id = ? AND status = 0", organizerID).Select("COALESCE(SUM(amount),0)").Scan(&resp.PendingWithdrawAmount).Error; err != nil {
+		return nil, err
+	}
+	resp.AvailableAmount = resp.GrossAmount - resp.RefundAmount - resp.WithdrawAmount - resp.PendingWithdrawAmount
+	if resp.AvailableAmount < 0 {
+		resp.AvailableAmount = 0
+	}
 	return resp, nil
 }
 
@@ -1666,6 +1733,19 @@ func loadPointsRule(ctx context.Context, db *gorm.DB) (*types.PointsRule, error)
 		}
 	}
 	return rule, nil
+}
+
+func (s *TicketingService) getPlatformSetting(ctx context.Context, key, fallback string) string {
+	var setting models.PlatformSetting
+	err := s.DB.WithContext(ctx).Where("setting_key = ?", key).First(&setting).Error
+	if err != nil {
+		return fallback
+	}
+	value := strings.TrimSpace(setting.Value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (s *TicketingService) resolveOrderViewers(tx *gorm.DB, userID int64, req types.CreateTicketOrderRequest, quantity int, realNameMode, minorCheck bool) ([]models.TicketOrderViewer, error) {
