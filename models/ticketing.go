@@ -123,6 +123,17 @@ func (ActivitySubscription) TableName() string {
 	return "activity_subscriptions"
 }
 
+type VenueSubscription struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;uniqueIndex:uk_venue_user,priority:1;index" json:"organizer_id"`
+	UserID      int64     `gorm:"column:user_id;not null;uniqueIndex:uk_venue_user,priority:2;index" json:"user_id"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (VenueSubscription) TableName() string {
+	return "venue_subscriptions"
+}
+
 type TicketOrder struct {
 	ID             int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrderNo        string     `gorm:"column:order_no;size:30;not null;uniqueIndex" json:"order_no"`

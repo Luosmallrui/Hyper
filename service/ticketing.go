@@ -44,6 +44,14 @@ type ITicketingService interface {
 	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
 	MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error)
 	GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error)
+	ListVenues(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[types.VenueListItem], error)
+	GetVenueDetail(ctx context.Context, userID, venueID int64) (*types.VenueDetailResponse, error)
+	ListVenueNotes(ctx context.Context, userID, venueID int64, cursor int64, pageSize int) (*types.VenueNotesResponse, error)
+	FollowVenue(ctx context.Context, userID, venueID int64) error
+	UnfollowVenue(ctx context.Context, userID, venueID int64) error
+	SubscribeVenue(ctx context.Context, userID, venueID int64) error
+	UnsubscribeVenue(ctx context.Context, userID, venueID int64) error
+	ListSubscriptions(ctx context.Context, userID int64, subType string, page, size int) (*types.PageResponse[types.SubscriptionListItem], error)
 	GetOrganizerProfile(ctx context.Context, userID int64) (*types.OrganizerProfileResponse, error)
 	UpdateOrganizerProfile(ctx context.Context, userID int64, req types.OrganizerProfileRequest) error
 	LookupOrganizerUser(ctx context.Context, userID int64, phone string) (*types.OrganizerUserLookupResponse, error)
@@ -649,6 +657,409 @@ func (s *TicketingService) GetOrganizerSubscriptionSummary(ctx context.Context, 
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (s *TicketingService) ListVenues(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[types.VenueListItem], error) {
+	page, size = normalizePage(page, size)
+	query := s.DB.WithContext(ctx).Table("organizers o").
+		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district, o.created_at,
+			COALESCE(p.cover_image, '') AS cover_image,
+			COALESCE(p.description, '') AS description,
+			COALESCE(p.business_hours, '') AS business_hours,
+			COALESCE(p.service_phone, '') AS service_phone,
+			COALESCE(p.address, '') AS address,
+			COALESCE(p.latitude, 0) AS latitude,
+			COALESCE(p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend`).
+		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+		Where("o.type = ? AND o.status = ? AND o.enabled = 1", models.OrganizerTypeVenue, models.OrganizerStatusApproved)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("o.name LIKE ? OR p.address LIKE ? OR p.description LIKE ? OR o.district LIKE ?", like, like, like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []types.VenueListItem
+	if err := query.Order("o.created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&list).Error; err != nil {
+		return nil, err
+	}
+	if err := s.fillVenueStats(ctx, userID, list); err != nil {
+		return nil, err
+	}
+	return &types.PageResponse[types.VenueListItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) GetVenueDetail(ctx context.Context, userID, venueID int64) (*types.VenueDetailResponse, error) {
+	var item types.VenueListItem
+	if err := s.DB.WithContext(ctx).Table("organizers o").
+		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district, o.created_at,
+			COALESCE(p.cover_image, '') AS cover_image,
+			COALESCE(p.description, '') AS description,
+			COALESCE(p.business_hours, '') AS business_hours,
+			COALESCE(p.service_phone, '') AS service_phone,
+			COALESCE(p.address, '') AS address,
+			COALESCE(p.latitude, 0) AS latitude,
+			COALESCE(p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend`).
+		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+		Where("o.id = ? AND o.type = ? AND o.status = ? AND o.enabled = 1", venueID, models.OrganizerTypeVenue, models.OrganizerStatusApproved).
+		First(&item).Error; err != nil {
+		return nil, err
+	}
+	list := []types.VenueListItem{item}
+	if err := s.fillVenueStats(ctx, userID, list); err != nil {
+		return nil, err
+	}
+	resp := &types.VenueDetailResponse{VenueListItem: list[0], Gallery: []string{}, Stores: []models.OrganizerStore{}}
+	var profile models.OrganizerProfile
+	if err := s.DB.WithContext(ctx).Where("organizer_id = ?", venueID).First(&profile).Error; err == nil && profile.Gallery != "" {
+		_ = json.Unmarshal([]byte(profile.Gallery), &resp.Gallery)
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Where("organizer_id = ?", venueID).Order("created_at DESC").Find(&resp.Stores).Error; err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) ListVenueNotes(ctx context.Context, userID, venueID int64, cursor int64, pageSize int) (*types.VenueNotesResponse, error) {
+	if err := s.ensureVenueVisible(ctx, venueID); err != nil {
+		return nil, err
+	}
+	if pageSize <= 0 {
+		pageSize = types.DefaultPageSize
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	var storeIDs []int64
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerStore{}).Where("organizer_id = ?", venueID).Pluck("id", &storeIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(storeIDs) == 0 {
+		return &types.VenueNotesResponse{Notes: []types.VenueNoteItem{}}, nil
+	}
+	query := s.DB.WithContext(ctx).Table("notes n").
+		Select(`n.id, n.user_id, n.title, n.content, n.type, n.media_data, n.activity_id, n.store_id,
+			n.created_at, n.updated_at, COALESCE(u.avatar, '') AS avatar, COALESCE(u.nickname, '') AS nickname`).
+		Joins("LEFT JOIN users u ON u.id = n.user_id").
+		Where("n.store_id IN ? AND n.status <> ? AND n.visible_conf = ?", storeIDs, -1, types.VisibleConfPublic)
+	if cursor > 0 {
+		query = query.Where("n.created_at < ?", time.Unix(0, cursor))
+	}
+	var rows []struct {
+		ID         int64
+		UserID     int64
+		Title      string
+		Content    string
+		Type       int
+		MediaData  string
+		ActivityID int
+		StoreID    int64
+		Avatar     string
+		Nickname   string
+		CreatedAt  time.Time
+		UpdatedAt  time.Time
+	}
+	if err := query.Order("n.created_at DESC").Limit(pageSize + 1).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	resp := &types.VenueNotesResponse{Notes: []types.VenueNoteItem{}}
+	displayCount := len(rows)
+	if displayCount > pageSize {
+		displayCount = pageSize
+		resp.HasMore = true
+	}
+	for i := 0; i < displayCount; i++ {
+		row := rows[i]
+		media := []types.NoteMedia{}
+		if row.MediaData != "" {
+			_ = json.Unmarshal([]byte(row.MediaData), &media)
+		}
+		resp.Notes = append(resp.Notes, types.VenueNoteItem{
+			ID: row.ID, UserID: row.UserID, Title: row.Title, Content: row.Content, Type: row.Type,
+			MediaData: media, ActivityID: row.ActivityID, StoreID: row.StoreID,
+			Avatar: row.Avatar, Nickname: row.Nickname, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+			TimeStamp: row.CreatedAt.UnixNano(),
+		})
+	}
+	if displayCount > 0 {
+		resp.NextCursor = rows[displayCount-1].CreatedAt.UnixNano()
+	}
+	return resp, nil
+}
+
+func (s *TicketingService) FollowVenue(ctx context.Context, userID, venueID int64) error {
+	venue, err := s.getVisibleVenue(ctx, venueID)
+	if err != nil {
+		return err
+	}
+	if userID == venue.UserID {
+		return errors.New("不能关注自己的场地")
+	}
+	return s.DB.WithContext(ctx).Exec(`
+		INSERT INTO user_follow (follower_id, followee_id, status, created_at, updated_at)
+		VALUES (?, ?, 1, NOW(), NOW())
+		ON DUPLICATE KEY UPDATE status = 1, updated_at = NOW()
+	`, userID, venue.UserID).Error
+}
+
+func (s *TicketingService) UnfollowVenue(ctx context.Context, userID, venueID int64) error {
+	venue, err := s.getVisibleVenue(ctx, venueID)
+	if err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Model(&models.UserFollow{}).
+		Where("follower_id = ? AND followee_id = ?", userID, venue.UserID).
+		Updates(map[string]any{"status": 0, "updated_at": time.Now()}).Error
+}
+
+func (s *TicketingService) SubscribeVenue(ctx context.Context, userID, venueID int64) error {
+	if err := s.ensureVenueVisible(ctx, venueID); err != nil {
+		return err
+	}
+	sub := models.VenueSubscription{OrganizerID: venueID, UserID: userID}
+	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&sub).Error
+}
+
+func (s *TicketingService) UnsubscribeVenue(ctx context.Context, userID, venueID int64) error {
+	return s.DB.WithContext(ctx).Where("organizer_id = ? AND user_id = ?", venueID, userID).Delete(&models.VenueSubscription{}).Error
+}
+
+func (s *TicketingService) ListSubscriptions(ctx context.Context, userID int64, subType string, page, size int) (*types.PageResponse[types.SubscriptionListItem], error) {
+	page, size = normalizePage(page, size)
+	subType = strings.TrimSpace(subType)
+	if subType == "" {
+		subType = "all"
+	}
+	if subType != "all" && subType != "activity" && subType != "venue" {
+		return nil, errors.New("type 仅支持 all、activity、venue")
+	}
+
+	items := make([]types.SubscriptionListItem, 0)
+	if subType == "all" || subType == "activity" {
+		var rows []struct {
+			ID           int64
+			Name         string
+			PosterList   string
+			Description  string
+			StartTime    time.Time
+			EndTime      time.Time
+			Status       int8
+			Address      string
+			Latitude     float64
+			Longitude    float64
+			SubscribedAt time.Time
+		}
+		if err := s.DB.WithContext(ctx).Table("activity_subscriptions sub").
+			Select(`a.id, a.name, a.poster_list, a.description, a.start_time, a.end_time, a.status,
+				a.address, a.latitude, a.longitude, sub.created_at AS subscribed_at`).
+			Joins("JOIN activities a ON a.id = sub.activity_id").
+			Where("sub.user_id = ?", userID).
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			startTime := row.StartTime
+			endTime := row.EndTime
+			items = append(items, types.SubscriptionListItem{
+				ID: fmt.Sprintf("activity-%d", row.ID), Source: "activity", SourceID: row.ID, Title: row.Name,
+				CoverImage: row.PosterList, Description: row.Description, StartTime: &startTime, EndTime: &endTime,
+				Status: row.Status, Address: row.Address, Latitude: row.Latitude, Longitude: row.Longitude,
+				SubscribedAt: row.SubscribedAt,
+			})
+		}
+	}
+	if subType == "all" || subType == "venue" {
+		var rows []struct {
+			ID            int64
+			UserID        int64
+			Name          string
+			Logo          string
+			CoverImage    string
+			Description   string
+			BusinessHours string
+			ServicePhone  string
+			Province      string
+			City          string
+			District      string
+			Address       string
+			Latitude      float64
+			Longitude     float64
+			AverageSpend  int64
+			SubscribedAt  time.Time
+		}
+		if err := s.DB.WithContext(ctx).Table("venue_subscriptions sub").
+			Select(`o.id, o.user_id, o.name, o.logo,
+				COALESCE(p.cover_image, '') AS cover_image,
+				COALESCE(p.description, '') AS description,
+				COALESCE(p.business_hours, '') AS business_hours,
+				COALESCE(p.service_phone, '') AS service_phone,
+				o.province, o.city, o.district,
+				COALESCE(p.address, '') AS address,
+				COALESCE(p.latitude, 0) AS latitude,
+				COALESCE(p.longitude, 0) AS longitude,
+				COALESCE(p.average_spend, 0) AS average_spend,
+				sub.created_at AS subscribed_at`).
+			Joins("JOIN organizers o ON o.id = sub.organizer_id").
+			Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+			Where("sub.user_id = ? AND o.type = ? AND o.status = ? AND o.enabled = 1", userID, models.OrganizerTypeVenue, models.OrganizerStatusApproved).
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			items = append(items, types.SubscriptionListItem{
+				ID: fmt.Sprintf("venue-%d", row.ID), Source: "venue", SourceID: row.ID, Title: row.Name,
+				CoverImage: firstNonEmpty(row.CoverImage, row.Logo), Description: row.Description,
+				Address: row.Address, Latitude: row.Latitude, Longitude: row.Longitude,
+				Extra: map[string]any{
+					"user_id":        row.UserID,
+					"logo":           row.Logo,
+					"business_hours": row.BusinessHours,
+					"service_phone":  row.ServicePhone,
+					"province":       row.Province,
+					"city":           row.City,
+					"district":       row.District,
+					"average_spend":  row.AverageSpend,
+				},
+				SubscribedAt: row.SubscribedAt,
+			})
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].SubscribedAt.After(items[j].SubscribedAt)
+	})
+	total := int64(len(items))
+	start := (page - 1) * size
+	if start >= len(items) {
+		return &types.PageResponse[types.SubscriptionListItem]{List: []types.SubscriptionListItem{}, Total: total}, nil
+	}
+	end := start + size
+	if end > len(items) {
+		end = len(items)
+	}
+	return &types.PageResponse[types.SubscriptionListItem]{List: items[start:end], Total: total}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, venues []types.VenueListItem) error {
+	if len(venues) == 0 {
+		return nil
+	}
+	venueIDs := make([]int64, 0, len(venues))
+	ownerUserIDs := make([]int64, 0, len(venues))
+	for _, venue := range venues {
+		venueIDs = append(venueIDs, venue.ID)
+		ownerUserIDs = append(ownerUserIDs, venue.UserID)
+	}
+
+	followCounts := map[int64]int64{}
+	var followRows []struct {
+		FolloweeID int64
+		Count      int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.UserFollow{}).
+		Select("followee_id, COUNT(*) AS count").
+		Where("followee_id IN ? AND status = 1", ownerUserIDs).
+		Group("followee_id").
+		Scan(&followRows).Error; err != nil {
+		return err
+	}
+	for _, row := range followRows {
+		followCounts[row.FolloweeID] = row.Count
+	}
+
+	subCounts := map[int64]int64{}
+	var subRows []struct {
+		OrganizerID int64
+		Count       int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.VenueSubscription{}).
+		Select("organizer_id, COUNT(*) AS count").
+		Where("organizer_id IN ?", venueIDs).
+		Group("organizer_id").
+		Scan(&subRows).Error; err != nil {
+		return err
+	}
+	for _, row := range subRows {
+		subCounts[row.OrganizerID] = row.Count
+	}
+
+	postCounts := map[int64]int64{}
+	var postRows []struct {
+		OrganizerID int64
+		Count       int64
+	}
+	if err := s.DB.WithContext(ctx).Table("notes n").
+		Select("os.organizer_id, COUNT(n.id) AS count").
+		Joins("JOIN organizer_stores os ON os.id = n.store_id").
+		Where("os.organizer_id IN ? AND n.status <> ? AND n.visible_conf = ?", venueIDs, -1, types.VisibleConfPublic).
+		Group("os.organizer_id").
+		Scan(&postRows).Error; err != nil {
+		return err
+	}
+	for _, row := range postRows {
+		postCounts[row.OrganizerID] = row.Count
+	}
+
+	followed := map[int64]bool{}
+	subscribed := map[int64]bool{}
+	if userID > 0 {
+		var followedIDs []int64
+		if err := s.DB.WithContext(ctx).Model(&models.UserFollow{}).
+			Where("follower_id = ? AND followee_id IN ? AND status = 1", userID, ownerUserIDs).
+			Pluck("followee_id", &followedIDs).Error; err != nil {
+			return err
+		}
+		for _, id := range followedIDs {
+			followed[id] = true
+		}
+		var subscribedIDs []int64
+		if err := s.DB.WithContext(ctx).Model(&models.VenueSubscription{}).
+			Where("user_id = ? AND organizer_id IN ?", userID, venueIDs).
+			Pluck("organizer_id", &subscribedIDs).Error; err != nil {
+			return err
+		}
+		for _, id := range subscribedIDs {
+			subscribed[id] = true
+		}
+	}
+
+	for i := range venues {
+		venues[i].FollowCount = followCounts[venues[i].UserID]
+		venues[i].SubscribeCount = subCounts[venues[i].ID]
+		venues[i].PostCount = postCounts[venues[i].ID]
+		venues[i].IsFollow = followed[venues[i].UserID]
+		venues[i].IsSubscribe = subscribed[venues[i].ID]
+	}
+	return nil
+}
+
+func (s *TicketingService) ensureVenueVisible(ctx context.Context, venueID int64) error {
+	_, err := s.getVisibleVenue(ctx, venueID)
+	return err
+}
+
+func (s *TicketingService) getVisibleVenue(ctx context.Context, venueID int64) (*models.Organizer, error) {
+	var venue models.Organizer
+	if err := s.DB.WithContext(ctx).
+		Where("id = ? AND type = ? AND status = ? AND enabled = 1", venueID, models.OrganizerTypeVenue, models.OrganizerStatusApproved).
+		First(&venue).Error; err != nil {
+		return nil, err
+	}
+	return &venue, nil
 }
 
 func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64) (*types.OrganizerProfileResponse, error) {

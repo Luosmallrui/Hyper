@@ -31,6 +31,18 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	auth := middleware.Auth([]byte(h.Config.Jwt.Secret))
 	v1 := r.Group("/v1")
 	v1.GET("/points/rules", auth, h.wrap(h.GetPointsRule))
+	v1.GET("/subscriptions", auth, h.wrap(h.ListSubscriptions))
+
+	venues := v1.Group("/venues", auth)
+	{
+		venues.GET("", h.wrap(h.ListVenues))
+		venues.GET("/:id", h.wrap(h.GetVenueDetail))
+		venues.GET("/:id/notes", h.wrap(h.ListVenueNotes))
+		venues.POST("/:id/follow", h.wrap(h.FollowVenue))
+		venues.DELETE("/:id/follow", h.wrap(h.UnfollowVenue))
+		venues.POST("/:id/subscribe", h.wrap(h.SubscribeVenue))
+		venues.DELETE("/:id/subscribe", h.wrap(h.UnsubscribeVenue))
+	}
 
 	organizer := v1.Group("/organizer", auth)
 	{
@@ -351,6 +363,103 @@ func (h *Ticketing) GetOrganizerSubscriptionSummary(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListSubscriptions(c *gin.Context) error {
+	resp, err := h.TicketingService.ListSubscriptions(c.Request.Context(), currentUserID(c), c.DefaultQuery("type", "all"), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListVenues(c *gin.Context) error {
+	resp, err := h.TicketingService.ListVenues(c.Request.Context(), currentUserID(c), c.Query("keyword"), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetVenueDetail(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.GetVenueDetail(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListVenueNotes(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	cursor, _ := strconv.ParseInt(c.Query("cursor"), 10, 64)
+	pageSize := queryInt(c, "pageSize")
+	if pageSize <= 0 {
+		pageSize = size(c)
+	}
+	resp, err := h.TicketingService.ListVenueNotes(c.Request.Context(), currentUserID(c), id, cursor, pageSize)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) FollowVenue(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.FollowVenue(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"is_follow": true})
+	return nil
+}
+
+func (h *Ticketing) UnfollowVenue(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.UnfollowVenue(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"is_follow": false})
+	return nil
+}
+
+func (h *Ticketing) SubscribeVenue(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.SubscribeVenue(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"is_subscribe": true})
+	return nil
+}
+
+func (h *Ticketing) UnsubscribeVenue(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if err := h.TicketingService.UnsubscribeVenue(c.Request.Context(), currentUserID(c), id); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"is_subscribe": false})
 	return nil
 }
 
