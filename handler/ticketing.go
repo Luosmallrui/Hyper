@@ -84,6 +84,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.POST("/apply", h.wrap(h.ApplyOrganizer))
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
 		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
+		organizer.GET("/orders/:order_no", h.wrap(h.GetOrganizerOrderDetail))
 		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
@@ -1226,6 +1227,15 @@ func (h *Ticketing) ListOrganizerOrders(c *gin.Context) error {
 		page(c),
 		size(c),
 	)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerOrderDetail(c *gin.Context) error {
+	resp, err := h.TicketingService.GetOrganizerOrderDetail(c.Request.Context(), currentUserID(c), c.Param("order_no"))
 	if err != nil {
 		return err
 	}
