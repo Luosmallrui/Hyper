@@ -564,6 +564,14 @@ type OrganizerOrderListItem struct {
 	ExpireTime     time.Time         `json:"expire_time"`
 }
 
+type OrganizerOrderDetailResponse struct {
+	TicketOrderDetailResponse
+	UserID     int64  `json:"user_id"`
+	UserName   string `json:"user_name"`
+	UserMobile string `json:"user_mobile"`
+	UserAvatar string `json:"user_avatar"`
+}
+
 type OrganizerRefundListItem struct {
 	RefundNo         string    `json:"refund_no"`
 	Status           int8      `json:"status"`

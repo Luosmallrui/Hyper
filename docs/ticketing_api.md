@@ -1993,6 +1993,72 @@ Authorization: Bearer <access_token>
 - `buyer_name/buyer_id_card`：实名购票兼容字段，当前表示首位观演人，不等同于下单账号。
 - `viewers`：本订单全部观演人脱敏信息。
 
+### 主办方订单详情
+
+```http
+GET /api/v1/organizer/orders/:order_no
+Authorization: Bearer <access_token>
+```
+
+说明：
+
+- 只允许当前登录主办方查看自己名下活动的订单。
+- 如果订单号存在但不属于当前主办方，返回不存在/无权限错误。
+- 返回结构复用用户侧订单详情，并额外返回下单账号信息。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "order_no": "T2026053114300012ab34cd",
+    "status": 1,
+    "refund_status": "",
+    "total_price": 17600,
+    "actual_price": 17600,
+    "points_amount": 0,
+    "points_discount": 0,
+    "quantity": 2,
+    "user_id": 1001,
+    "user_name": "邪修的马路路",
+    "user_mobile": "138****8000",
+    "user_avatar": "https://cdn.xxx/avatar.png",
+    "activity": {
+      "id": 1,
+      "name": "周末电音派对",
+      "start_time": "2026-06-28T20:00:00+08:00",
+      "end_time": "2026-06-28T23:00:00+08:00",
+      "poster_list": "https://cdn.xxx/poster.png"
+    },
+    "ticket_spec": {
+      "name": "早鸟票"
+    },
+    "buyer_name": "罗小瑞",
+    "buyer_id_card": "500101199001010817",
+    "viewers": [
+      {
+        "viewer_id": 12,
+        "real_name": "罗小瑞",
+        "id_card": "500101199001010817",
+        "id_card_masked": "5001**********0817",
+        "phone": "13800008000",
+        "phone_masked": "138****8000",
+        "type": 1
+      }
+    ],
+    "pay_method": "JSAPI",
+    "pay_time": "2026-05-31T14:32:00+08:00",
+    "created_at": "2026-05-31T14:30:00+08:00",
+    "qr_code": "TICKET:T2026053114300012ab34cd:xxxx",
+    "qr_code_url": "https://cdn.hypercn.cn/ticket/qrcode/2026/06/12/T2026053114300012ab34cd.png",
+    "expire_time": "2026-05-31T14:45:00+08:00",
+    "refund_info": null
+  }
+}
+```
+
 ---
 
 ## 8. 退款模块

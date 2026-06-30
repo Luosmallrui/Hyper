@@ -95,6 +95,7 @@ type ITicketingService interface {
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
 	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
 	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
+	GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
 	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
@@ -2724,6 +2725,35 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 		})
 	}
 	return &types.PageResponse[types.OrganizerOrderListItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Table("ticket_orders o").
+		Select("o.*").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("o.order_no = ? AND a.organizer_id = ?", orderNo, org.ID).
+		First(&order).Error; err != nil {
+		return nil, err
+	}
+	detail, err := s.buildOrderDetail(ctx, order)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerOrderDetailResponse{TicketOrderDetailResponse: *detail, UserID: order.UserID}
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("id = ?", order.UserID).First(&user).Error; err == nil {
+		resp.UserName = user.Nickname
+		resp.UserMobile = maskPhone(user.Mobile)
+		resp.UserAvatar = user.Avatar
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error) {
