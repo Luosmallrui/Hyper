@@ -90,7 +90,7 @@ type ActivityCollectionItem struct {
 
 type PlatformMessageRequest struct {
 	Title         string  `json:"title" binding:"required"`
-	Content       string  `json:"content"`
+	Content       string  `json:"content" binding:"required"`
 	Type          string  `json:"type"`
 	Target        string  `json:"target"`
 	TargetUserIDs []int64 `json:"target_user_ids"`
@@ -110,4 +110,18 @@ type BankAccountAuditRequest struct {
 
 type AdminCommentStatusRequest struct {
 	Status int8 `json:"status" binding:"oneof=-1 0 1"`
+}
+
+type AdminPointsAdjustRequest struct {
+	UserID    int64  `json:"user_id" binding:"required"`
+	Points    int64  `json:"points" binding:"required"`
+	Reason    string `json:"reason" binding:"required,max=255"`
+	RequestNo string `json:"request_no" binding:"required,max=64"`
+}
+
+type AdminPointsAdjustResponse struct {
+	UserID       int64  `json:"user_id"`
+	ChangePoints int64  `json:"change_points"`
+	Balance      int64  `json:"balance"`
+	RequestNo    string `json:"request_no"`
 }

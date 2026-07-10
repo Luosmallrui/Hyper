@@ -6,6 +6,9 @@ const (
 	OrganizerTypeVenue    = "venue"
 	OrganizerTypeMerchant = "merchant"
 
+	ActivityTypeParty = "party"
+	ActivityTypeVenue = "venue"
+
 	OrganizerStatusPending  int8 = 0
 	OrganizerStatusAuditing int8 = 1
 	OrganizerStatusApproved int8 = 2
@@ -38,7 +41,7 @@ const (
 type Organizer struct {
 	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserID          int64     `gorm:"column:user_id;not null;uniqueIndex:uk_organizer_user" json:"user_id"`
-	Type            string    `gorm:"column:type;size:20;not null;default:venue" json:"type"`
+	Type            string    `gorm:"column:type;size:20;not null;default:merchant" json:"type"`
 	Name            string    `gorm:"column:name;size:100;not null" json:"name"`
 	Logo            string    `gorm:"column:logo;size:255" json:"logo"`
 	Status          int8      `gorm:"column:status;not null;default:0" json:"status"`
@@ -64,6 +67,7 @@ func (Organizer) TableName() string {
 type Activity struct {
 	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID      int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Type             string    `gorm:"column:type;size:20;not null;default:party;index" json:"type"`
 	Name             string    `gorm:"column:name;size:80;not null" json:"name"`
 	ShareTitle       string    `gorm:"column:share_title;size:20" json:"share_title"`
 	StartTime        time.Time `gorm:"column:start_time" json:"start_time"`

@@ -12,6 +12,7 @@ import (
 	"Hyper/types"
 	base "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -59,10 +60,34 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id/collect", authorize, context.Wrap(n.Uncollect))
 	g.GET("/:note_id/collect", authorize, context.Wrap(n.GetCollectStatus))
 	g.GET("/:note_id/collections/count", context.Wrap(n.GetCollectCount))
+	g.POST("/:note_id/share", authorize, context.Wrap(n.RecordShare))
 	g.DELETE("/:note_id", authorize, context.Wrap(n.DeleteNote))
 	g.PATCH("/:note_id/relation", authorize, context.Wrap(n.UpdateNoteRelation))
 	g.PUT("/:note_id/relation", authorize, context.Wrap(n.UpdateNoteRelation))
 	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
+}
+
+func (n *Note) RecordShare(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	noteID, err := strconv.ParseUint(c.Param("note_id"), 10, 64)
+	if err != nil || noteID == 0 {
+		return response.NewError(http.StatusBadRequest, "笔记ID格式错误")
+	}
+	var req types.RecordNoteShareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误: "+err.Error())
+	}
+	if err := n.NoteService.RecordShare(c.Request.Context(), uint64(userID), noteID, req.Channel); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "动态不存在")
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
 }
 
 func (n *Note) Gen(c *gin.Context) error {

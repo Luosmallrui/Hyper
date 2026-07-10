@@ -14,7 +14,7 @@ Authorization: Bearer <access_token>
 
 场地展示数据来源：
 
-- `organizers`：只返回 `type=venue`、`status=2`、`enabled=1` 的场地。
+- `organizers`：只返回 `status=2`、`enabled=1` 且名下存在已上架 `activities.type=venue` 的主办方；场地/派对区分已迁移到活动创建。
 - `organizer_profiles`：介绍、图册、地址、营业时间、定位等资料。
 - `organizer_stores`：门店/场地位置。
 - `notes.store_id`：场地相关动态。
@@ -276,7 +276,7 @@ Query:
 |---|---|---|
 | page | 否 | 默认 1 |
 | size | 否 | 默认 10 |
-| type | 否 | `all` / `activity` / `venue`，默认 `all` |
+| type | 否 | `all` / `activity` / `venue`，默认 `all`；`venue` 来源于名下存在已上架 `activities.type=venue` 的主办方 |
 
 响应：
 

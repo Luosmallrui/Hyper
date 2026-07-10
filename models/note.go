@@ -24,3 +24,16 @@ type Note struct {
 func (n Note) TableName() string {
 	return "notes"
 }
+
+// NoteShare stores every share action. Unlike note_stats, it is an auditable event log.
+type NoteShare struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	NoteID    uint64    `gorm:"column:note_id;not null;index:idx_note_share_note_created" json:"note_id"`
+	UserID    uint64    `gorm:"column:user_id;not null;index:idx_note_share_user" json:"user_id"`
+	Channel   string    `gorm:"column:channel;size:50;not null;default:''" json:"channel"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;index:idx_note_share_note_created" json:"created_at"`
+}
+
+func (NoteShare) TableName() string {
+	return "note_shares"
+}

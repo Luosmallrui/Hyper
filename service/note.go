@@ -32,6 +32,27 @@ type INoteService interface {
 	GetALlNote(ctx context.Context) ([]*models.Note, error)
 	GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error)
 	GetRelatedNotes(ctx context.Context, req types.ListRelatedNotesReq, currentUserID uint64) (types.ListNotesRep, error)
+	RecordShare(ctx context.Context, userID, noteID uint64, channel string) error
+}
+
+func (s *NoteService) RecordShare(ctx context.Context, userID, noteID uint64, channel string) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var note models.Note
+		if err := tx.Where("id = ?", noteID).First(&note).Error; err != nil {
+			return err
+		}
+		if note.Status == -1 {
+			return errors.New("笔记已删除")
+		}
+		if err := tx.Create(&models.NoteShare{NoteID: noteID, UserID: userID, Channel: channel}).Error; err != nil {
+			return err
+		}
+		return tx.Exec(
+			"INSERT INTO note_stats (note_id, share_count, updated_at) VALUES (?, 1, NOW()) "+
+				"ON DUPLICATE KEY UPDATE share_count = share_count + 1, updated_at = NOW()",
+			noteID,
+		).Error
+	})
 }
 
 type NoteService struct {

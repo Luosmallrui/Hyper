@@ -446,6 +446,9 @@ func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, t
 	if err := tx.Where("order_no = ?", orderNo).First(&paidOrder).Error; err != nil {
 		return fmt.Errorf("获取票务订单失败: %w", err)
 	}
+	if err := recordPlatformTicketPayment(tx, paidOrder, tradeType); err != nil {
+		return err
+	}
 	return p.rewardTicketOrderPoints(tx, paidOrder)
 }
 
@@ -589,6 +592,9 @@ func (p *PayService) ApplyWechatRefund(ctx context.Context, weChatClient *core.C
 			if err := p.refundTicketOrderPoints(tx, order); err != nil {
 				return err
 			}
+			if err := recordPlatformTicketRefund(tx, refund, order); err != nil {
+				return err
+			}
 		}
 		return tx.Create(&models.RefundLog{
 			RefundID:    refund.ID,
@@ -643,6 +649,9 @@ func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddo
 				if err := p.refundTicketOrderPoints(tx, order); err != nil {
 					return err
 				}
+				if err := recordPlatformTicketRefund(tx, refund, order); err != nil {
+					return err
+				}
 			}
 		}
 		return tx.Create(&models.RefundLog{
@@ -694,6 +703,9 @@ func (p *PayService) completeLocalTicketRefund(ctx context.Context, refund model
 			return err
 		}
 		if err := p.refundTicketOrderPoints(tx, order); err != nil {
+			return err
+		}
+		if err := recordPlatformTicketRefund(tx, refund, order); err != nil {
 			return err
 		}
 		return tx.Create(&models.RefundLog{

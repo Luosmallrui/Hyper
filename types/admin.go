@@ -60,6 +60,37 @@ type AdminTicketListResponse struct {
 	PageSize int               `json:"pageSize"`
 }
 
+type AdminPlatformFlowFilter struct {
+	Type        string     `json:"type"`
+	Keyword     string     `json:"keyword"`
+	OrganizerID int64      `json:"organizer_id"`
+	StartDate   *time.Time `json:"start_date"`
+	EndDate     *time.Time `json:"end_date"`
+}
+
+type AdminPlatformFlowItem struct {
+	ID            int64     `json:"id"`
+	FlowNo        string    `json:"flow_no"`
+	Type          string    `json:"type"`
+	Direction     string    `json:"direction"`
+	Amount        int64     `json:"amount"`
+	OrderNo       string    `json:"order_no"`
+	RefundNo      string    `json:"refund_no"`
+	WithdrawID    int64     `json:"withdraw_id"`
+	OrganizerID   int64     `json:"organizer_id"`
+	OrganizerName string    `json:"organizer_name"`
+	PayMethod     string    `json:"pay_method"`
+	Remark        string    `json:"remark"`
+	OccurredAt    time.Time `json:"occurred_at"`
+}
+
+type AdminPlatformFlowListResponse struct {
+	List     []AdminPlatformFlowItem `json:"list"`
+	Total    int64                   `json:"total"`
+	Page     int                     `json:"page"`
+	PageSize int                     `json:"pageSize"`
+}
+
 // AdminActivityListResponse 活动审核列表响应
 type AdminActivityListResponse struct {
 	List     []AdminActivityItem `json:"list"`
@@ -74,6 +105,7 @@ type AdminActivityItem struct {
 	OrganizerID      int64   `json:"organizer_id"`
 	OrganizerName    string  `json:"organizer_name"`
 	OrganizerType    string  `json:"organizer_type"`
+	Type             string  `json:"type"`
 	Name             string  `json:"name"`
 	ShareTitle       string  `json:"share_title"`
 	StartTime        string  `json:"start_time"`
@@ -133,6 +165,8 @@ type AdminTicketOrderItem struct {
 	Status         int8   `json:"status"`
 	TotalPrice     int64  `json:"total_price"`
 	ActualPrice    int64  `json:"actual_price"`
+	PointsAmount   int64  `json:"points_amount"`
+	PointsDiscount int64  `json:"points_discount"`
 	Quantity       int    `json:"quantity"`
 	UserID         int64  `json:"user_id"`
 	UserName       string `json:"user_name"`
@@ -145,13 +179,17 @@ type AdminTicketOrderItem struct {
 	TicketSpecName string `json:"ticket_spec_name"`
 	PayMethod      string `json:"pay_method"`
 	PayTime        string `json:"pay_time"`
+	ExpireTime     string `json:"expire_time"`
 	CreatedAt      string `json:"created_at"`
 }
 
 type AdminTicketOrderDetail struct {
-	Order      AdminTicketOrderItem `json:"order"`
-	Refunds    []models.Refund      `json:"refunds"`
-	RefundLogs []models.RefundLog   `json:"refund_logs"`
+	Order               AdminTicketOrderItem `json:"order"`
+	Viewers             []OrderViewerItem    `json:"viewers"`
+	Refunds             []models.Refund      `json:"refunds"`
+	RefundLogs          []models.RefundLog   `json:"refund_logs"`
+	VerificationRecords []map[string]any     `json:"verification_records"`
+	PayRecords          []models.PayRecord   `json:"pay_records"`
 }
 
 // AdminUpdatePartyStatusRequest 更新派对状态
@@ -243,12 +281,16 @@ type AdminFinanceSummary struct {
 }
 
 type AdminSettlementItem struct {
-	OrganizerID   int64  `json:"organizer_id"`
-	OrganizerName string `json:"organizer_name"`
-	GrossAmount   int64  `json:"gross_amount"`
-	RefundAmount  int64  `json:"refund_amount"`
-	SettleAmount  int64  `json:"settle_amount"`
-	OrderCount    int64  `json:"order_count"`
+	OrganizerID           int64  `json:"organizer_id"`
+	OrganizerName         string `json:"organizer_name"`
+	GrossAmount           int64  `json:"gross_amount"`
+	RefundAmount          int64  `json:"refund_amount"`
+	WithdrawAmount        int64  `json:"withdraw_amount"`
+	PendingWithdrawAmount int64  `json:"pending_withdraw_amount"`
+	SettleAmount          int64  `json:"settle_amount"`
+	PendingSettleAmount   int64  `json:"pending_settle_amount"`
+	OrderCount            int64  `json:"order_count"`
+	UpdatedAt             string `json:"updated_at"`
 }
 
 type AdminSettlementListResponse struct {

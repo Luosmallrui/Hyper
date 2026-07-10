@@ -64,6 +64,7 @@ type SearchPartyItem struct {
 
 type SearchActivityItem struct {
 	ID         int64     `json:"id"`
+	Type       string    `json:"type"`
 	Name       string    `json:"name"`
 	PosterList string    `json:"poster_list"`
 	StartTime  time.Time `json:"start_time"`

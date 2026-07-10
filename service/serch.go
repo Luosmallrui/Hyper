@@ -278,6 +278,7 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 		for _, a := range dbActivities {
 			resp.Activities = append(resp.Activities, types.SearchActivityItem{
 				ID:         a.ID,
+				Type:       searchActivityType(a.Type),
 				Name:       a.Name,
 				PosterList: a.PosterList,
 				StartTime:  a.StartTime,
@@ -294,6 +295,13 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 		}
 	}
 	return resp, nil
+}
+
+func searchActivityType(raw string) string {
+	if raw == models.ActivityTypeVenue {
+		return models.ActivityTypeVenue
+	}
+	return models.ActivityTypeParty
 }
 
 func parseSearchTagBits(raw string) int {
