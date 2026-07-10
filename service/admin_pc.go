@@ -22,7 +22,21 @@ func (s *AdminService) GetAdminProfile(ctx context.Context, adminID int64) (*typ
 	if err := s.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
 		return nil, err
 	}
-	return &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, RoleID: admin.RoleID, Status: admin.Status, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}, nil
+	resp := &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, RoleID: admin.RoleID, Status: admin.Status, Permissions: []string{}, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}
+	if admin.RoleID == 0 {
+		return resp, nil
+	}
+	var role models.AdminRole
+	if err := s.DB.WithContext(ctx).Where("id = ?", admin.RoleID).First(&role).Error; err != nil {
+		return nil, err
+	}
+	permissions, err := normalizeAdminPermissions(role.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	resp.RoleName = role.Name
+	resp.Permissions = permissions
+	return resp, nil
 }
 
 func (s *AdminService) UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error {
@@ -45,25 +59,35 @@ func (s *AdminService) UpdateAdminPassword(ctx context.Context, adminID int64, r
 	return s.DB.WithContext(ctx).Model(&admin).Update("password", encrypt.HashPassword(req.NewPassword)).Error
 }
 
-func (s *AdminService) ListAdmins(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.Admin], error) {
+func (s *AdminService) ListAdmins(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[types.AdminAccountItem], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
-	query := s.DB.WithContext(ctx).Model(&models.Admin{})
+	query := s.DB.WithContext(ctx).Table("admin a").Joins("LEFT JOIN admin_roles r ON r.id = a.role_id")
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("username LIKE ? OR mobile LIKE ? OR email LIKE ?", like, like, like)
+		query = query.Where("a.username LIKE ? OR a.mobile LIKE ? OR a.email LIKE ?", like, like, like)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var list []models.Admin
-	if err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
+	var rows []struct {
+		ID                              int
+		Username, Avatar, Mobile, Email string
+		RoleID                          int64
+		Status                          int8
+		CreatedAt, UpdatedAt            time.Time
+		RoleName                        string
+		Permissions                     string
+	}
+	if err := query.Select("a.id, a.username, a.avatar, a.mobile, a.email, a.role_id, a.status, a.created_at, a.updated_at, r.name AS role_name, r.permissions").Order("a.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	for i := range list {
-		list[i].Password = ""
+	list := make([]types.AdminAccountItem, 0, len(rows))
+	for _, row := range rows {
+		permissions, _ := normalizeAdminPermissions(row.Permissions)
+		list = append(list, types.AdminAccountItem{ID: row.ID, Username: row.Username, Avatar: row.Avatar, Mobile: row.Mobile, Email: row.Email, RoleID: row.RoleID, Role: types.AdminRoleSummary{ID: row.RoleID, Name: row.RoleName, Permissions: permissions}, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
 	}
-	return &types.AdminPageResponse[models.Admin]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+	return &types.AdminPageResponse[types.AdminAccountItem]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *AdminService) CreateAdmin(ctx context.Context, req types.AdminAccountRequest) (int64, error) {
@@ -83,8 +107,14 @@ func (s *AdminService) CreateAdmin(ctx context.Context, req types.AdminAccountRe
 	return int64(admin.Id), nil
 }
 
-func (s *AdminService) UpdateAdmin(ctx context.Context, id int64, req types.AdminAccountRequest) error {
+func (s *AdminService) UpdateAdmin(ctx context.Context, actorID, id int64, req types.AdminAccountRequest) error {
 	if err := s.validateAdminRole(ctx, req.RoleID); err != nil {
+		return err
+	}
+	if actorID == id && req.Status != 0 && req.Status != models.AdminStatusNormal {
+		return errors.New("不能停用自己的管理员账号")
+	}
+	if err := s.ensureAdminChangeKeepsSuperAdmin(ctx, id, req.RoleID, req.Status); err != nil {
 		return err
 	}
 	updates := map[string]any{"username": req.Username, "avatar": req.Avatar, "mobile": req.Mobile, "email": req.Email, "role_id": req.RoleID}
@@ -99,7 +129,7 @@ func (s *AdminService) UpdateAdmin(ctx context.Context, id int64, req types.Admi
 
 func (s *AdminService) validateAdminRole(ctx context.Context, roleID int64) error {
 	if roleID == 0 {
-		return nil
+		return errors.New("管理员必须分配启用角色")
 	}
 	var count int64
 	if err := s.DB.WithContext(ctx).Model(&models.AdminRole{}).Where("id = ? AND status = 1", roleID).Count(&count).Error; err != nil {
@@ -111,32 +141,62 @@ func (s *AdminService) validateAdminRole(ctx context.Context, roleID int64) erro
 	return nil
 }
 
-func (s *AdminService) DeleteAdmin(ctx context.Context, id int64) error {
+func (s *AdminService) DeleteAdmin(ctx context.Context, actorID, id int64) error {
+	if actorID == id {
+		return errors.New("不能删除自己的管理员账号")
+	}
+	if err := s.ensureAdminChangeKeepsSuperAdmin(ctx, id, -1, models.AdminStatusDeactivate); err != nil {
+		return err
+	}
 	return s.DB.WithContext(ctx).Delete(&models.Admin{}, id).Error
 }
 
-func (s *AdminService) ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.AdminRole], error) {
+func (s *AdminService) ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[types.AdminRoleItem], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
-	query := s.DB.WithContext(ctx).Model(&models.AdminRole{})
+	query := s.DB.WithContext(ctx).Table("admin_roles r").Joins("LEFT JOIN admin a ON a.role_id = r.id")
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
-		query = query.Where("name LIKE ?", "%"+keyword+"%")
+		query = query.Where("r.name LIKE ?", "%"+keyword+"%")
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var list []models.AdminRole
-	if err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
+	var rows []struct {
+		ID                             int64
+		Name, Description, Permissions string
+		Status                         int8
+		MemberCount                    int64
+		CreatedAt, UpdatedAt           time.Time
+	}
+	if err := query.Select("r.id, r.name, r.description, r.permissions, r.status, r.created_at, r.updated_at, COUNT(a.id) AS member_count").Group("r.id, r.name, r.description, r.permissions, r.status, r.created_at, r.updated_at").Order("r.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	return &types.AdminPageResponse[models.AdminRole]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+	list := make([]types.AdminRoleItem, 0, len(rows))
+	for _, row := range rows {
+		permissions, _ := normalizeAdminPermissions(row.Permissions)
+		list = append(list, types.AdminRoleItem{ID: row.ID, Name: row.Name, Description: row.Description, Permissions: permissions, Status: row.Status, MemberCount: row.MemberCount, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
+	}
+	return &types.AdminPageResponse[types.AdminRoleItem]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *AdminService) SaveRole(ctx context.Context, id int64, req types.AdminRoleRequest) (int64, error) {
-	if req.Status == 0 {
+	permissions, err := normalizeAdminPermissions(req.Permissions)
+	if err != nil {
+		return 0, err
+	}
+	if id == 0 && req.Status == 0 {
 		req.Status = 1
 	}
-	role := models.AdminRole{Name: req.Name, Description: req.Description, Permissions: req.Permissions, Status: req.Status}
+	if req.Status != 0 && req.Status != 1 {
+		return 0, errors.New("角色状态仅支持 0禁用 或 1启用")
+	}
+	if id > 0 {
+		if err := s.ensureRoleChangeKeepsSuperAdmin(ctx, id, permissions, req.Status); err != nil {
+			return 0, err
+		}
+	}
+	encoded, _ := json.Marshal(permissions)
+	role := models.AdminRole{Name: req.Name, Description: req.Description, Permissions: string(encoded), Status: req.Status}
 	if id > 0 {
 		return id, s.DB.WithContext(ctx).Model(&models.AdminRole{}).Where("id = ?", id).Updates(role).Error
 	}
@@ -147,6 +207,16 @@ func (s *AdminService) SaveRole(ctx context.Context, id int64, req types.AdminRo
 }
 
 func (s *AdminService) DeleteRole(ctx context.Context, id int64) error {
+	var members int64
+	if err := s.DB.WithContext(ctx).Model(&models.Admin{}).Where("role_id = ?", id).Count(&members).Error; err != nil {
+		return err
+	}
+	if members > 0 {
+		return errors.New("该角色仍有关联管理员，请先迁移成员")
+	}
+	if err := s.ensureRoleChangeKeepsSuperAdmin(ctx, id, nil, models.AdminStatusDeactivate); err != nil {
+		return err
+	}
 	return s.DB.WithContext(ctx).Delete(&models.AdminRole{}, id).Error
 }
 
@@ -183,41 +253,168 @@ func (s *AdminService) CheckPermission(ctx context.Context, adminID int64, metho
 	if admin.Status != models.AdminStatusNormal {
 		return errors.New("管理员账号已停用")
 	}
-	if admin.RoleID == 0 {
+	if isAdminSelfServiceRoute(method, path) {
 		return nil
+	}
+	requiredPermission := RequiredAdminPermission(method, path)
+	if requiredPermission == "" {
+		return errors.New("管理接口未配置权限")
+	}
+	if admin.RoleID == 0 {
+		return fmt.Errorf("无权执行该操作：需要 %s", requiredPermission)
 	}
 	var role models.AdminRole
 	if err := s.DB.WithContext(ctx).Where("id = ? AND status = 1", admin.RoleID).First(&role).Error; err != nil {
 		return errors.New("管理员角色不存在或已停用")
 	}
-	permissions := parsePermissions(role.Permissions)
-	if permissions["*"] || permissions[strings.ToUpper(method)+":"+path] || permissions[adminPermissionModule(path)] {
-		return nil
+	permissions, err := normalizeAdminPermissions(role.Permissions)
+	if err != nil {
+		return errors.New("管理员角色权限配置无效")
 	}
-	return errors.New("无权执行该操作")
-}
-
-func parsePermissions(raw string) map[string]bool {
-	result := map[string]bool{}
-	var values []string
-	if json.Unmarshal([]byte(raw), &values) != nil {
-		values = strings.Split(raw, ",")
-	}
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			result[value] = true
+	for _, permission := range permissions {
+		if permission == "*" || permission == requiredPermission {
+			return nil
 		}
 	}
-	return result
+	return fmt.Errorf("无权执行该操作：需要 %s", requiredPermission)
 }
 
-func adminPermissionModule(path string) string {
-	trimmed := strings.TrimPrefix(path, "/v1/admin/")
-	module := strings.SplitN(trimmed, "/", 2)[0]
-	if module == "" {
-		return "admin"
+var adminPermissionWhitelist = map[string]struct{}{
+	"admin.dashboard": {}, "admin.system": {}, "admin.users": {}, "admin.merchants": {},
+	"admin.organizers": {}, "admin.activities": {}, "admin.tickets": {}, "admin.orders": {},
+	"admin.verifications": {}, "admin.content": {}, "admin.finance": {},
+}
+
+func normalizeAdminPermissions(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}, nil
 	}
-	return "admin." + module
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		values = strings.Split(raw, ",")
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if value != "*" {
+			if _, ok := adminPermissionWhitelist[value]; !ok {
+				return nil, fmt.Errorf("无效的权限值：%s", value)
+			}
+		}
+		if _, ok := seen[value]; !ok {
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	_, hasStar := seen["*"]
+	if len(result) > 1 && hasStar {
+		return nil, errors.New("超级管理员权限只能单独使用 *")
+	}
+	return result, nil
+}
+
+func isAdminSelfServiceRoute(method, path string) bool {
+	return ((method == "GET" || method == "PUT") && path == "/v1/admin/profile") || (method == "PUT" && path == "/v1/admin/profile/password")
+}
+
+// RequiredAdminPermission is the single route-to-module mapping used by the RBAC middleware.
+func RequiredAdminPermission(method, path string) string {
+	if (method == "POST" || method == "PUT" || method == "DELETE") && (strings.HasPrefix(path, "/v1/admin/admins") || strings.HasPrefix(path, "/v1/admin/roles")) {
+		return "*"
+	}
+	switch {
+	case path == "/v1/admin/dashboard":
+		return "admin.dashboard"
+	case strings.HasPrefix(path, "/v1/admin/settings"), strings.HasPrefix(path, "/v1/admin/categories"), strings.HasPrefix(path, "/v1/admin/logs"), strings.HasPrefix(path, "/v1/admin/admins"), strings.HasPrefix(path, "/v1/admin/roles"), strings.HasPrefix(path, "/v1/admin/wechat-subscribe"):
+		return "admin.system"
+	case strings.HasPrefix(path, "/v1/admin/users"), strings.HasPrefix(path, "/v1/admin/viewers"):
+		return "admin.users"
+	case strings.HasPrefix(path, "/v1/admin/organizers"):
+		return "admin.organizers"
+	case strings.HasPrefix(path, "/v1/admin/activities"), strings.HasPrefix(path, "/v1/admin/parties"), strings.HasPrefix(path, "/v1/admin/activity-collections"):
+		return "admin.activities"
+	case strings.HasPrefix(path, "/v1/admin/tickets") || strings.HasPrefix(path, "/v1/admin/events/"):
+		return "admin.tickets"
+	case strings.HasPrefix(path, "/v1/admin/orders"):
+		return "admin.orders"
+	case strings.HasPrefix(path, "/v1/admin/verifiers"), strings.HasPrefix(path, "/v1/admin/verification-records"):
+		return "admin.verifications"
+	case strings.HasPrefix(path, "/v1/admin/notes"), strings.HasPrefix(path, "/v1/admin/messages"), strings.HasPrefix(path, "/v1/admin/banners"):
+		return "admin.content"
+	case strings.HasPrefix(path, "/v1/admin/finance"), strings.HasPrefix(path, "/v1/admin/withdraws"), strings.HasPrefix(path, "/v1/admin/bank-account-audits"), strings.HasPrefix(path, "/v1/admin/points"):
+		return "admin.finance"
+	case strings.HasPrefix(path, "/v1/admin/organizer-level-rules"):
+		return "admin.merchants"
+	default:
+		return "*"
+	}
+}
+
+func (s *AdminService) ensureAdminChangeKeepsSuperAdmin(ctx context.Context, targetID, newRoleID int64, newStatus int8) error {
+	var target models.Admin
+	if err := s.DB.WithContext(ctx).First(&target, targetID).Error; err != nil {
+		return err
+	}
+	if !s.isAdminSuper(ctx, target) {
+		return nil
+	}
+	if newStatus == 0 {
+		newStatus = target.Status
+	}
+	if newStatus == models.AdminStatusNormal && s.isRoleSuper(ctx, newRoleID) {
+		return nil
+	}
+	var count int64
+	if err := s.DB.WithContext(ctx).Table("admin a").Joins("JOIN admin_roles r ON r.id = a.role_id").Where("a.id <> ? AND a.status = ? AND r.status = ? AND r.permissions = ?", targetID, models.AdminStatusNormal, 1, `["*"]`).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("不能删除、停用或降权最后一个启用的超级管理员")
+	}
+	return nil
+}
+
+func (s *AdminService) isAdminSuper(ctx context.Context, admin models.Admin) bool {
+	return s.isRoleSuper(ctx, admin.RoleID)
+}
+
+func (s *AdminService) isRoleSuper(ctx context.Context, roleID int64) bool {
+	if roleID == 0 {
+		return false
+	}
+	var role models.AdminRole
+	if s.DB.WithContext(ctx).First(&role, roleID).Error != nil {
+		return false
+	}
+	permissions, err := normalizeAdminPermissions(role.Permissions)
+	return err == nil && len(permissions) == 1 && permissions[0] == "*"
+}
+
+func (s *AdminService) ensureRoleChangeKeepsSuperAdmin(ctx context.Context, roleID int64, permissions []string, status int8) error {
+	var role models.AdminRole
+	if err := s.DB.WithContext(ctx).First(&role, roleID).Error; err != nil {
+		return err
+	}
+	oldPermissions, err := normalizeAdminPermissions(role.Permissions)
+	if err != nil || len(oldPermissions) != 1 || oldPermissions[0] != "*" {
+		return nil
+	}
+	if status == 1 && len(permissions) == 1 && permissions[0] == "*" {
+		return nil
+	}
+	var count int64
+	if err := s.DB.WithContext(ctx).Table("admin a").Joins("JOIN admin_roles r ON r.id = a.role_id").Where("a.role_id <> ? AND a.status = ? AND r.status = ? AND r.permissions = ?", roleID, models.AdminStatusNormal, 1, `["*"]`).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("不能删除、停用或降权最后一个启用的超级管理员角色")
+	}
+	return nil
 }
 
 func (s *AdminService) GetPointsRule(ctx context.Context) (*types.PointsRule, error) {
@@ -441,7 +638,7 @@ func (s *AdminService) ListVerificationRecords(ctx context.Context, page, pageSi
 
 func (s *AdminService) ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
-	query := s.DB.WithContext(ctx).Table("notes n").Select("n.*, u.nickname, u.avatar, ns.like_count, ns.collect_count, ns.comment_count, ns.share_count").Joins("LEFT JOIN users u ON u.id = n.user_id").Joins("LEFT JOIN note_stats ns ON ns.note_id = n.id")
+	query := s.DB.WithContext(ctx).Table("notes n").Select("n.*, u.nickname, u.avatar, ns.like_count, ns.coll_count, ns.coll_count AS collect_count, ns.comment_count, ns.share_count").Joins("LEFT JOIN users u ON u.id = n.user_id").Joins("LEFT JOIN note_stats ns ON ns.note_id = n.id")
 	if status != nil {
 		query = query.Where("n.status = ?", *status)
 	}

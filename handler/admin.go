@@ -137,7 +137,15 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 func (a *Admin) permissionMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := a.AdminService.CheckPermission(c.Request.Context(), int64(c.GetInt("admin_id")), c.Request.Method, c.FullPath()); err != nil {
-			response.Abort(c, http.StatusForbidden, err.Error())
+			required := service.RequiredAdminPermission(c.Request.Method, c.FullPath())
+			_ = a.AdminService.RecordOperationLog(c.Request.Context(), models.AdminOperationLog{
+				AdminID: int64(c.GetInt("admin_id")), Action: "permission_denied", Resource: required,
+				Method: c.Request.Method, Path: c.Request.URL.Path, IP: c.ClientIP(), Remark: err.Error(),
+			})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code": 403, "msg": "无权执行该操作", "message": "无权执行该操作",
+				"error_code": "ADMIN_PERMISSION_DENIED", "data": gin.H{"required_permission": required},
+			})
 			return
 		}
 		c.Next()
@@ -266,7 +274,7 @@ func (a *Admin) UpdateAdmin(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	if err := a.AdminService.UpdateAdmin(c.Request.Context(), adminParamID(c), req); err != nil {
+	if err := a.AdminService.UpdateAdmin(c.Request.Context(), int64(c.GetInt("admin_id")), adminParamID(c), req); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
@@ -274,7 +282,7 @@ func (a *Admin) UpdateAdmin(c *gin.Context) error {
 }
 
 func (a *Admin) DeleteAdmin(c *gin.Context) error {
-	if err := a.AdminService.DeleteAdmin(c.Request.Context(), adminParamID(c)); err != nil {
+	if err := a.AdminService.DeleteAdmin(c.Request.Context(), int64(c.GetInt("admin_id")), adminParamID(c)); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

@@ -10,16 +10,48 @@ type AdminPageResponse[T any] struct {
 }
 
 type AdminProfileResponse struct {
-	ID        int       `json:"id"`
-	Username  string    `json:"username"`
-	Avatar    string    `json:"avatar"`
-	Mobile    string    `json:"mobile"`
-	Email     string    `json:"email"`
-	Motto     string    `json:"motto"`
-	RoleID    int64     `json:"role_id"`
-	Status    int8      `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          int       `json:"id"`
+	Username    string    `json:"username"`
+	Avatar      string    `json:"avatar"`
+	Mobile      string    `json:"mobile"`
+	Email       string    `json:"email"`
+	Motto       string    `json:"motto"`
+	RoleID      int64     `json:"role_id"`
+	RoleName    string    `json:"role_name"`
+	Permissions []string  `json:"permissions"`
+	Status      int8      `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type AdminRoleSummary struct {
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+}
+
+type AdminAccountItem struct {
+	ID        int              `json:"id"`
+	Username  string           `json:"username"`
+	Avatar    string           `json:"avatar"`
+	Mobile    string           `json:"mobile"`
+	Email     string           `json:"email"`
+	RoleID    int64            `json:"role_id"`
+	Role      AdminRoleSummary `json:"role"`
+	Status    int8             `json:"status"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+type AdminRoleItem struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Permissions []string  `json:"permissions"`
+	Status      int8      `json:"status"`
+	MemberCount int64     `json:"member_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type AdminProfileRequest struct {
