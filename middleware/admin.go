@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"Hyper/pkg/jwt"
-	"Hyper/pkg/response"
 	"net/http"
 	"strings"
 
@@ -14,28 +13,34 @@ func AdminAuth(secret []byte) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			response.Abort(c, http.StatusUnauthorized, "缺少 Authorization")
+			abortAdminAuth(c, http.StatusUnauthorized, "管理员登录已失效", "ADMIN_UNAUTHORIZED")
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			response.Abort(c, http.StatusUnauthorized, "Authorization 格式错误")
+			abortAdminAuth(c, http.StatusUnauthorized, "管理员登录已失效", "ADMIN_UNAUTHORIZED")
 			return
 		}
 
 		claims, err := jwt.ParseToken(secret, "access", parts[1])
 		if err != nil {
-			response.Abort(c, http.StatusUnauthorized, "token 无效或已过期")
+			abortAdminAuth(c, http.StatusUnauthorized, "管理员登录已失效", "ADMIN_UNAUTHORIZED")
 			return
 		}
 
 		if claims.OpenID != "admin" {
-			response.Abort(c, http.StatusForbidden, "非管理员账号")
+			abortAdminAuth(c, http.StatusForbidden, "非管理员账号", "ADMIN_FORBIDDEN")
 			return
 		}
 
 		c.Set("admin_id", int(claims.UserID))
 		c.Next()
 	}
+}
+
+func abortAdminAuth(c *gin.Context, status int, message, errorCode string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"code": status, "msg": message, "message": message, "error_code": errorCode,
+	})
 }

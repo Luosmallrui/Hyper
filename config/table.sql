@@ -506,6 +506,17 @@ CREATE TABLE IF NOT EXISTS `admin_roles`
     PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台角色表';
 
+-- RBAC production migration (run before deploying global RBAC enforcement):
+-- 1. Create the enabled super-administrator role once.
+-- INSERT INTO `admin_roles` (`name`, `description`, `permissions`, `status`, `created_at`, `updated_at`)
+-- SELECT '超级管理员', '系统初始化超级管理员', '["*"]', 1, NOW(), NOW()
+-- WHERE NOT EXISTS (SELECT 1 FROM `admin_roles` WHERE `permissions` = '["*"]' AND `status` = 1);
+-- 2. Assign the existing production admin account to that role. Replace `admin` when the actual bootstrap username differs.
+-- SET @super_role_id := (SELECT `id` FROM `admin_roles` WHERE `permissions` = '["*"]' AND `status` = 1 ORDER BY `id` ASC LIMIT 1);
+-- UPDATE `admin` SET `role_id` = @super_role_id, `status` = 1 WHERE `username` = 'admin';
+-- 3. Assign all remaining enabled administrators an explicit least-privilege role, or disable them before deployment.
+-- UPDATE `admin` SET `status` = 2 WHERE `id` <> (SELECT `id` FROM (SELECT `id` FROM `admin` WHERE `username` = 'admin' LIMIT 1) AS bootstrap_admin) AND `role_id` = 0;
+
 CREATE TABLE IF NOT EXISTS `admin_operation_logs`
 (
     `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '日志ID',

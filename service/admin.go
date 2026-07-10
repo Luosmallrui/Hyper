@@ -53,11 +53,11 @@ type IAdminService interface {
 	GetAdminProfile(ctx context.Context, adminID int64) (*types.AdminProfileResponse, error)
 	UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error
 	UpdateAdminPassword(ctx context.Context, adminID int64, req types.AdminPasswordRequest) error
-	ListAdmins(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.Admin], error)
+	ListAdmins(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[types.AdminAccountItem], error)
 	CreateAdmin(ctx context.Context, req types.AdminAccountRequest) (int64, error)
-	UpdateAdmin(ctx context.Context, id int64, req types.AdminAccountRequest) error
-	DeleteAdmin(ctx context.Context, id int64) error
-	ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[models.AdminRole], error)
+	UpdateAdmin(ctx context.Context, actorID, id int64, req types.AdminAccountRequest) error
+	DeleteAdmin(ctx context.Context, actorID, id int64) error
+	ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[types.AdminRoleItem], error)
 	SaveRole(ctx context.Context, id int64, req types.AdminRoleRequest) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	ListOperationLogs(ctx context.Context, page, pageSize int, adminID int64, keyword string) (*types.AdminPageResponse[models.AdminOperationLog], error)
