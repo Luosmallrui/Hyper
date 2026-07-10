@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS `organizers`
 (
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主办方ID',
     `user_id`           bigint unsigned NOT NULL COMMENT '用户ID',
-    `type`              varchar(20)     NOT NULL DEFAULT 'venue' COMMENT '入驻类型: venue场地 merchant商家',
+    `type`              varchar(20)     NOT NULL DEFAULT 'merchant' COMMENT '兼容字段: 入驻不再区分场地/派对，场地/派对由 activities.type 决定',
     `name`              varchar(100)    NOT NULL COMMENT '主办方名称',
     `logo`              varchar(255)    NOT NULL DEFAULT '' COMMENT 'Logo',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1审核中 2已认证 3未通过',
@@ -205,14 +205,15 @@ CREATE TABLE IF NOT EXISTS `organizers`
     UNIQUE KEY `uk_organizer_user` (`user_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方表';
 
--- 如已有 organizers 表，执行以下 ALTER 添加 type 字段:
--- ALTER TABLE `organizers` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'venue' COMMENT '入驻类型: venue场地 merchant商家' AFTER `user_id`;
+-- 如已有 organizers 表，type 字段保留为兼容字段；场地/派对区分请使用 activities.type。
+-- ALTER TABLE `organizers` MODIFY COLUMN `type` varchar(20) NOT NULL DEFAULT 'merchant' COMMENT '兼容字段: 入驻不再区分场地/派对，场地/派对由 activities.type 决定';
 -- ALTER TABLE `organizers` ADD COLUMN `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用' AFTER `status`;
 
 CREATE TABLE IF NOT EXISTS `activities`
 (
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
     `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
+    `type`              varchar(20)     NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地',
     `name`              varchar(80)     NOT NULL COMMENT '活动名称',
     `share_title`       varchar(20)     NOT NULL DEFAULT '' COMMENT '分享标题',
     `start_time`        datetime        NULL COMMENT '开始时间',
@@ -237,8 +238,13 @@ CREATE TABLE IF NOT EXISTS `activities`
     `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_activity_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_activity_type` (`type`) USING BTREE,
     KEY `idx_activity_status` (`status`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动表v2';
+
+-- 如已有 activities 表，执行以下 ALTER 添加活动类型字段:
+-- ALTER TABLE `activities` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地' AFTER `organizer_id`;
+-- ALTER TABLE `activities` ADD INDEX `idx_activity_type` (`type`);
 
 CREATE TABLE IF NOT EXISTS `ticket_specs`
 (
@@ -737,6 +743,50 @@ CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
 -- 场地详情“相关动态”需要动态和场地/门店建立明确关联。
 -- ALTER TABLE `notes` ADD COLUMN `store_id` bigint NOT NULL DEFAULT 0 COMMENT '关联门店/场地ID' AFTER `activity_id`;
 -- ALTER TABLE `notes` ADD KEY `idx_store_id` (`store_id`);
+
+-- Dynamic share event log. This is the source of truth; note_stats.share_count is only a display counter.
+CREATE TABLE IF NOT EXISTS `note_shares`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '分享记录ID',
+    `note_id`    bigint unsigned NOT NULL COMMENT '动态ID',
+    `user_id`    bigint unsigned NOT NULL COMMENT '分享用户ID',
+    `channel`    varchar(50)     NOT NULL DEFAULT '' COMMENT 'wechat_session/wechat_timeline/copy_link/poster/other',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '分享时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_note_share_note_created` (`note_id`, `created_at`) USING BTREE,
+    KEY `idx_note_share_user` (`user_id`) USING BTREE,
+    KEY `idx_note_share_created` (`created_at`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='动态真实分享日志';
+
+-- Immutable platform accounting ledger. Correcting a business event must append a reversal row instead of updating history.
+CREATE TABLE IF NOT EXISTS `platform_finance_flows`
+(
+    `id`             bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '流水ID',
+    `flow_no`        varchar(40)     NOT NULL COMMENT '平台流水号',
+    `business_key`   varchar(100)    NOT NULL COMMENT '业务幂等键',
+    `type`           varchar(32)     NOT NULL COMMENT 'order_income/refund/service_fee/settlement/withdraw/manual_adjustment',
+    `direction`      varchar(16)     NOT NULL COMMENT 'income/expense',
+    `amount`         bigint          NOT NULL COMMENT '金额，单位分',
+    `order_no`       varchar(30)     NOT NULL DEFAULT '' COMMENT '订单号',
+    `refund_no`      varchar(30)     NOT NULL DEFAULT '' COMMENT '退款单号',
+    `withdraw_id`    bigint unsigned NOT NULL DEFAULT 0 COMMENT '提现记录ID',
+    `organizer_id`   bigint unsigned NOT NULL DEFAULT 0 COMMENT '商家ID',
+    `organizer_name` varchar(100)    NOT NULL DEFAULT '' COMMENT '商家名称快照',
+    `pay_method`     varchar(20)     NOT NULL DEFAULT '' COMMENT '支付方式快照',
+    `remark`         varchar(255)    NOT NULL DEFAULT '' COMMENT '说明',
+    `occurred_at`    datetime        NOT NULL COMMENT '业务发生时间',
+    `created_at`     datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '入账时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_platform_flow_no` (`flow_no`) USING BTREE,
+    UNIQUE KEY `uk_platform_flow_business` (`business_key`) USING BTREE,
+    KEY `idx_platform_flow_type_occurred` (`type`, `occurred_at`) USING BTREE,
+    KEY `idx_platform_flow_organizer_occurred` (`organizer_id`, `occurred_at`) USING BTREE,
+    KEY `idx_platform_flow_order` (`order_no`) USING BTREE,
+    KEY `idx_platform_flow_refund` (`refund_no`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台资金流水';
+
+-- Existing point_logs table migration. It makes request_no idempotency safe under concurrent submissions.
+-- ALTER TABLE `point_logs` ADD UNIQUE KEY `uk_point_log_user_source_type` (`user_id`, `source_id`, `change_type`);
 
 INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '计划有变', 1),

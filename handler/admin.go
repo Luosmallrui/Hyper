@@ -85,6 +85,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 
 		// 财务结算
 		authorized.GET("/finance/summary", context.Wrap(a.GetFinanceSummary))
+		authorized.GET("/finance/platform-flows", context.Wrap(a.ListPlatformFinanceFlows))
 		authorized.GET("/finance/settlements", context.Wrap(a.GetFinanceSettlements))
 		authorized.GET("/finance/settlements/:organizer_id", context.Wrap(a.GetFinanceSettlementDetail))
 		authorized.GET("/finance/settlements/:organizer_id/export", context.Wrap(a.ExportFinanceSettlement))
@@ -102,6 +103,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/notes/:id/records/:type", context.Wrap(a.ListNoteRecords))
 		authorized.PATCH("/notes/:id/comments/:comment_id/status", context.Wrap(a.UpdateCommentStatus))
 		authorized.GET("/points/logs", context.Wrap(a.ListPointLogs))
+		authorized.POST("/points/adjust", context.Wrap(a.AdjustPoints))
 		authorized.GET("/points/rules", context.Wrap(a.GetPointsRule))
 		authorized.PUT("/points/rules", context.Wrap(a.UpdatePointsRule))
 		authorized.GET("/withdraws", context.Wrap(a.ListWithdraws))
@@ -533,6 +535,19 @@ func (a *Admin) ListPointLogs(c *gin.Context) error {
 	return nil
 }
 
+func (a *Admin) AdjustPoints(c *gin.Context) error {
+	var req types.AdminPointsAdjustRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	resp, err := a.AdminService.AdjustPoints(c.Request.Context(), int64(c.GetInt("admin_id")), req)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (a *Admin) GetPointsRule(c *gin.Context) error {
 	resp, err := a.AdminService.GetPointsRule(c.Request.Context())
 	if err != nil {
@@ -658,7 +673,7 @@ func (a *Admin) DeleteOrganizerLevelRule(c *gin.Context) error {
 }
 
 func (a *Admin) ListMessages(c *gin.Context) error {
-	resp, err := a.AdminService.ListMessages(c.Request.Context(), adminPage(c), adminPageSize(c))
+	resp, err := a.AdminService.ListMessages(c.Request.Context(), adminPage(c), adminPageSize(c), c.Query("target"), c.Query("type"))
 	if err != nil {
 		return err
 	}
@@ -969,8 +984,12 @@ func (a *Admin) GetOrderList(c *gin.Context) error {
 		s := int8(v)
 		status = &s
 	}
+	refundStatus, err := adminRefundStatusQuery(c.Query("refund_status"))
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
 
-	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, keyword)
+	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, refundStatus, keyword)
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}
@@ -1017,10 +1036,29 @@ func (a *Admin) GetFinanceSummary(c *gin.Context) error {
 	return nil
 }
 
+func (a *Admin) ListPlatformFinanceFlows(c *gin.Context) error {
+	filter := types.AdminPlatformFlowFilter{
+		Type:        c.Query("type"),
+		Keyword:     c.Query("keyword"),
+		OrganizerID: adminQueryInt64(c, "organizer_id"),
+		StartDate:   adminQueryTime(c, "start_date"),
+		EndDate:     adminQueryTime(c, "end_date"),
+	}
+	if (c.Query("start_date") != "" && filter.StartDate == nil) || (c.Query("end_date") != "" && filter.EndDate == nil) {
+		return response.NewError(400, "日期格式应为 YYYY-MM-DD")
+	}
+	resp, err := a.AdminService.ListPlatformFinanceFlows(c.Request.Context(), adminPage(c), adminPageSize(c), filter)
+	if err != nil {
+		return response.NewError(500, "查询失败: "+err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (a *Admin) GetFinanceSettlements(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	resp, err := a.AdminService.GetFinanceSettlements(c.Request.Context(), page, pageSize, 0)
+	resp, err := a.AdminService.GetFinanceSettlements(c.Request.Context(), page, pageSize, adminQueryInt64(c, "organizer_id"))
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}
@@ -1216,4 +1254,31 @@ func adminQueryTime(c *gin.Context, key string) *time.Time {
 		}
 	}
 	return nil
+}
+
+func adminRefundStatusQuery(raw string) (*int8, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if value, err := strconv.ParseInt(raw, 10, 8); err == nil {
+		parsed := int8(value)
+		return &parsed, nil
+	}
+	var value int8
+	switch raw {
+	case "pending_review":
+		value = models.RefundStatusAuditing
+	case "refunding":
+		value = models.RefundStatusRunning
+	case "refunded":
+		value = models.RefundStatusSuccess
+	case "rejected":
+		value = models.RefundStatusRejected
+	case "cancelled":
+		value = models.RefundStatusCancelled
+	default:
+		return nil, errors.New("无效的售后状态")
+	}
+	return &value, nil
 }

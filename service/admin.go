@@ -8,6 +8,7 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
@@ -32,12 +33,13 @@ type IAdminService interface {
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
 	GetAllTickets(ctx context.Context, page, pageSize int, keyword string) (*types.AdminTicketListResponse, error)
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
-	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status *int8, keyword string) (*types.AdminTicketOrderListResponse, error)
+	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword string) (*types.AdminTicketOrderListResponse, error)
 	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
 	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
 	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
 	GetFinanceSettlements(ctx context.Context, page, pageSize int, organizerID int64) (*types.AdminSettlementListResponse, error)
+	ListPlatformFinanceFlows(ctx context.Context, page, pageSize int, filter types.AdminPlatformFlowFilter) (*types.AdminPlatformFlowListResponse, error)
 	GetUserList(ctx context.Context, page, pageSize int, keyword string) (*types.AdminUserListResponse, error)
 	UpdateUserStatus(ctx context.Context, userID int, status int8) error
 	ListBanners(ctx context.Context) ([]models.PlatformBanner, error)
@@ -77,6 +79,7 @@ type IAdminService interface {
 	ListNoteRecords(ctx context.Context, recordType string, page, pageSize int, noteID int64) (*types.AdminPageResponse[map[string]any], error)
 	UpdateCommentStatus(ctx context.Context, noteID, commentID int64, status int8) error
 	ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error)
+	AdjustPoints(ctx context.Context, adminID int64, req types.AdminPointsAdjustRequest) (*types.AdminPointsAdjustResponse, error)
 	ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error
 	ListBankAccountAudits(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
@@ -84,7 +87,7 @@ type IAdminService interface {
 	ListOrganizerLevelRules(ctx context.Context) ([]models.OrganizerLevelRule, error)
 	SaveOrganizerLevelRule(ctx context.Context, id int64, req types.OrganizerLevelRuleRequest) (int64, error)
 	DeleteOrganizerLevelRule(ctx context.Context, id int64) error
-	ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error)
+	ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[models.PlatformMessage], error)
 	ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, status *int8) (*types.AdminPageResponse[map[string]any], error)
 	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
 	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
@@ -536,6 +539,7 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 		item := types.AdminActivityItem{
 			ID:               activity.ID,
 			OrganizerID:      activity.OrganizerID,
+			Type:             activity.Type,
 			Name:             activity.Name,
 			ShareTitle:       activity.ShareTitle,
 			StartTime:        formatAdminTime(activity.StartTime),
@@ -761,7 +765,7 @@ func (s *AdminService) GetOrderList(ctx context.Context, page, pageSize int, eve
 	}, nil
 }
 
-func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status *int8, keyword string) (*types.AdminTicketOrderListResponse, error) {
+func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword string) (*types.AdminTicketOrderListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -771,23 +775,42 @@ func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize in
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{})
+	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Joins("LEFT JOIN users u ON u.id = ticket_orders.user_id").
+		Joins("LEFT JOIN activities a ON a.id = ticket_orders.activity_id").
+		Joins("LEFT JOIN ticket_specs ts ON ts.id = ticket_orders.ticket_spec_id")
 	if activityID > 0 {
-		query = query.Where("activity_id = ?", activityID)
+		query = query.Where("ticket_orders.activity_id = ?", activityID)
 	}
 	if status != nil {
-		query = query.Where("status = ?", *status)
+		query = query.Where("ticket_orders.status = ?", *status)
 	}
-	if keyword != "" {
+	if refundStatus != nil {
+		query = query.Where(`EXISTS (
+			SELECT 1 FROM refunds rf
+			WHERE rf.order_id = ticket_orders.id
+			AND rf.status = ?
+			AND rf.id = (
+				SELECT MAX(rf2.id) FROM refunds rf2 WHERE rf2.order_id = ticket_orders.id
+			)
+		)`, *refundStatus)
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("order_no LIKE ? OR buyer_name LIKE ? OR buyer_id_card LIKE ?", like, like, like)
+		query = query.Where(`ticket_orders.order_no LIKE ?
+			OR ticket_orders.buyer_name LIKE ?
+			OR ticket_orders.buyer_id_card LIKE ?
+			OR u.nickname LIKE ?
+			OR u.mobile LIKE ?
+			OR a.name LIKE ?
+			OR ts.name LIKE ?`, like, like, like, like, like, like, like)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
 	var orders []models.TicketOrder
-	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&orders).Error; err != nil {
+	if err := query.Select("ticket_orders.*").Order("ticket_orders.created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&orders).Error; err != nil {
 		return nil, err
 	}
 	list, err := s.buildAdminTicketOrderItems(ctx, orders)
@@ -820,7 +843,32 @@ func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string)
 			return nil, err
 		}
 	}
-	return &types.AdminTicketOrderDetail{Order: items[0], Refunds: refunds, RefundLogs: logs}, nil
+	var viewers []models.TicketOrderViewer
+	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id ASC").Find(&viewers).Error; err != nil {
+		return nil, err
+	}
+	var verificationRecords []map[string]any
+	if err := s.DB.WithContext(ctx).Table("verification_records vr").
+		Select("vr.*, v.name AS verifier_name, v.phone AS verifier_phone, a.name AS activity_name").
+		Joins("LEFT JOIN verifiers v ON v.id = vr.verifier_id").
+		Joins("LEFT JOIN activities a ON a.id = vr.activity_id").
+		Where("vr.order_id = ?", order.ID).
+		Order("vr.id DESC").
+		Find(&verificationRecords).Error; err != nil {
+		return nil, err
+	}
+	var payRecords []models.PayRecord
+	if err := s.DB.WithContext(ctx).Where("order_sn = ?", order.OrderNo).Order("id DESC").Find(&payRecords).Error; err != nil {
+		return nil, err
+	}
+	return &types.AdminTicketOrderDetail{
+		Order:               items[0],
+		Viewers:             orderViewerItems(viewers, true),
+		Refunds:             refunds,
+		RefundLogs:          logs,
+		VerificationRecords: verificationRecords,
+		PayRecords:          payRecords,
+	}, nil
 }
 
 func (s *AdminService) ApproveOrderRefund(ctx context.Context, orderNo string) error {
@@ -898,7 +946,15 @@ func (s *AdminService) GetFinanceSettlements(ctx context.Context, page, pageSize
 	base := s.DB.WithContext(ctx).Table("organizers org").
 		Joins("LEFT JOIN activities a ON a.organizer_id = org.id").
 		Joins("LEFT JOIN ticket_orders o ON o.activity_id = a.id AND o.status IN ?", []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}).
-		Joins("LEFT JOIN refunds r ON r.order_id = o.id AND r.status = ?", models.RefundStatusSuccess)
+		Joins("LEFT JOIN refunds r ON r.order_id = o.id AND r.status = ?", models.RefundStatusSuccess).
+		Joins(`LEFT JOIN (
+			SELECT organizer_id,
+				COALESCE(SUM(CASE WHEN status = 1 THEN amount ELSE 0 END), 0) AS withdraw_amount,
+				COALESCE(SUM(CASE WHEN status = 0 THEN amount ELSE 0 END), 0) AS pending_withdraw_amount,
+				MAX(updated_at) AS withdraw_updated_at
+			FROM organizer_withdraws
+			GROUP BY organizer_id
+		) w ON w.organizer_id = org.id`)
 	if organizerID > 0 {
 		base = base.Where("org.id = ?", organizerID)
 	}
@@ -911,8 +967,17 @@ func (s *AdminService) GetFinanceSettlements(ctx context.Context, page, pageSize
 		return nil, err
 	}
 	var rows []types.AdminSettlementItem
-	if err := base.Select("org.id AS organizer_id, org.name AS organizer_name, COALESCE(SUM(o.actual_price),0) AS gross_amount, COALESCE(SUM(r.refund_amount),0) AS refund_amount, COALESCE(SUM(o.actual_price),0) - COALESCE(SUM(r.refund_amount),0) AS settle_amount, COUNT(o.id) AS order_count").
-		Group("org.id, org.name").
+	if err := base.Select(`org.id AS organizer_id,
+			org.name AS organizer_name,
+			COALESCE(SUM(o.actual_price),0) AS gross_amount,
+			COALESCE(SUM(r.refund_amount),0) AS refund_amount,
+			COALESCE(MAX(w.withdraw_amount),0) AS withdraw_amount,
+			COALESCE(MAX(w.pending_withdraw_amount),0) AS pending_withdraw_amount,
+			COALESCE(SUM(o.actual_price),0) - COALESCE(SUM(r.refund_amount),0) AS settle_amount,
+			COALESCE(SUM(o.actual_price),0) - COALESCE(SUM(r.refund_amount),0) - COALESCE(MAX(w.withdraw_amount),0) - COALESCE(MAX(w.pending_withdraw_amount),0) AS pending_settle_amount,
+			COUNT(o.id) AS order_count,
+			DATE_FORMAT(GREATEST(org.updated_at, COALESCE(MAX(w.withdraw_updated_at), org.updated_at)), '%Y-%m-%d %H:%i:%s') AS updated_at`).
+		Group("org.id, org.name, org.updated_at").
 		Order("org.id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
@@ -1095,7 +1160,24 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 	}
 	list := make([]types.AdminTicketOrderItem, 0, len(orders))
 	for _, order := range orders {
-		item := types.AdminTicketOrderItem{OrderNo: order.OrderNo, Status: order.Status, TotalPrice: order.TotalPrice, ActualPrice: order.ActualPrice, Quantity: order.Quantity, UserID: order.UserID, BuyerName: order.BuyerName, BuyerIDCard: order.BuyerIDCard, ActivityID: order.ActivityID, TicketSpecID: order.TicketSpecID, PayMethod: order.PayMethod, PayTime: formatAdminPtrTime(order.PayTime), CreatedAt: order.CreatedAt.Format("2006-01-02 15:04:05")}
+		item := types.AdminTicketOrderItem{
+			OrderNo:        order.OrderNo,
+			Status:         order.Status,
+			TotalPrice:     order.TotalPrice,
+			ActualPrice:    order.ActualPrice,
+			PointsAmount:   order.PointsAmount,
+			PointsDiscount: order.PointsDiscount,
+			Quantity:       order.Quantity,
+			UserID:         order.UserID,
+			BuyerName:      order.BuyerName,
+			BuyerIDCard:    order.BuyerIDCard,
+			ActivityID:     order.ActivityID,
+			TicketSpecID:   order.TicketSpecID,
+			PayMethod:      order.PayMethod,
+			PayTime:        formatAdminPtrTime(order.PayTime),
+			ExpireTime:     formatAdminTime(order.ExpireTime),
+			CreatedAt:      order.CreatedAt.Format("2006-01-02 15:04:05"),
+		}
 		if user, ok := userMap[int(order.UserID)]; ok {
 			item.UserName = user.Nickname
 			item.UserMobile = user.Mobile

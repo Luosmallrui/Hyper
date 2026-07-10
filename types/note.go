@@ -91,6 +91,11 @@ type CreateNoteResponse struct {
 	NoteID uint64 `json:"note_id"` // 笔记ID
 }
 
+// RecordNoteShareRequest records an actual user share action for audit and analytics.
+type RecordNoteShareRequest struct {
+	Channel string `json:"channel" binding:"required,oneof=wechat_session wechat_timeline copy_link poster other"`
+}
+
 type UpdateNoteRelationRequest struct {
 	StoreID    *int64 `json:"store_id"`
 	ActivityID *int   `json:"activity_id"`

@@ -47,12 +47,21 @@ Content-Type: application/json
 | 2 | 已认证 |
 | 3 | 审核未通过 |
 
-### 入驻类型 `organizer.type`
+### 入驻兼容字段 `organizer.type`
+
+> 2026-07-09 更新：入驻申请不再区分场地/派对。`organizer.type` 仅保留兼容旧后台展示，不再作为 C 端场地/派对判断依据。
 
 | 值 | 说明 |
 |---|---|
+| merchant | 默认兼容值 |
+| venue | 历史兼容值 |
+
+### 活动类型 `activity.type`
+
+| 值 | 说明 |
+|---|---|
+| party | 派对，默认值 |
 | venue | 场地 |
-| merchant | 商家 |
 
 ### 活动状态 `activity.status`
 
@@ -138,7 +147,7 @@ Query:
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| source | 否 | `all` / `activity`，默认 `all`；`party` / `venue` / `merchant` 暂保留但返回空列表 |
+| source | 否 | `all` / `activity` / `party` / `venue` / `merchant`，默认 `all`；`party`、`venue` 按 `activities.type` 过滤，`merchant` 暂保留但返回空列表 |
 | limit | 否 | 最多返回数量，默认 `200`，最大 `500` |
 | keyword | 否 | 关键词，匹配标题、地址、描述 |
 | category_id | 否 | 预留字段，当前活动暂未按分类过滤 |
@@ -165,7 +174,9 @@ GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
 |---|---|---|---|
 | all | `activities` | `status=3` | 新票务活动，管理员审核通过后可见 |
 | activity | `activities` | `status=3` | 新票务活动，管理员审核通过后可见 |
-| party / venue / merchant | - | - | 老派对/场地已停止作为首页数据源，返回空列表 |
+| party | `activities` | `status=3 AND type='party'` | 派对型活动 |
+| venue | `activities` | `status=3 AND type='venue'` | 场地型活动 |
+| merchant | - | - | 老商家/派对数据已停止作为首页数据源，返回空列表 |
 
 响应：
 
@@ -318,7 +329,7 @@ CREATE TABLE IF NOT EXISTS `activity_subscriptions`
 
 新场地不再使用旧 `/api/v1/merchant/*`。C 端展示数据来自：
 
-- `organizers`：只返回 `type=venue`、`status=2`、`enabled=1` 的场地。
+- `organizers`：只返回 `status=2`、`enabled=1` 且名下存在已上架 `activities.type=venue` 的主办方。
 - `organizer_profiles`：介绍、图册、地址、营业时间、定位等资料。
 - `organizer_stores`：门店/场地位置。
 - `notes.store_id`：场地相关动态。
@@ -575,7 +586,6 @@ POST /api/v1/organizer/apply
 
 ```json
 {
-  "type": "venue",
   "name": "Hyper Club",
   "logo": "https://cdn.xxx/logo.png",
   "province": "北京市",
@@ -588,7 +598,7 @@ POST /api/v1/organizer/apply
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| type | string | 是 | `venue` 场地 / `merchant` 商家，二选一 |
+| type | string | 否 | 兼容旧字段；入驻不再区分场地/派对，后端忽略该字段并默认按主办方入驻处理 |
 | name | string | 是 | 入驻名称 |
 | logo | string | 否 | Logo URL，可先用 `/api/v1/upload` 上传 |
 | province | string | 否 | 省份 |
@@ -1252,6 +1262,7 @@ Step 1 请求：
 ```json
 {
   "step": 1,
+  "type": "party",
   "name": "周末电音派对",
   "share_title": "一起蹦到凌晨",
   "start_time": "2026-06-12T20:00",
@@ -1261,6 +1272,12 @@ Step 1 请求：
   "description": "<p>活动介绍</p>"
 }
 ```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| type | string | 否 | `party` 派对 / `venue` 场地；不传默认 `party`。场地/派对区分从入驻申请迁移到这里 |
 
 Step 2 请求：
 
@@ -1346,6 +1363,7 @@ GET /api/v1/activity/:id
   "data": {
     "id": 1,
     "organizer_id": 1,
+    "type": "party",
     "name": "周末电音派对",
     "status": 0,
     "ticket_specs": [

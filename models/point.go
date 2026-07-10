@@ -32,12 +32,12 @@ const (
 
 type PointsLog struct {
 	ID         uint64    `gorm:"primaryKey;column:id"`
-	UserID     uint64    `gorm:"column:user_id;index:idx_user_id"`
-	Amount     int64     `gorm:"column:amount"`      // 变动数额（正负）
-	Balance    int64     `gorm:"column:balance"`     // 变动后余额
-	ChangeType int8      `gorm:"column:change_type"` // 1-签到, 2-消费返利, 3-积分抵扣, 4-后台调整
-	Status     int8      `gorm:"column:status"`      // 0-待入账, 1-正式入账
-	SourceID   string    `gorm:"column:source_id;index:idx_source_id;size:64"`
+	UserID     uint64    `gorm:"column:user_id;index:idx_user_id;uniqueIndex:uk_point_log_user_source_type,priority:1"`
+	Amount     int64     `gorm:"column:amount"`                                                           // 变动数额（正负）
+	Balance    int64     `gorm:"column:balance"`                                                          // 变动后余额
+	ChangeType int8      `gorm:"column:change_type;uniqueIndex:uk_point_log_user_source_type,priority:3"` // 1-签到, 2-消费返利, 3-积分抵扣, 4-后台调整
+	Status     int8      `gorm:"column:status"`                                                           // 0-待入账, 1-正式入账
+	SourceID   string    `gorm:"column:source_id;index:idx_source_id;size:64;uniqueIndex:uk_point_log_user_source_type,priority:2"`
 	Remark     string    `gorm:"column:remark;size:255"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
 }

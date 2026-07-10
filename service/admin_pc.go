@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,6 +270,17 @@ func (s *AdminService) SaveCategory(ctx context.Context, id int64, req types.Adm
 	if req.Status == 0 {
 		req.Status = 1
 	}
+	if req.Type == "distance" {
+		value := strings.TrimSpace(req.Value)
+		if value == "" {
+			return 0, errors.New("距离筛选项必须填写公里值")
+		}
+		distance, err := strconv.ParseFloat(value, 64)
+		if err != nil || distance <= 0 {
+			return 0, errors.New("距离筛选项只能填写大于0的数字公里值")
+		}
+		req.Value = value
+	}
 	row := models.AdminCategory{Type: req.Type, Name: req.Name, Image: req.Image, Value: req.Value, Sort: req.Sort, Status: req.Status}
 	if id > 0 {
 		return id, s.DB.WithContext(ctx).Model(&models.AdminCategory{}).Where("id = ?", id).Updates(row).Error
@@ -295,9 +307,19 @@ func (s *AdminService) ListUserRecords(ctx context.Context, userID int64, record
 	case "followers":
 		return adminMapPage(s.DB.WithContext(ctx).Table("user_follow uf").Select("uf.*, u.nickname, u.avatar").Joins("LEFT JOIN users u ON u.id = uf.follower_id").Where("uf.followee_id = ? AND uf.status = 1", userID).Order("uf.id desc"), page, pageSize)
 	case "attends":
-		return adminMapPage(s.DB.WithContext(ctx).Table("party_attends pa").Where("pa.user_id = ?", userID).Order("pa.id desc"), page, pageSize)
+		return adminMapPage(s.DB.WithContext(ctx).Table("ticket_orders o").
+			Select(`o.id, o.order_no, o.status, o.quantity, o.actual_price, o.created_at,
+				a.id AS activity_id, a.name AS activity_name, a.poster_list, ts.name AS ticket_spec_name`).
+			Joins("LEFT JOIN activities a ON a.id = o.activity_id").
+			Joins("LEFT JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
+			Where("o.user_id = ? AND o.status IN ?", userID, []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}).
+			Order("o.id desc"), page, pageSize)
 	case "subscribes":
-		return adminMapPage(s.DB.WithContext(ctx).Table("subscribes s").Where("s.user_id = ?", userID).Order("s.id desc"), page, pageSize)
+		return adminMapPage(s.DB.WithContext(ctx).Table("activity_subscriptions sub").
+			Select(`sub.id, sub.activity_id, sub.created_at, a.name AS activity_name, a.poster_list, a.status AS activity_status`).
+			Joins("LEFT JOIN activities a ON a.id = sub.activity_id").
+			Where("sub.user_id = ?", userID).
+			Order("sub.id desc"), page, pageSize)
 	default:
 		return nil, errors.New("记录类型无效")
 	}
@@ -443,7 +465,11 @@ func (s *AdminService) ListNoteRecords(ctx context.Context, recordType string, p
 	case "comments":
 		return adminMapPage(s.DB.WithContext(ctx).Table("comments c").Select("c.*, u.nickname, u.avatar").Joins("LEFT JOIN users u ON u.id = c.user_id").Where("c.note_id = ?", noteID).Order("c.id desc"), page, pageSize)
 	case "shares":
-		return adminMapPage(s.DB.WithContext(ctx).Table("note_stats ns").Where("ns.note_id = ?", noteID), page, pageSize)
+		return adminMapPage(s.DB.WithContext(ctx).Table("note_shares ns").
+			Select("ns.id, ns.note_id, ns.user_id, u.nickname AS user_name, CASE WHEN u.mobile = '' THEN '' ELSE CONCAT(LEFT(u.mobile, 3), '****', RIGHT(u.mobile, 4)) END AS user_mobile, ns.channel, ns.created_at").
+			Joins("LEFT JOIN users u ON u.id = ns.user_id").
+			Where("ns.note_id = ?", noteID).
+			Order("ns.id desc"), page, pageSize)
 	default:
 		return nil, errors.New("记录类型无效")
 	}
@@ -474,6 +500,104 @@ func (s *AdminService) ListPointLogs(ctx context.Context, page, pageSize int, us
 	return adminMapPage(query.Order("pl.id desc"), page, pageSize)
 }
 
+func (s *AdminService) ListPlatformFinanceFlows(ctx context.Context, page, pageSize int, filter types.AdminPlatformFlowFilter) (*types.AdminPlatformFlowListResponse, error) {
+	page, pageSize = normalizeAdminPage(page, pageSize)
+	query := s.DB.WithContext(ctx).Model(&models.PlatformFinanceFlow{})
+	if flowType := strings.TrimSpace(filter.Type); flowType != "" {
+		query = query.Where("type = ?", flowType)
+	}
+	if filter.OrganizerID > 0 {
+		query = query.Where("organizer_id = ?", filter.OrganizerID)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("flow_no LIKE ? OR order_no LIKE ? OR refund_no LIKE ? OR organizer_name LIKE ?", like, like, like, like)
+	}
+	if filter.StartDate != nil {
+		query = query.Where("occurred_at >= ?", *filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		query = query.Where("occurred_at < ?", filter.EndDate.AddDate(0, 0, 1))
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var list []types.AdminPlatformFlowItem
+	if err := query.Select("id, flow_no, type, direction, amount, order_no, refund_no, withdraw_id, organizer_id, organizer_name, pay_method, remark, occurred_at").
+		Order("occurred_at desc, id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&list).Error; err != nil {
+		return nil, err
+	}
+	return &types.AdminPlatformFlowListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) AdjustPoints(ctx context.Context, adminID int64, req types.AdminPointsAdjustRequest) (*types.AdminPointsAdjustResponse, error) {
+	req.Reason = strings.TrimSpace(req.Reason)
+	req.RequestNo = strings.TrimSpace(req.RequestNo)
+	if req.UserID <= 0 || req.Points == 0 || req.Reason == "" || req.RequestNo == "" {
+		return nil, errors.New("用户、积分变动、调整原因和请求编号不能为空")
+	}
+	resp := &types.AdminPointsAdjustResponse{UserID: req.UserID, ChangePoints: req.Points, RequestNo: req.RequestNo}
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user models.Users
+		if err := tx.First(&user, req.UserID).Error; err != nil {
+			return errors.New("用户不存在")
+		}
+		var existing models.PointsLog
+		if err := tx.Where("user_id = ? AND source_id = ? AND change_type = ?", req.UserID, req.RequestNo, models.TypeSystemCompensate).First(&existing).Error; err == nil {
+			resp.ChangePoints = existing.Amount
+			resp.Balance = existing.Balance
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var account models.UserPoint
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", req.UserID).First(&account).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			account = models.UserPoint{UserID: uint64(req.UserID)}
+			if err := tx.Create(&account).Error; err != nil {
+				return err
+			}
+		}
+		// A concurrent request may have passed the first idempotency check before
+		// this account lock was acquired, so check again while holding the lock.
+		if err := tx.Where("user_id = ? AND source_id = ? AND change_type = ?", req.UserID, req.RequestNo, models.TypeSystemCompensate).First(&existing).Error; err == nil {
+			resp.ChangePoints = existing.Amount
+			resp.Balance = existing.Balance
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		newBalance := account.Balance + req.Points
+		if newBalance < 0 {
+			return errors.New("扣减后积分余额不能小于0")
+		}
+		updates := map[string]any{"balance": newBalance}
+		if req.Points > 0 {
+			updates["total_earned"] = gorm.Expr("total_earned + ?", req.Points)
+		} else {
+			updates["total_used"] = gorm.Expr("total_used + ?", -req.Points)
+		}
+		if err := tx.Model(&models.UserPoint{}).Where("user_id = ?", req.UserID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.PointsLog{UserID: uint64(req.UserID), Amount: req.Points, Balance: newBalance, ChangeType: models.TypeSystemCompensate, SourceID: req.RequestNo, Remark: req.Reason, Status: 1}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&models.AdminOperationLog{AdminID: adminID, Action: "points_adjust", Resource: "points", Method: "POST", Path: "/api/v1/admin/points/adjust", Remark: fmt.Sprintf("user_id=%d,points=%d,request_no=%s,reason=%s", req.UserID, req.Points, req.RequestNo, req.Reason)}).Error; err != nil {
+			return err
+		}
+		resp.Balance = newBalance
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (s *AdminService) ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	query := s.DB.WithContext(ctx).Table("organizer_withdraws w").Select("w.*, o.name AS organizer_name").Joins("LEFT JOIN organizers o ON o.id = w.organizer_id")
@@ -487,7 +611,25 @@ func (s *AdminService) ListWithdraws(ctx context.Context, page, pageSize int, st
 }
 
 func (s *AdminService) AuditWithdraw(ctx context.Context, id int64, req types.WithdrawAuditRequest) error {
-	return s.DB.WithContext(ctx).Model(&models.OrganizerWithdraw{}).Where("id = ?", id).Updates(map[string]any{"status": req.Status, "remark": req.Remark}).Error
+	if req.Status != 1 && req.Status != 2 {
+		return errors.New("提现审核状态仅支持 1通过 或 2拒绝")
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var withdraw models.OrganizerWithdraw
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&withdraw).Error; err != nil {
+			return err
+		}
+		if withdraw.Status != 0 {
+			return errors.New("该提现申请已审核")
+		}
+		if err := tx.Model(&withdraw).Updates(map[string]any{"status": req.Status, "remark": req.Remark, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
+		if req.Status == 1 {
+			return recordPlatformWithdraw(tx, withdraw)
+		}
+		return nil
+	})
 }
 
 func (s *AdminService) ListBankAccountAudits(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
@@ -606,10 +748,16 @@ func (s *AdminService) ensureDefaultOrganizerLevelRules(ctx context.Context) err
 	return nil
 }
 
-func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int) (*types.AdminPageResponse[models.PlatformMessage], error) {
+func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[models.PlatformMessage], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	var total int64
 	query := s.DB.WithContext(ctx).Model(&models.PlatformMessage{})
+	if target = strings.TrimSpace(target); target != "" {
+		query = query.Where("target = ?", target)
+	}
+	if messageType = strings.TrimSpace(messageType); messageType != "" {
+		query = query.Where("type = ?", messageType)
+	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
@@ -631,6 +779,22 @@ func (s *AdminService) ListMessageDeliveries(ctx context.Context, messageID int6
 }
 
 func (s *AdminService) CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error) {
+	req.Title = strings.TrimSpace(req.Title)
+	req.Content = strings.TrimSpace(req.Content)
+	req.Type = strings.TrimSpace(req.Type)
+	req.Target = strings.TrimSpace(req.Target)
+	if req.Title == "" {
+		return 0, errors.New("消息标题不能为空")
+	}
+	if req.Content == "" {
+		return 0, errors.New("消息内容不能为空")
+	}
+	if req.Type == "" {
+		req.Type = "system"
+	}
+	if req.Target == "" {
+		req.Target = "all"
+	}
 	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, Type: req.Type, Target: req.Target, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&msg).Error; err != nil {
 		return 0, err

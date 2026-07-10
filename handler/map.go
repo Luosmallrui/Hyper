@@ -69,11 +69,11 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 	}
 
 	markers := make([]types.MapMarker, 0)
-	if source == "party" || source == "venue" || source == "merchant" {
+	if source == "merchant" {
 		response.Success(c, types.MapMarkerResponse{List: markers, Total: 0})
 		return nil
 	}
-	if source == "all" || source == "activity" {
+	if source == "all" || source == "activity" || source == "party" || source == "venue" {
 		activities, err := m.getActivityMarkers(c, limit)
 		if err != nil {
 			return err
@@ -202,6 +202,12 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", models.ActivityStatusOnline).
 		Where("latitude <> 0 AND longitude <> 0")
+	switch c.DefaultQuery("source", "all") {
+	case "party":
+		query = query.Where("type = ?", models.ActivityTypeParty)
+	case "venue":
+		query = query.Where("type = ?", models.ActivityTypeVenue)
+	}
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR description LIKE ?", like, like, like, like, like, like)
@@ -273,6 +279,14 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 
 	markers := make([]types.MapMarker, 0, len(activities))
 	for _, activity := range activities {
+		activityType := activity.Type
+		if activityType != models.ActivityTypeVenue {
+			activityType = models.ActivityTypeParty
+		}
+		icon := "https://cdn.hypercn.cn/icon/party.png"
+		if activityType == models.ActivityTypeVenue {
+			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
+		}
 		marker := types.MapMarker{
 			ID:            fmt.Sprintf("activity-%d", activity.ID),
 			Source:        "activity",
@@ -280,7 +294,7 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			DetailType:    "activity",
 			DetailURL:     fmt.Sprintf("/api/v1/activity/%d", activity.ID),
 			Title:         activity.Name,
-			Type:          "activity",
+			Type:          activityType,
 			Location:      activity.Address,
 			Address:       activity.Address,
 			Lat:           activity.Latitude,
@@ -290,7 +304,7 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			AvgPrice:      priceMap[activity.ID],
 			CurrentCount:  0,
 			PostCount:     0,
-			Icon:          "https://cdn.hypercn.cn/icon/party.png",
+			Icon:          icon,
 			StartTime:     formatMarkerTime(activity.StartTime),
 			EndTime:       formatMarkerTime(activity.EndTime),
 			Status:        activity.Status,

@@ -213,10 +213,29 @@ other             其它分类
 
 | 功能 | 方法 | 路径 |
 |---|---|---|
-| 平台订单列表 | GET | `/orders?activity_id=&status=&keyword=` |
+| 平台订单列表 | GET | `/orders?activity_id=&status=&refund_status=&keyword=` |
 | 订单详情 | GET | `/orders/:order_no` |
 | 退款通过 | POST | `/orders/:order_no/refund/approve` |
 | 退款拒绝 | POST | `/orders/:order_no/refund/reject` |
+
+订单列表筛选：
+
+| 参数 | 说明 |
+|---|---|
+| keyword | 支持订单号、买家姓名、身份证、用户昵称、手机号、活动名、票种名 |
+| status | 订单主状态 |
+| refund_status | 售后状态，支持数字或 `pending_review` / `refunding` / `refunded` / `rejected` / `cancelled` |
+| activity_id | 活动 ID |
+
+订单详情额外返回：
+
+| 字段 | 说明 |
+|---|---|
+| viewers | 订单实名观演人 |
+| verification_records | 核销记录 |
+| pay_records | 支付流水 |
+| refunds | 退款单 |
+| refund_logs | 退款处理日志 |
 
 拒绝退款：
 
@@ -257,7 +276,7 @@ other             其它分类
 
 | 功能 | 方法 | 路径 |
 |---|---|---|
-| 消息列表 | GET | `/messages` |
+| 消息列表 | GET | `/messages?target=&type=` |
 | 发布消息 | POST | `/messages` |
 | 消息发送/阅读记录 | GET | `/messages/:id/records` |
 
@@ -280,6 +299,7 @@ other             其它分类
 | 字段 | 说明 |
 |---|---|
 | target | `all` 全部用户；`merchant`/`organizer` 商家账号；`user` 指定用户 |
+| type | 消息类型，例如 `system`、`notice`、`activity`、`refund` |
 | organizer_ids | 当 `target=merchant` 时可指定商家 ID；不传则推送全部已通过商家 |
 | target_user_ids | 当 `target=user` 时指定用户 ID |
 | status | `1` 发布并推送；`0` 草稿，只落库不推送 |
@@ -327,6 +347,19 @@ POST /api/v1/admin/messages
 | 收款账户审核 | PUT | `/bank-account-audits/:id/audit` |
 
 提现审核：
+
+商家对账返回关键字段：
+
+| 字段 | 说明 |
+|---|---|
+| gross_amount | 订单收入，单位分 |
+| refund_amount | 已退款金额，单位分 |
+| withdraw_amount | 已审核通过提现金额，单位分 |
+| pending_withdraw_amount | 待审核提现金额，单位分 |
+| settle_amount | 订单收入 - 已退款金额 |
+| pending_settle_amount | 订单收入 - 已退款金额 - 已提现 - 待审核提现 |
+| order_count | 订单数 |
+| updated_at | 最近更新时间 |
 
 ```json
 {

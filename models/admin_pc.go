@@ -139,6 +139,28 @@ type OrganizerWithdraw struct {
 
 func (OrganizerWithdraw) TableName() string { return "organizer_withdraws" }
 
+// PlatformFinanceFlow is the immutable platform-side accounting ledger.
+// Rows are only inserted; correcting a business event creates a reversal row.
+type PlatformFinanceFlow struct {
+	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	FlowNo        string    `gorm:"column:flow_no;size:40;not null;uniqueIndex" json:"flow_no"`
+	BusinessKey   string    `gorm:"column:business_key;size:100;not null;uniqueIndex" json:"-"`
+	Type          string    `gorm:"column:type;size:32;not null;index" json:"type"`
+	Direction     string    `gorm:"column:direction;size:16;not null;index" json:"direction"`
+	Amount        int64     `gorm:"column:amount;not null" json:"amount"`
+	OrderNo       string    `gorm:"column:order_no;size:30;not null;default:'';index" json:"order_no"`
+	RefundNo      string    `gorm:"column:refund_no;size:30;not null;default:'';index" json:"refund_no"`
+	WithdrawID    int64     `gorm:"column:withdraw_id;not null;default:0;index" json:"withdraw_id"`
+	OrganizerID   int64     `gorm:"column:organizer_id;not null;default:0;index" json:"organizer_id"`
+	OrganizerName string    `gorm:"column:organizer_name;size:100;not null;default:''" json:"organizer_name"`
+	PayMethod     string    `gorm:"column:pay_method;size:20;not null;default:''" json:"pay_method"`
+	Remark        string    `gorm:"column:remark;size:255;not null;default:''" json:"remark"`
+	OccurredAt    time.Time `gorm:"column:occurred_at;not null;index" json:"occurred_at"`
+	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (PlatformFinanceFlow) TableName() string { return "platform_finance_flows" }
+
 const (
 	OrganizerBankAuditStatusPending  int8 = 0
 	OrganizerBankAuditStatusApproved int8 = 1

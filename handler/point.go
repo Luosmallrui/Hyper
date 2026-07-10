@@ -21,7 +21,6 @@ func (p *PointHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(p.Config.Jwt.Secret))
 	pointGroup := r.Group("/v1/points")
 	pointGroup.GET("/records", authorize, context.Wrap(p.GetRecordsItem))
-	pointGroup.POST("/reward", context.Wrap(p.RewardPoints))
 	pointGroup.POST("/consume", authorize, context.Wrap(p.ConsumePoint))
 	pointGroup.GET("/balance", authorize, context.Wrap(p.GetAccountAllPoint))
 

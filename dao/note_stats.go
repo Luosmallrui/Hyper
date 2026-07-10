@@ -34,6 +34,15 @@ func (d *NoteStatsDAO) IncrCollCount(ctx context.Context, noteID uint64, delta i
 	).Error
 }
 
+// IncrShareCount increments the denormalized display counter after a share event is recorded.
+func (d *NoteStatsDAO) IncrShareCount(ctx context.Context, noteID uint64, delta int64) error {
+	return d.Db.WithContext(ctx).Exec(
+		"INSERT INTO note_stats (note_id, share_count, updated_at) VALUES (?, GREATEST(?, 0), NOW()) "+
+			"ON DUPLICATE KEY UPDATE share_count = GREATEST(share_count + ?, 0), updated_at = NOW()",
+		noteID, delta, delta,
+	).Error
+}
+
 // GetUserTotalLikes 统计用户所有笔记的总点赞数
 func (d *NoteStatsDAO) GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error) {
 	var total int64

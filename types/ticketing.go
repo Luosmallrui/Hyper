@@ -21,7 +21,7 @@ type ActivityListFilter struct {
 
 type OrganizerApplyRequest struct {
 	Name     string `json:"name" binding:"required"`
-	Type     string `json:"type" binding:"required,oneof=venue merchant"`
+	Type     string `json:"type"`
 	Logo     string `json:"logo"`
 	Province string `json:"province"`
 	City     string `json:"city"`
@@ -357,6 +357,7 @@ type OrganizerInfoResponse struct {
 type ActivityCreateRequest struct {
 	ActivityID       int64                `json:"activity_id"`
 	Step             int                  `json:"step" binding:"required,min=1,max=5"`
+	Type             *string              `json:"type"`
 	Name             *string              `json:"name"`
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
@@ -387,6 +388,7 @@ type ActivityDetailResponse struct {
 
 type ActivityListItem struct {
 	ID          int64     `json:"id"`
+	Type        string    `json:"type"`
 	Name        string    `json:"name"`
 	PosterList  string    `json:"poster_list"`
 	StartTime   time.Time `json:"start_time"`
