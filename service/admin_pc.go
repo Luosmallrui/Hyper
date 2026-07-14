@@ -220,29 +220,93 @@ func (s *AdminService) DeleteRole(ctx context.Context, id int64) error {
 	return s.DB.WithContext(ctx).Delete(&models.AdminRole{}, id).Error
 }
 
-func (s *AdminService) ListOperationLogs(ctx context.Context, page, pageSize int, adminID int64, keyword string) (*types.AdminPageResponse[models.AdminOperationLog], error) {
+func (s *AdminService) ListOperationLogs(ctx context.Context, page, pageSize int, filter types.AdminOperationLogFilter) (*types.AdminPageResponse[types.AdminOperationLogItem], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
-	query := s.DB.WithContext(ctx).Model(&models.AdminOperationLog{})
-	if adminID > 0 {
-		query = query.Where("admin_id = ?", adminID)
+	query := s.DB.WithContext(ctx).Table("admin_operation_logs l").Joins("LEFT JOIN admin a ON a.id = l.admin_id")
+	if filter.AdminID > 0 {
+		query = query.Where("l.admin_id = ?", filter.AdminID)
 	}
-	if keyword = strings.TrimSpace(keyword); keyword != "" {
+	if filter.Action = strings.TrimSpace(filter.Action); filter.Action != "" {
+		query = query.Where("l.action = ?", filter.Action)
+	}
+	if filter.ResourceType = strings.TrimSpace(filter.ResourceType); filter.ResourceType != "" {
+		query = query.Where("COALESCE(NULLIF(l.resource_type, ''), l.resource) = ?", filter.ResourceType)
+	}
+	if filter.Result = strings.TrimSpace(filter.Result); filter.Result != "" {
+		query = query.Where("l.result = ?", filter.Result)
+	}
+	if filter.StartDate != nil {
+		query = query.Where("l.created_at >= ?", *filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		query = query.Where("l.created_at < ?", filter.EndDate.AddDate(0, 0, 1))
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("action LIKE ? OR resource LIKE ? OR path LIKE ?", like, like, like)
+		query = query.Where("l.action LIKE ? OR l.resource_type LIKE ? OR l.resource_id LIKE ? OR l.resource_name LIKE ? OR l.remark LIKE ? OR l.error_message LIKE ? OR a.username LIKE ?", like, like, like, like, like, like, like)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var list []models.AdminOperationLog
-	if err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
+	var list []types.AdminOperationLogItem
+	if err := query.Select("l.id, l.admin_id, COALESCE(a.username, '') AS admin_name, COALESCE(a.username, '') AS admin_username, l.action, COALESCE(NULLIF(l.resource_type, ''), l.resource) AS resource_type, l.resource_id, l.resource_name, l.method, l.path, l.remark, COALESCE(NULLIF(l.result, ''), 'success') AS result, l.error_code, l.error_message, l.ip, l.created_at").Order("l.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&list).Error; err != nil {
 		return nil, err
 	}
-	return &types.AdminPageResponse[models.AdminOperationLog]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+	for i := range list {
+		list[i].ActionName = adminAuditActionName(list[i].Action)
+		if list[i].ResourceName == "" {
+			list[i].ResourceName = adminAuditResourceName(list[i].ResourceType, list[i].ResourceID)
+		}
+	}
+	return &types.AdminPageResponse[types.AdminOperationLogItem]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (s *AdminService) RecordOperationLog(ctx context.Context, item models.AdminOperationLog) error {
+	if item.Result == "" {
+		item.Result = "success"
+	}
+	if item.ResourceType == "" {
+		item.ResourceType = item.Resource
+	}
+	if item.Resource == "" {
+		item.Resource = item.ResourceType
+	}
+	if item.ResourceName == "" {
+		item.ResourceName = adminAuditResourceName(item.ResourceType, item.ResourceID)
+	}
 	return s.DB.WithContext(ctx).Create(&item).Error
+}
+
+func adminAuditActionName(action string) string {
+	names := map[string]string{
+		"admin.settings.update": "更新系统配置", "admin.category.create": "新增分类", "admin.category.update": "更新分类", "admin.category.delete": "删除分类",
+		"admin.role.create": "新增角色", "admin.role.update": "更新角色", "admin.role.delete": "删除角色",
+		"admin.account.create": "新增管理员", "admin.account.update": "更新管理员", "admin.account.delete": "删除管理员",
+		"admin.account.disable": "停用管理员", "admin.withdraw.approve": "审核通过提现申请", "admin.withdraw.reject": "驳回提现申请",
+		"admin.refund.approve": "审核通过退款申请", "admin.refund.reject": "驳回退款申请", "admin.organizer.approve": "审核通过入驻申请",
+		"admin.organizer.reject": "驳回入驻申请", "admin.activity.approve": "审核通过活动", "admin.activity.reject": "驳回活动",
+		"admin.bank_account.approve": "审核通过收款账户", "admin.bank_account.reject": "驳回收款账户", "admin.points.adjust": "人工调整积分", "admin.permission.denied": "权限拒绝",
+		"admin.comment.moderate": "审核动态评论",
+		"admin.profile.update":   "更新个人资料", "admin.activity_collection.create": "新增活动合集", "admin.activity_collection.update": "更新活动合集", "admin.activity_collection.delete": "删除活动合集",
+		"admin.party.update": "更新派对或场地状态", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
+		"admin.message.create": "发布平台消息", "admin.banner.create": "新增轮播图", "admin.banner.update": "更新轮播图", "admin.banner.delete": "删除轮播图",
+	}
+	if name, ok := names[action]; ok {
+		return name
+	}
+	return action
+}
+
+func adminAuditResourceName(resourceType, resourceID string) string {
+	base := map[string]string{"settings": "系统配置", "category": "分类", "role": "角色", "admin": "管理员", "withdraw": "提现申请", "refund": "退款申请", "organizer": "入驻申请", "activity": "活动", "points": "积分账户", "permission": "权限校验"}[resourceType]
+	if base == "" {
+		base = resourceType
+	}
+	if resourceID == "" {
+		return base
+	}
+	return fmt.Sprintf("%s %s", base, resourceID)
 }
 
 func (s *AdminService) CheckPermission(ctx context.Context, adminID int64, method, path string) error {
@@ -330,7 +394,7 @@ func RequiredAdminPermission(method, path string) string {
 	switch {
 	case path == "/v1/admin/dashboard":
 		return "admin.dashboard"
-	case strings.HasPrefix(path, "/v1/admin/settings"), strings.HasPrefix(path, "/v1/admin/categories"), strings.HasPrefix(path, "/v1/admin/logs"), strings.HasPrefix(path, "/v1/admin/admins"), strings.HasPrefix(path, "/v1/admin/roles"), strings.HasPrefix(path, "/v1/admin/wechat-subscribe"):
+	case strings.HasPrefix(path, "/v1/admin/settings"), strings.HasPrefix(path, "/v1/admin/system-config"), strings.HasPrefix(path, "/v1/admin/categories"), strings.HasPrefix(path, "/v1/admin/logs"), strings.HasPrefix(path, "/v1/admin/admins"), strings.HasPrefix(path, "/v1/admin/roles"), strings.HasPrefix(path, "/v1/admin/wechat-subscribe"):
 		return "admin.system"
 	case strings.HasPrefix(path, "/v1/admin/users"), strings.HasPrefix(path, "/v1/admin/viewers"):
 		return "admin.users"
@@ -344,7 +408,7 @@ func RequiredAdminPermission(method, path string) string {
 		return "admin.orders"
 	case strings.HasPrefix(path, "/v1/admin/verifiers"), strings.HasPrefix(path, "/v1/admin/verification-records"):
 		return "admin.verifications"
-	case strings.HasPrefix(path, "/v1/admin/notes"), strings.HasPrefix(path, "/v1/admin/messages"), strings.HasPrefix(path, "/v1/admin/banners"):
+	case strings.HasPrefix(path, "/v1/admin/notes"), strings.HasPrefix(path, "/v1/admin/note-interactions"), strings.HasPrefix(path, "/v1/admin/note-comments"), strings.HasPrefix(path, "/v1/admin/messages"), strings.HasPrefix(path, "/v1/admin/banners"):
 		return "admin.content"
 	case strings.HasPrefix(path, "/v1/admin/finance"), strings.HasPrefix(path, "/v1/admin/withdraws"), strings.HasPrefix(path, "/v1/admin/bank-account-audits"), strings.HasPrefix(path, "/v1/admin/points"):
 		return "admin.finance"
@@ -672,13 +736,16 @@ func (s *AdminService) ListNoteRecords(ctx context.Context, recordType string, p
 	}
 }
 
-func (s *AdminService) UpdateCommentStatus(ctx context.Context, noteID, commentID int64, status int8) error {
+func (s *AdminService) UpdateCommentStatus(ctx context.Context, noteID, commentID, adminID int64, status int8, reason string) error {
 	if status != -1 && status != 0 && status != 1 {
 		return errors.New("评论状态仅支持 -1删除、0隐藏、1公开")
 	}
-	result := s.DB.WithContext(ctx).Model(&models.Comment{}).
-		Where("id = ? AND note_id = ?", commentID, noteID).
-		Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	query := s.DB.WithContext(ctx).Model(&models.Comment{}).Where("id = ?", commentID)
+	if noteID > 0 {
+		query = query.Where("note_id = ?", noteID)
+	}
+	now := time.Now()
+	result := query.Updates(map[string]any{"status": status, "moderated_by": adminID, "moderated_at": now, "moderate_reason": strings.TrimSpace(reason), "updated_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -686,6 +753,97 @@ func (s *AdminService) UpdateCommentStatus(ctx context.Context, noteID, commentI
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func (s *AdminService) ListNoteInteractions(ctx context.Context, page, pageSize int, filter types.AdminNoteInteractionFilter) (*types.AdminPageResponse[map[string]any], error) {
+	page, pageSize = normalizeAdminPage(page, pageSize)
+	parts := make([]string, 0, 3)
+	args := make([]any, 0)
+	appendPart := func(kind, table, channelExpr string) {
+		where := " WHERE 1=1"
+		localArgs := make([]any, 0)
+		if filter.NoteID > 0 {
+			where += " AND x.note_id = ?"
+			localArgs = append(localArgs, filter.NoteID)
+		}
+		if filter.UserID > 0 {
+			where += " AND x.user_id = ?"
+			localArgs = append(localArgs, filter.UserID)
+		}
+		if filter.StartDate != nil {
+			where += " AND x.created_at >= ?"
+			localArgs = append(localArgs, *filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			where += " AND x.created_at < ?"
+			localArgs = append(localArgs, filter.EndDate.AddDate(0, 0, 1))
+		}
+		if kind == "share" && strings.TrimSpace(filter.Channel) != "" {
+			where += " AND x.channel = ?"
+			localArgs = append(localArgs, strings.TrimSpace(filter.Channel))
+		}
+		if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+			like := "%" + keyword + "%"
+			where += " AND (n.title LIKE ? OR n.content LIKE ? OR u.nickname LIKE ? OR u.mobile LIKE ?)"
+			localArgs = append(localArgs, like, like, like, like)
+		}
+		parts = append(parts, "SELECT x.id, '"+kind+"' AS type, x.note_id, CONCAT(LEFT(COALESCE(n.content, ''), 120)) AS note_content, n.status AS note_status, x.user_id, u.nickname AS user_name, CASE WHEN u.mobile = '' THEN '' ELSE CONCAT(LEFT(u.mobile, 3), '****', RIGHT(u.mobile, 4)) END AS user_mobile, "+channelExpr+" AS channel, x.created_at FROM "+table+" x LEFT JOIN notes n ON n.id = x.note_id LEFT JOIN users u ON u.id = x.user_id"+where)
+		args = append(args, localArgs...)
+	}
+	if filter.Type == "" || filter.Type == "like" {
+		appendPart("like", "note_likes", "''")
+	}
+	if filter.Type == "" || filter.Type == "collection" {
+		appendPart("collection", "note_collections", "''")
+	}
+	if filter.Type == "" || filter.Type == "share" {
+		appendPart("share", "note_shares", "x.channel")
+	}
+	if len(parts) == 0 {
+		return nil, errors.New("互动类型仅支持 like、collection、share")
+	}
+	// Likes and collections retain cancelled rows, so only active interactions are included.
+	for i := range parts {
+		if strings.Contains(parts[i], "FROM note_likes") || strings.Contains(parts[i], "FROM note_collections") {
+			parts[i] += " AND x.status = 1"
+		}
+	}
+	union := strings.Join(parts, " UNION ALL ")
+	var total int64
+	if err := s.DB.WithContext(ctx).Raw("SELECT COUNT(*) FROM ("+union+") interactions", args...).Scan(&total).Error; err != nil {
+		return nil, err
+	}
+	queryArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
+	var list []map[string]any
+	if err := s.DB.WithContext(ctx).Raw("SELECT * FROM ("+union+") interactions ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", queryArgs...).Scan(&list).Error; err != nil {
+		return nil, err
+	}
+	return &types.AdminPageResponse[map[string]any]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+func (s *AdminService) ListNoteComments(ctx context.Context, page, pageSize int, filter types.AdminNoteCommentFilter) (*types.AdminPageResponse[map[string]any], error) {
+	page, pageSize = normalizeAdminPage(page, pageSize)
+	query := s.DB.WithContext(ctx).Table("comments c").Select("c.id, c.note_id, LEFT(COALESCE(n.content, ''), 120) AS note_content, c.user_id, u.nickname AS user_name, CASE WHEN u.mobile = '' THEN '' ELSE CONCAT(LEFT(u.mobile, 3), '****', RIGHT(u.mobile, 4)) END AS user_mobile, c.content, c.status, c.created_at, c.updated_at, c.moderated_by, c.moderated_at, c.moderate_reason, ma.username AS moderated_by_name").Joins("LEFT JOIN notes n ON n.id = c.note_id").Joins("LEFT JOIN users u ON u.id = c.user_id").Joins("LEFT JOIN admin ma ON ma.id = c.moderated_by")
+	if filter.Status != nil {
+		query = query.Where("c.status = ?", *filter.Status)
+	}
+	if filter.NoteID > 0 {
+		query = query.Where("c.note_id = ?", filter.NoteID)
+	}
+	if filter.UserID > 0 {
+		query = query.Where("c.user_id = ?", filter.UserID)
+	}
+	if filter.StartDate != nil {
+		query = query.Where("c.created_at >= ?", *filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		query = query.Where("c.created_at < ?", filter.EndDate.AddDate(0, 0, 1))
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("c.content LIKE ? OR n.title LIKE ? OR n.content LIKE ? OR u.nickname LIKE ? OR u.mobile LIKE ?", like, like, like, like, like)
+	}
+	return adminMapPage(query.Order("c.id desc"), page, pageSize)
 }
 
 func (s *AdminService) ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error) {
@@ -781,9 +939,6 @@ func (s *AdminService) AdjustPoints(ctx context.Context, adminID int64, req type
 			return err
 		}
 		if err := tx.Create(&models.PointsLog{UserID: uint64(req.UserID), Amount: req.Points, Balance: newBalance, ChangeType: models.TypeSystemCompensate, SourceID: req.RequestNo, Remark: req.Reason, Status: 1}).Error; err != nil {
-			return err
-		}
-		if err := tx.Create(&models.AdminOperationLog{AdminID: adminID, Action: "points_adjust", Resource: "points", Method: "POST", Path: "/api/v1/admin/points/adjust", Remark: fmt.Sprintf("user_id=%d,points=%d,request_no=%s,reason=%s", req.UserID, req.Points, req.RequestNo, req.Reason)}).Error; err != nil {
 			return err
 		}
 		resp.Balance = newBalance
@@ -945,41 +1100,63 @@ func (s *AdminService) ensureDefaultOrganizerLevelRules(ctx context.Context) err
 	return nil
 }
 
-func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[models.PlatformMessage], error) {
+func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	var total int64
-	query := s.DB.WithContext(ctx).Model(&models.PlatformMessage{})
+	query := s.DB.WithContext(ctx).Table("platform_messages pm").Joins("LEFT JOIN admin a ON a.id = pm.creator_id")
 	if target = strings.TrimSpace(target); target != "" {
-		query = query.Where("target = ?", target)
+		query = query.Where("pm.target = ?", target)
 	}
 	if messageType = strings.TrimSpace(messageType); messageType != "" {
-		query = query.Where("type = ?", messageType)
+		query = query.Where("pm.type = ?", messageType)
 	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
 	}
-	var list []models.PlatformMessage
-	err := query.Order("id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
-	return &types.AdminPageResponse[models.PlatformMessage]{List: list, Total: total, Page: page, PageSize: pageSize}, err
+	var list []map[string]any
+	err := query.Select(`pm.id, pm.title, pm.content, pm.target, pm.type, pm.status, pm.channel, pm.creator_id, COALESCE(a.username, '') AS creator_name, pm.created_at, pm.updated_at,
+		(SELECT COUNT(*) FROM platform_message_deliveries d WHERE d.message_id = pm.id) AS target_count,
+		(SELECT COUNT(*) FROM platform_message_deliveries d WHERE d.message_id = pm.id AND d.status IN (1,3)) AS sent_count,
+		0 AS delivered_count,
+		(SELECT COUNT(*) FROM platform_message_deliveries d WHERE d.message_id = pm.id AND d.status = 2) AS failed_count,
+		(SELECT COUNT(*) FROM platform_message_deliveries d WHERE d.message_id = pm.id AND (d.status = 3 OR d.read_at IS NOT NULL)) AS read_count,
+		(SELECT COUNT(*) FROM platform_message_deliveries d WHERE d.message_id = pm.id AND d.status IN (0,1)) AS unread_count`).Order("pm.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&list).Error
+	return &types.AdminPageResponse[map[string]any]{List: list, Total: total, Page: page, PageSize: pageSize}, err
 }
 
-func (s *AdminService) ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, status *int8) (*types.AdminPageResponse[map[string]any], error) {
+func (s *AdminService) ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, filter types.AdminMessageDeliveryFilter) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	query := s.DB.WithContext(ctx).Table("platform_message_deliveries d").
-		Select("d.*, u.nickname, u.avatar, u.mobile").
+		Select("d.id, d.message_id, CASE WHEN o.id IS NULL THEN 'user' ELSE 'organizer' END AS target_type, d.user_id AS target_id, COALESCE(o.name, u.nickname, '') AS target_name, CASE WHEN u.mobile = '' THEN '' ELSE CONCAT(LEFT(u.mobile, 3), '****', RIGHT(u.mobile, 4)) END AS target_mobile, CASE d.status WHEN 0 THEN 'pending' WHEN 1 THEN 'sent' WHEN 2 THEN 'failed' WHEN 3 THEN 'read' ELSE 'pending' END AS delivery_status, d.sent_at AS delivered_at, d.error AS failed_reason, CASE WHEN d.status = 3 OR d.read_at IS NOT NULL THEN 'read' ELSE 'unread' END AS read_status, d.read_at, d.created_at").
 		Joins("LEFT JOIN users u ON u.id = d.user_id").
+		Joins("LEFT JOIN organizers o ON o.user_id = d.user_id AND o.status = 2").
 		Where("d.message_id = ?", messageID)
-	if status != nil {
-		query = query.Where("d.status = ?", *status)
+	if status := strings.TrimSpace(filter.DeliveryStatus); status != "" {
+		statuses := map[string]int8{"pending": 0, "sent": 1, "failed": 2, "read": 3}
+		value, ok := statuses[status]
+		if !ok {
+			return nil, errors.New("投递状态仅支持 pending、sent、failed、read")
+		}
+		query = query.Where("d.status = ?", value)
+	}
+	if readStatus := strings.TrimSpace(filter.ReadStatus); readStatus != "" {
+		if readStatus == "read" {
+			query = query.Where("d.status = 3 OR d.read_at IS NOT NULL")
+		} else if readStatus == "unread" {
+			query = query.Where("d.status <> 3 AND d.read_at IS NULL")
+		} else {
+			return nil, errors.New("阅读状态仅支持 read、unread")
+		}
 	}
 	return adminMapPage(query.Order("d.id desc"), page, pageSize)
 }
 
-func (s *AdminService) CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error) {
+func (s *AdminService) CreateMessage(ctx context.Context, adminID int64, req types.PlatformMessageRequest) (int64, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.Content = strings.TrimSpace(req.Content)
 	req.Type = strings.TrimSpace(req.Type)
 	req.Target = strings.TrimSpace(req.Target)
+	req.Channel = strings.TrimSpace(req.Channel)
 	if req.Title == "" {
 		return 0, errors.New("消息标题不能为空")
 	}
@@ -992,7 +1169,13 @@ func (s *AdminService) CreateMessage(ctx context.Context, req types.PlatformMess
 	if req.Target == "" {
 		req.Target = "all"
 	}
-	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, Type: req.Type, Target: req.Target, Status: req.Status}
+	if req.Channel == "" {
+		req.Channel = "in_app"
+	}
+	if req.Channel != "in_app" {
+		return 0, errors.New("当前仅支持 in_app 站内消息渠道")
+	}
+	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, Type: req.Type, Target: req.Target, Channel: req.Channel, CreatorID: adminID, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&msg).Error; err != nil {
 		return 0, err
 	}

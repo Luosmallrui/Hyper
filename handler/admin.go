@@ -25,6 +25,8 @@ type Admin struct {
 
 func (a *Admin) RegisterRouter(r gin.IRouter) {
 	adminAuth := middleware.AdminAuth([]byte(a.Config.Jwt.Secret))
+	// Login pages may read branding before an administrator has a token.
+	r.GET("/v1/system-config", context.Wrap(a.GetPublicSystemConfig))
 
 	g := r.Group("/v1/admin")
 	g.POST("/login", context.Wrap(a.Login))
@@ -102,6 +104,9 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.PUT("/notes/:id/status", context.Wrap(a.UpdateNoteStatus))
 		authorized.GET("/notes/:id/records/:type", context.Wrap(a.ListNoteRecords))
 		authorized.PATCH("/notes/:id/comments/:comment_id/status", context.Wrap(a.UpdateCommentStatus))
+		authorized.GET("/note-interactions", context.Wrap(a.ListNoteInteractions))
+		authorized.GET("/note-comments", context.Wrap(a.ListNoteComments))
+		authorized.PATCH("/note-comments/:comment_id/status", context.Wrap(a.UpdateGlobalCommentStatus))
 		authorized.GET("/points/logs", context.Wrap(a.ListPointLogs))
 		authorized.POST("/points/adjust", context.Wrap(a.AdjustPoints))
 		authorized.GET("/points/rules", context.Wrap(a.GetPointsRule))
@@ -128,6 +133,8 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		// 平台设置
 		authorized.GET("/settings", context.Wrap(a.GetSettings))
 		authorized.PUT("/settings", context.Wrap(a.UpdateSettings))
+		authorized.GET("/system-config", context.Wrap(a.GetSystemConfig))
+		authorized.PUT("/system-config", context.Wrap(a.UpdateSystemConfig))
 
 		// 数据概览
 		authorized.GET("/dashboard", context.Wrap(a.GetDashboard))
@@ -139,8 +146,8 @@ func (a *Admin) permissionMiddleware() gin.HandlerFunc {
 		if err := a.AdminService.CheckPermission(c.Request.Context(), int64(c.GetInt("admin_id")), c.Request.Method, c.FullPath()); err != nil {
 			required := service.RequiredAdminPermission(c.Request.Method, c.FullPath())
 			_ = a.AdminService.RecordOperationLog(c.Request.Context(), models.AdminOperationLog{
-				AdminID: int64(c.GetInt("admin_id")), Action: "permission_denied", Resource: required,
-				Method: c.Request.Method, Path: c.Request.URL.Path, IP: c.ClientIP(), Remark: err.Error(),
+				AdminID: int64(c.GetInt("admin_id")), Action: "admin.permission.denied", Resource: "permission", ResourceType: "permission", ResourceID: required, ResourceName: required,
+				Method: c.Request.Method, Path: c.Request.URL.Path, IP: c.ClientIP(), Result: "denied", ErrorCode: "ADMIN_PERMISSION_DENIED", ErrorMessage: err.Error(), Remark: "所需权限：" + required,
 			})
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"code": 403, "msg": "无权执行该操作", "message": "无权执行该操作",
@@ -155,22 +162,115 @@ func (a *Admin) permissionMiddleware() gin.HandlerFunc {
 func (a *Admin) operationLogMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
-		if c.Request.Method == http.MethodGet || c.Writer.Status() >= http.StatusBadRequest {
+		if c.Request.Method == http.MethodGet {
 			return
 		}
 		adminID := int64(c.GetInt("admin_id"))
 		if adminID == 0 {
 			return
 		}
+		meta := adminAuditMetaForRequest(c)
+		result, errorCode, errorMessage := "success", "", ""
+		if message, ok := c.Get("request_handler_error"); ok {
+			result = "failed"
+			errorCode = "ADMIN_OPERATION_FAILED"
+			errorMessage, _ = message.(string)
+			if code, ok := c.Get("request_handler_error_code"); ok {
+				errorCode, _ = code.(string)
+			}
+		} else if c.Writer.Status() >= http.StatusBadRequest {
+			result = "failed"
+			errorCode = "HTTP_" + strconv.Itoa(c.Writer.Status())
+			errorMessage = "管理接口处理失败"
+		}
 		_ = a.AdminService.RecordOperationLog(c.Request.Context(), models.AdminOperationLog{
-			AdminID:  adminID,
-			Action:   strings.ToLower(c.Request.Method),
-			Resource: c.FullPath(),
-			Method:   c.Request.Method,
-			Path:     c.Request.URL.Path,
-			IP:       c.ClientIP(),
-			Remark:   "status=" + strconv.Itoa(c.Writer.Status()),
+			AdminID: adminID, Action: meta.Action, Resource: meta.ResourceType, ResourceType: meta.ResourceType, ResourceID: meta.ResourceID, ResourceName: meta.ResourceName,
+			Method: c.Request.Method, Path: c.Request.URL.Path, IP: c.ClientIP(), Remark: meta.Remark, Result: result, ErrorCode: errorCode, ErrorMessage: errorMessage,
 		})
+	}
+}
+
+type adminAuditMeta struct {
+	Action       string
+	ResourceType string
+	ResourceID   string
+	ResourceName string
+	Remark       string
+}
+
+const adminAuditMetaKey = "admin_audit_meta"
+
+func setAdminAuditMeta(c *gin.Context, meta adminAuditMeta) { c.Set(adminAuditMetaKey, meta) }
+
+func adminAuditMetaForRequest(c *gin.Context) adminAuditMeta {
+	if value, ok := c.Get(adminAuditMetaKey); ok {
+		if meta, ok := value.(adminAuditMeta); ok {
+			return meta
+		}
+	}
+	path := c.FullPath()
+	meta := adminAuditMeta{Action: "admin.unknown." + strings.ToLower(c.Request.Method), ResourceType: "admin"}
+	switch {
+	case path == "/v1/admin/profile":
+		meta = adminAuditMeta{Action: "admin.profile.update", ResourceType: "admin"}
+	case path == "/v1/admin/settings":
+		meta = adminAuditMeta{Action: "admin.settings.update", ResourceType: "settings"}
+	case strings.HasPrefix(path, "/v1/admin/categories"):
+		meta = adminAuditMeta{Action: "admin.category." + requestAction(c.Request.Method), ResourceType: "category"}
+	case strings.HasPrefix(path, "/v1/admin/admins"):
+		meta = adminAuditMeta{Action: "admin.account." + requestAction(c.Request.Method), ResourceType: "admin"}
+	case strings.HasPrefix(path, "/v1/admin/roles"):
+		meta = adminAuditMeta{Action: "admin.role." + requestAction(c.Request.Method), ResourceType: "role"}
+	case strings.HasPrefix(path, "/v1/admin/organizers"):
+		meta = adminAuditMeta{Action: "admin.organizer." + requestAction(c.Request.Method), ResourceType: "organizer"}
+	case strings.HasPrefix(path, "/v1/admin/activities"):
+		meta = adminAuditMeta{Action: "admin.activity." + requestAction(c.Request.Method), ResourceType: "activity"}
+	case strings.HasPrefix(path, "/v1/admin/activity-collections"):
+		meta = adminAuditMeta{Action: "admin.activity_collection." + requestAction(c.Request.Method), ResourceType: "activity_collection"}
+	case strings.HasPrefix(path, "/v1/admin/parties"):
+		meta = adminAuditMeta{Action: "admin.party." + requestAction(c.Request.Method), ResourceType: "party"}
+	case strings.HasPrefix(path, "/v1/admin/orders"):
+		meta = adminAuditMeta{Action: "admin.refund." + requestAction(c.Request.Method), ResourceType: "refund"}
+	case strings.HasPrefix(path, "/v1/admin/withdraws"):
+		meta = adminAuditMeta{Action: "admin.withdraw." + requestAction(c.Request.Method), ResourceType: "withdraw"}
+	case strings.HasPrefix(path, "/v1/admin/users"):
+		meta = adminAuditMeta{Action: "admin.user." + requestAction(c.Request.Method), ResourceType: "user"}
+	case strings.HasPrefix(path, "/v1/admin/verifiers"):
+		meta = adminAuditMeta{Action: "admin.verifier." + requestAction(c.Request.Method), ResourceType: "verifier"}
+	case strings.HasPrefix(path, "/v1/admin/points/adjust"):
+		meta = adminAuditMeta{Action: "admin.points.adjust", ResourceType: "points"}
+	case strings.HasPrefix(path, "/v1/admin/points"):
+		meta = adminAuditMeta{Action: "admin.points.update", ResourceType: "points"}
+	case strings.HasPrefix(path, "/v1/admin/bank-account-audits"):
+		meta = adminAuditMeta{Action: "admin.bank_account.audit", ResourceType: "bank_account"}
+	case strings.HasPrefix(path, "/v1/admin/organizer-level-rules"):
+		meta = adminAuditMeta{Action: "admin.organizer_level_rule." + requestAction(c.Request.Method), ResourceType: "organizer_level_rule"}
+	case strings.HasPrefix(path, "/v1/admin/messages"):
+		meta = adminAuditMeta{Action: "admin.message." + requestAction(c.Request.Method), ResourceType: "message"}
+	case strings.HasPrefix(path, "/v1/admin/banners"):
+		meta = adminAuditMeta{Action: "admin.banner." + requestAction(c.Request.Method), ResourceType: "banner"}
+	case strings.HasPrefix(path, "/v1/admin/notes"), strings.HasPrefix(path, "/v1/admin/note-comments"):
+		meta = adminAuditMeta{Action: "admin.note." + requestAction(c.Request.Method), ResourceType: "note"}
+	}
+	for _, key := range []string{"id", "order_no", "organizer_id", "comment_id"} {
+		if id := c.Param(key); id != "" {
+			meta.ResourceID = id
+			break
+		}
+	}
+	return meta
+}
+
+func requestAction(method string) string {
+	switch method {
+	case http.MethodPost:
+		return "create"
+	case http.MethodPut, http.MethodPatch:
+		return "update"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return strings.ToLower(method)
 	}
 }
 
@@ -274,6 +374,9 @@ func (a *Admin) UpdateAdmin(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
+	if req.Status == models.AdminStatusDeactivate {
+		setAdminAuditMeta(c, adminAuditMeta{Action: "admin.account.disable", ResourceType: "admin", ResourceID: c.Param("id"), Remark: "停用管理员账号"})
+	}
 	if err := a.AdminService.UpdateAdmin(c.Request.Context(), int64(c.GetInt("admin_id")), adminParamID(c), req); err != nil {
 		return err
 	}
@@ -333,7 +436,11 @@ func (a *Admin) DeleteRole(c *gin.Context) error {
 }
 
 func (a *Admin) ListOperationLogs(c *gin.Context) error {
-	resp, err := a.AdminService.ListOperationLogs(c.Request.Context(), adminPage(c), adminPageSize(c), adminQueryInt64(c, "admin_id"), c.Query("keyword"))
+	filter := types.AdminOperationLogFilter{
+		AdminID: adminQueryInt64(c, "admin_id"), Action: c.Query("action"), ResourceType: c.Query("resource_type"),
+		Result: c.Query("result"), Keyword: c.Query("keyword"), StartDate: adminQueryTime(c, "start_date"), EndDate: adminQueryTime(c, "end_date"),
+	}
+	resp, err := a.AdminService.ListOperationLogs(c.Request.Context(), adminPage(c), adminPageSize(c), filter)
 	if err != nil {
 		return err
 	}
@@ -524,11 +631,58 @@ func (a *Admin) UpdateCommentStatus(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(400, "评论ID无效")
 	}
-	if err := a.AdminService.UpdateCommentStatus(c.Request.Context(), adminParamID(c), commentID, req.Status); err != nil {
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.comment.moderate", ResourceType: "comment", ResourceID: strconv.FormatInt(commentID, 10), Remark: req.Reason})
+	if err := a.AdminService.UpdateCommentStatus(c.Request.Context(), adminParamID(c), commentID, int64(c.GetInt("admin_id")), req.Status, req.Reason); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return response.NewError(404, "评论不存在")
 		}
 		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) ListNoteInteractions(c *gin.Context) error {
+	filter := types.AdminNoteInteractionFilter{Type: c.Query("type"), NoteID: adminQueryInt64(c, "note_id"), UserID: adminQueryInt64(c, "user_id"), Keyword: c.Query("keyword"), Channel: c.Query("channel"), StartDate: adminQueryTime(c, "start_date"), EndDate: adminQueryTime(c, "end_date")}
+	resp, err := a.AdminService.ListNoteInteractions(c.Request.Context(), adminPage(c), adminPageSize(c), filter)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) ListNoteComments(c *gin.Context) error {
+	var status *int8
+	if raw := c.Query("status"); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil {
+			return response.NewError(400, "评论状态无效")
+		}
+		parsed := int8(value)
+		status = &parsed
+	}
+	filter := types.AdminNoteCommentFilter{Status: status, NoteID: adminQueryInt64(c, "note_id"), UserID: adminQueryInt64(c, "user_id"), Keyword: c.Query("keyword"), StartDate: adminQueryTime(c, "start_date"), EndDate: adminQueryTime(c, "end_date")}
+	resp, err := a.AdminService.ListNoteComments(c.Request.Context(), adminPage(c), adminPageSize(c), filter)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) UpdateGlobalCommentStatus(c *gin.Context) error {
+	commentID, err := strconv.ParseInt(c.Param("comment_id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "评论ID无效")
+	}
+	var req types.AdminCommentStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.comment.moderate", ResourceType: "comment", ResourceID: strconv.FormatInt(commentID, 10), Remark: req.Reason})
+	if err := a.AdminService.UpdateCommentStatus(c.Request.Context(), 0, commentID, int64(c.GetInt("admin_id")), req.Status, req.Reason); err != nil {
+		return err
 	}
 	response.Success(c, gin.H{"success": true})
 	return nil
@@ -548,6 +702,7 @@ func (a *Admin) AdjustPoints(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.points.adjust", ResourceType: "points", ResourceID: strconv.FormatInt(req.UserID, 10), Remark: req.Reason})
 	resp, err := a.AdminService.AdjustPoints(c.Request.Context(), int64(c.GetInt("admin_id")), req)
 	if err != nil {
 		return response.NewError(400, err.Error())
@@ -600,6 +755,11 @@ func (a *Admin) AuditWithdraw(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
+	action := "admin.withdraw.reject"
+	if req.Status == 1 {
+		action = "admin.withdraw.approve"
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: action, ResourceType: "withdraw", ResourceID: c.Param("id"), Remark: req.Remark})
 	if err := a.AdminService.AuditWithdraw(c.Request.Context(), adminParamID(c), req); err != nil {
 		return err
 	}
@@ -630,6 +790,11 @@ func (a *Admin) AuditBankAccount(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
+	action := "admin.bank_account.reject"
+	if req.Status == models.OrganizerBankAuditStatusApproved {
+		action = "admin.bank_account.approve"
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: action, ResourceType: "bank_account", ResourceID: c.Param("id"), Remark: req.RejectReason})
 	if err := a.AdminService.AuditBankAccount(c.Request.Context(), adminParamID(c), req); err != nil {
 		return err
 	}
@@ -694,7 +859,7 @@ func (a *Admin) CreateMessage(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	id, err := a.AdminService.CreateMessage(c.Request.Context(), req)
+	id, err := a.AdminService.CreateMessage(c.Request.Context(), int64(c.GetInt("admin_id")), req)
 	if err != nil {
 		return err
 	}
@@ -703,16 +868,8 @@ func (a *Admin) CreateMessage(c *gin.Context) error {
 }
 
 func (a *Admin) ListMessageDeliveries(c *gin.Context) error {
-	var status *int8
-	if raw := c.Query("status"); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 8)
-		if err != nil {
-			return response.NewError(400, "投递状态无效")
-		}
-		parsed := int8(value)
-		status = &parsed
-	}
-	resp, err := a.AdminService.ListMessageDeliveries(c.Request.Context(), adminParamID(c), adminPage(c), adminPageSize(c), status)
+	filter := types.AdminMessageDeliveryFilter{DeliveryStatus: c.Query("delivery_status"), ReadStatus: c.Query("read_status")}
+	resp, err := a.AdminService.ListMessageDeliveries(c.Request.Context(), adminParamID(c), adminPage(c), adminPageSize(c), filter)
 	if err != nil {
 		return err
 	}
@@ -769,6 +926,11 @@ func (a *Admin) AuditOrganizer(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}
+	action := "admin.organizer.reject"
+	if req.Status == models.OrganizerStatusApproved {
+		action = "admin.organizer.approve"
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: action, ResourceType: "organizer", ResourceID: strconv.FormatInt(id, 10), Remark: req.RejectReason})
 	if err := a.AdminService.AuditOrganizer(c.Request.Context(), id, req); err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -934,6 +1096,11 @@ func (a *Admin) AuditActivity(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}
+	action := "admin.activity.reject"
+	if req.Status == models.ActivityStatusOnline {
+		action = "admin.activity.approve"
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: action, ResourceType: "activity", ResourceID: strconv.FormatInt(id, 10), Remark: req.RejectReason})
 	if err := a.AdminService.AuditActivity(c.Request.Context(), id, req); err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -1016,6 +1183,7 @@ func (a *Admin) GetOrderDetail(c *gin.Context) error {
 }
 
 func (a *Admin) ApproveOrderRefund(c *gin.Context) error {
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.refund.approve", ResourceType: "refund", ResourceID: c.Param("order_no"), ResourceName: "订单 " + c.Param("order_no")})
 	if err := a.AdminService.ApproveOrderRefund(c.Request.Context(), c.Param("order_no")); err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -1028,6 +1196,7 @@ func (a *Admin) RejectOrderRefund(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.refund.reject", ResourceType: "refund", ResourceID: c.Param("order_no"), ResourceName: "订单 " + c.Param("order_no"), Remark: req.RejectReason})
 	if err := a.AdminService.RejectOrderRefund(c.Request.Context(), c.Param("order_no"), req.RejectReason); err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -1203,8 +1372,42 @@ func (a *Admin) UpdateSettings(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.settings.update", ResourceType: "settings", ResourceName: "系统配置", Remark: "更新系统配置"})
 	if err := a.AdminService.UpdateSettings(c.Request.Context(), req.Settings); err != nil {
 		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) GetSystemConfig(c *gin.Context) error {
+	resp, err := a.AdminService.GetSystemConfig(c.Request.Context())
+	if err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetPublicSystemConfig(c *gin.Context) error {
+	config, err := a.AdminService.GetSystemConfig(c.Request.Context())
+	if err != nil {
+		return response.NewError(500, "读取公开系统配置失败")
+	}
+	// The cache is intentionally short so configuration changes become visible promptly.
+	c.Header("Cache-Control", "public, max-age=300")
+	response.Success(c, types.PublicSystemConfig{SystemName: config.SystemName, ICPRecordNo: config.ICPRecordNo})
+	return nil
+}
+
+func (a *Admin) UpdateSystemConfig(c *gin.Context) error {
+	var req types.AdminSystemConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.settings.update", ResourceType: "settings", ResourceName: "系统配置", Remark: "更新系统名称、备案及客服信息"})
+	if err := a.AdminService.UpdateSystemConfig(c.Request.Context(), req); err != nil {
+		return response.NewError(400, err.Error())
 	}
 	response.Success(c, gin.H{"success": true})
 	return nil

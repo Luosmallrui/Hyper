@@ -21,6 +21,7 @@ type HandlerFunc func(*gin.Context) error
 func Wrap(h func(*gin.Context) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := h(c); err != nil {
+			c.Set("request_handler_error", err.Error())
 			log.L.Error(fmt.Sprintf("[Error] path: %s, method: %s, err: %+v",
 				c.Request.URL.Path, c.Request.Method, err), zap.Error(err))
 			// 如果已经写过响应，直接返回
@@ -30,6 +31,7 @@ func Wrap(h func(*gin.Context) error) gin.HandlerFunc {
 			// 业务错误
 			var be *response.BizError
 			if errors.As(err, &be) {
+				c.Set("request_handler_error_code", fmt.Sprintf("BIZ_%d", be.Code))
 				c.JSON(http.StatusOK, response.Response{
 					Code: be.Code,
 					Msg:  be.Msg,
