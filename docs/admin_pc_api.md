@@ -449,3 +449,90 @@ Authorization: Bearer <admin_access_token>
 - `organizer_bank_account_audits`
 
 部署前请执行 `config/table.sql` 中对应建表语句。
+
+## 内容管理补充（2026-07-12）
+
+以下接口均要求 `admin.content` 权限。
+
+### 全局动态互动日志
+
+```http
+GET /api/v1/admin/note-interactions?page=1&pageSize=20&type=share&note_id=1001&user_id=2001&channel=wechat_session&start_date=2026-07-01&end_date=2026-07-12&keyword=关键词
+```
+
+- `type`：`like`、`collection`、`share`；不传表示全部。
+- 返回：`id`、`type`、`note_id`、`note_content`、`note_status`、`user_id`、`user_name`、脱敏 `user_mobile`、`channel`、`created_at`。
+- 点赞和收藏仅返回当前有效记录；分享保留每一次真实分享行为。
+
+### 全局评论审核队列
+
+```http
+GET /api/v1/admin/note-comments?page=1&pageSize=20&status=0&note_id=1001&user_id=2001&keyword=关键词&start_date=2026-07-01&end_date=2026-07-12
+```
+
+返回评论、动态摘要、评论用户脱敏手机号，以及 `moderated_by`、`moderated_by_name`、`moderated_at`、`moderate_reason`。
+
+```http
+PATCH /api/v1/admin/note-comments/:comment_id/status
+Content-Type: application/json
+```
+
+```json
+{
+  "status": -1,
+  "reason": "包含违规内容"
+}
+```
+
+评论状态固定为：`1` 公开、`0` 隐藏、`-1` 软删除。旧接口 `PATCH /api/v1/admin/notes/:note_id/comments/:comment_id/status` 使用相同状态与审核逻辑。
+
+### 消息投递与阅读状态
+
+`GET /api/v1/admin/messages` 新增返回：`channel`、`creator_id`、`creator_name`、`target_count`、`sent_count`、`delivered_count`、`failed_count`、`read_count`、`unread_count`。
+
+创建消息支持：
+
+```json
+{
+  "title": "平台通知",
+  "content": "消息内容",
+  "target": "all",
+  "type": "system",
+  "channel": "in_app"
+}
+```
+
+当前仅支持 `in_app` 站内消息渠道；不应在前端宣称已发送短信或微信订阅消息。
+
+```http
+GET /api/v1/admin/messages/:id/records?page=1&pageSize=20&delivery_status=sent&read_status=unread
+```
+
+投递记录返回：`target_type`、`target_id`、`target_name`、脱敏 `target_mobile`、`delivery_status`、`delivered_at`、`failed_reason`、`read_status`、`read_at`、`created_at`。
+
+`delivery_status` 枚举：`pending`、`sent`、`failed`、`read`；`read_status` 枚举：`read`、`unread`。
+
+## 系统配置
+
+以下接口要求 `admin.system` 权限。
+
+```http
+GET /api/v1/admin/system-config
+PUT /api/v1/admin/system-config
+```
+
+更新请求：
+
+```json
+{
+  "system_name": "Hyper 潮流活动平台",
+  "icp_record_no": "蜀ICP备2026000000号",
+  "customer_service_phone": "400-000-0000",
+  "customer_service_wechat": "hyper_service",
+  "customer_service_email": "service@hypercn.cn",
+  "customer_service_hours": "工作日 09:00-18:00",
+  "withdraw_arrival_cycle": "T+1 到 T+3 个工作日"
+}
+```
+
+所有字段统一保存到 `platform_settings`。`system_name` 必填，其余字段可为空；更新会写入管理员操作日志。

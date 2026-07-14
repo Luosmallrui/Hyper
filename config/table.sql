@@ -492,7 +492,13 @@ CREATE TABLE IF NOT EXISTS `platform_settings`
 INSERT IGNORE INTO `platform_settings` (`setting_key`, `setting_value`, `remark`) VALUES
 ('points_discount_cents_per_point', '10', '每积分可抵扣金额，单位分'),
 ('points_reward_cents_per_point', '1000', '消费多少分奖励1积分'),
-('withdraw_arrival_cycle', 'T+1 到 T+3 个工作日', '商家提现到账周期展示文案');
+('withdraw_arrival_cycle', 'T+1 到 T+3 个工作日', '商家提现到账周期展示文案'),
+('system_name', 'Hyper', '平台系统名称'),
+('icp_record_no', '', 'ICP备案号'),
+('customer_service_phone', '', '客服电话'),
+('customer_service_wechat', '', '客服微信'),
+('customer_service_email', '', '客服邮箱'),
+('customer_service_hours', '', '客服服务时间');
 
 CREATE TABLE IF NOT EXISTS `admin_roles`
 (
@@ -523,14 +529,35 @@ CREATE TABLE IF NOT EXISTS `admin_operation_logs`
     `admin_id`   bigint unsigned NOT NULL COMMENT '管理员ID',
     `action`     varchar(100)    NOT NULL COMMENT '操作动作',
     `resource`   varchar(100)    NOT NULL DEFAULT '' COMMENT '资源',
+    `resource_type` varchar(50)  NOT NULL DEFAULT '' COMMENT '资源类型',
+    `resource_id` varchar(100)   NOT NULL DEFAULT '' COMMENT '资源ID或业务单号',
+    `resource_name` varchar(255) NOT NULL DEFAULT '' COMMENT '资源展示名称快照',
     `method`     varchar(20)     NOT NULL DEFAULT '' COMMENT 'HTTP方法',
     `path`       varchar(255)    NOT NULL DEFAULT '' COMMENT '请求路径',
+    `result`     varchar(20)     NOT NULL DEFAULT 'success' COMMENT 'success/denied/failed',
+    `error_code` varchar(100)    NOT NULL DEFAULT '' COMMENT '失败错误码',
+    `error_message` varchar(255) NOT NULL DEFAULT '' COMMENT '失败错误信息',
     `ip`         varchar(50)     NOT NULL DEFAULT '' COMMENT 'IP',
     `remark`     varchar(255)    NOT NULL DEFAULT '' COMMENT '备注',
     `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_admin_log_admin` (`admin_id`) USING BTREE
+    KEY `idx_admin_log_admin` (`admin_id`) USING BTREE,
+    KEY `idx_admin_log_action` (`action`) USING BTREE,
+    KEY `idx_admin_log_resource_type` (`resource_type`) USING BTREE,
+    KEY `idx_admin_log_result` (`result`) USING BTREE,
+    KEY `idx_admin_log_created` (`created_at`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台操作日志表';
+
+-- Existing admin_operation_logs table migration:
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `resource_type` varchar(50) NOT NULL DEFAULT '' COMMENT '资源类型' AFTER `resource`;
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `resource_id` varchar(100) NOT NULL DEFAULT '' COMMENT '资源ID或业务单号' AFTER `resource_type`;
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `resource_name` varchar(255) NOT NULL DEFAULT '' COMMENT '资源展示名称快照' AFTER `resource_id`;
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `result` varchar(20) NOT NULL DEFAULT 'success' COMMENT 'success/denied/failed' AFTER `path`;
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `error_code` varchar(100) NOT NULL DEFAULT '' COMMENT '失败错误码' AFTER `result`;
+-- ALTER TABLE `admin_operation_logs` ADD COLUMN `error_message` varchar(255) NOT NULL DEFAULT '' COMMENT '失败错误信息' AFTER `error_code`;
+-- ALTER TABLE `admin_operation_logs` ADD KEY `idx_admin_log_action` (`action`);
+-- ALTER TABLE `admin_operation_logs` ADD KEY `idx_admin_log_resource_type` (`resource_type`);
+-- ALTER TABLE `admin_operation_logs` ADD KEY `idx_admin_log_result` (`result`);
 
 CREATE TABLE IF NOT EXISTS `admin_categories`
 (
@@ -581,11 +608,19 @@ CREATE TABLE IF NOT EXISTS `platform_messages`
     `content`    text            NULL COMMENT '内容',
     `type`       varchar(50)     NOT NULL DEFAULT '' COMMENT '消息类型',
     `target`     varchar(50)     NOT NULL DEFAULT '' COMMENT '发送对象',
+    `channel`    varchar(30)     NOT NULL DEFAULT 'in_app' COMMENT '发送渠道，当前仅 in_app',
+    `creator_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '创建管理员ID',
     `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1已发布 0草稿',
     `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`) USING BTREE
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_platform_message_creator` (`creator_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='平台消息表';
+
+-- Existing platform_messages table migration:
+-- ALTER TABLE `platform_messages` ADD COLUMN `channel` varchar(30) NOT NULL DEFAULT 'in_app' COMMENT '发送渠道，当前仅 in_app' AFTER `target`;
+-- ALTER TABLE `platform_messages` ADD COLUMN `creator_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '创建管理员ID' AFTER `channel`;
+-- ALTER TABLE `platform_messages` ADD KEY `idx_platform_message_creator` (`creator_id`);
 
 CREATE TABLE IF NOT EXISTS `organizer_message_reads`
 (
@@ -754,6 +789,12 @@ CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
 -- 场地详情“相关动态”需要动态和场地/门店建立明确关联。
 -- ALTER TABLE `notes` ADD COLUMN `store_id` bigint NOT NULL DEFAULT 0 COMMENT '关联门店/场地ID' AFTER `activity_id`;
 -- ALTER TABLE `notes` ADD KEY `idx_store_id` (`store_id`);
+
+-- Existing comments table migration. Status is fixed as 1公开、0隐藏、-1软删除.
+-- ALTER TABLE `comments` ADD COLUMN `moderated_by` bigint unsigned NOT NULL DEFAULT 0 COMMENT '最后审核管理员ID' AFTER `status`;
+-- ALTER TABLE `comments` ADD COLUMN `moderated_at` datetime NULL COMMENT '最后审核时间' AFTER `moderated_by`;
+-- ALTER TABLE `comments` ADD COLUMN `moderate_reason` varchar(255) NOT NULL DEFAULT '' COMMENT '审核原因' AFTER `moderated_at`;
+-- ALTER TABLE `comments` ADD KEY `idx_comment_moderated_by` (`moderated_by`);
 
 -- Dynamic share event log. This is the source of truth; note_stats.share_count is only a display counter.
 CREATE TABLE IF NOT EXISTS `note_shares`

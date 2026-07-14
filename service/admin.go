@@ -49,6 +49,8 @@ type IAdminService interface {
 	SortBanners(ctx context.Context, req types.AdminBannerSortRequest) error
 	GetSettings(ctx context.Context) ([]types.AdminSettingItem, error)
 	UpdateSettings(ctx context.Context, settings []types.AdminSettingItem) error
+	GetSystemConfig(ctx context.Context) (*types.AdminSystemConfig, error)
+	UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfig) error
 	GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error)
 	GetAdminProfile(ctx context.Context, adminID int64) (*types.AdminProfileResponse, error)
 	UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error
@@ -60,7 +62,7 @@ type IAdminService interface {
 	ListRoles(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[types.AdminRoleItem], error)
 	SaveRole(ctx context.Context, id int64, req types.AdminRoleRequest) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
-	ListOperationLogs(ctx context.Context, page, pageSize int, adminID int64, keyword string) (*types.AdminPageResponse[models.AdminOperationLog], error)
+	ListOperationLogs(ctx context.Context, page, pageSize int, filter types.AdminOperationLogFilter) (*types.AdminPageResponse[types.AdminOperationLogItem], error)
 	RecordOperationLog(ctx context.Context, log models.AdminOperationLog) error
 	CheckPermission(ctx context.Context, adminID int64, method, path string) error
 	ListCategories(ctx context.Context, page, pageSize int, categoryType string) (*types.AdminPageResponse[models.AdminCategory], error)
@@ -77,7 +79,9 @@ type IAdminService interface {
 	ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error)
 	UpdateNoteStatus(ctx context.Context, noteID int64, status int) error
 	ListNoteRecords(ctx context.Context, recordType string, page, pageSize int, noteID int64) (*types.AdminPageResponse[map[string]any], error)
-	UpdateCommentStatus(ctx context.Context, noteID, commentID int64, status int8) error
+	ListNoteInteractions(ctx context.Context, page, pageSize int, filter types.AdminNoteInteractionFilter) (*types.AdminPageResponse[map[string]any], error)
+	ListNoteComments(ctx context.Context, page, pageSize int, filter types.AdminNoteCommentFilter) (*types.AdminPageResponse[map[string]any], error)
+	UpdateCommentStatus(ctx context.Context, noteID, commentID, adminID int64, status int8, reason string) error
 	ListPointLogs(ctx context.Context, page, pageSize int, userID int64) (*types.AdminPageResponse[map[string]any], error)
 	AdjustPoints(ctx context.Context, adminID int64, req types.AdminPointsAdjustRequest) (*types.AdminPointsAdjustResponse, error)
 	ListWithdraws(ctx context.Context, page, pageSize int, status *int8, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
@@ -87,9 +91,9 @@ type IAdminService interface {
 	ListOrganizerLevelRules(ctx context.Context) ([]models.OrganizerLevelRule, error)
 	SaveOrganizerLevelRule(ctx context.Context, id int64, req types.OrganizerLevelRuleRequest) (int64, error)
 	DeleteOrganizerLevelRule(ctx context.Context, id int64) error
-	ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[models.PlatformMessage], error)
-	ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, status *int8) (*types.AdminPageResponse[map[string]any], error)
-	CreateMessage(ctx context.Context, req types.PlatformMessageRequest) (int64, error)
+	ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[map[string]any], error)
+	ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, filter types.AdminMessageDeliveryFilter) (*types.AdminPageResponse[map[string]any], error)
+	CreateMessage(ctx context.Context, adminID int64, req types.PlatformMessageRequest) (int64, error)
 	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
 	UpdatePointsRule(ctx context.Context, req types.UpdatePointsRuleRequest) error
 }
@@ -1117,6 +1121,46 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings []types.Admi
 		}
 		return nil
 	})
+}
+
+func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemConfig, error) {
+	keys := []string{"system_name", "icp_record_no", "customer_service_phone", "customer_service_wechat", "customer_service_email", "customer_service_hours", "withdraw_arrival_cycle"}
+	var rows []models.PlatformSetting
+	if err := s.DB.WithContext(ctx).Where("setting_key IN ?", keys).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	values := make(map[string]string, len(rows))
+	for _, row := range rows {
+		values[row.Key] = row.Value
+	}
+	return &types.AdminSystemConfig{
+		SystemName: values["system_name"], ICPRecordNo: values["icp_record_no"], CustomerServicePhone: values["customer_service_phone"],
+		CustomerServiceWechat: values["customer_service_wechat"], CustomerServiceEmail: values["customer_service_email"], CustomerServiceHours: values["customer_service_hours"],
+		WithdrawArrivalCycle: values["withdraw_arrival_cycle"],
+	}, nil
+}
+
+func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfig) error {
+	config.SystemName = strings.TrimSpace(config.SystemName)
+	config.ICPRecordNo = strings.TrimSpace(config.ICPRecordNo)
+	config.CustomerServicePhone = strings.TrimSpace(config.CustomerServicePhone)
+	config.CustomerServiceWechat = strings.TrimSpace(config.CustomerServiceWechat)
+	config.CustomerServiceEmail = strings.TrimSpace(config.CustomerServiceEmail)
+	config.CustomerServiceHours = strings.TrimSpace(config.CustomerServiceHours)
+	config.WithdrawArrivalCycle = strings.TrimSpace(config.WithdrawArrivalCycle)
+	if config.SystemName == "" {
+		return errors.New("系统名称不能为空")
+	}
+	if len(config.SystemName) > 100 || len(config.ICPRecordNo) > 100 || len(config.CustomerServicePhone) > 50 || len(config.CustomerServiceWechat) > 100 || len(config.CustomerServiceEmail) > 100 || len(config.CustomerServiceHours) > 100 || len(config.WithdrawArrivalCycle) > 100 {
+		return errors.New("系统配置字段长度超限")
+	}
+	settings := []types.AdminSettingItem{
+		{Key: "system_name", Value: config.SystemName, Remark: "平台系统名称"}, {Key: "icp_record_no", Value: config.ICPRecordNo, Remark: "ICP备案号"},
+		{Key: "customer_service_phone", Value: config.CustomerServicePhone, Remark: "客服电话"}, {Key: "customer_service_wechat", Value: config.CustomerServiceWechat, Remark: "客服微信"},
+		{Key: "customer_service_email", Value: config.CustomerServiceEmail, Remark: "客服邮箱"}, {Key: "customer_service_hours", Value: config.CustomerServiceHours, Remark: "客服服务时间"},
+		{Key: "withdraw_arrival_cycle", Value: config.WithdrawArrivalCycle, Remark: "商家提现到账周期展示文案"},
+	}
+	return s.UpdateSettings(ctx, settings)
 }
 
 func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []models.TicketOrder) ([]types.AdminTicketOrderItem, error) {

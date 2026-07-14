@@ -15,15 +15,21 @@ type AdminRole struct {
 func (AdminRole) TableName() string { return "admin_roles" }
 
 type AdminOperationLog struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	AdminID   int64     `gorm:"column:admin_id;not null;index" json:"admin_id"`
-	Action    string    `gorm:"column:action;size:100;not null" json:"action"`
-	Resource  string    `gorm:"column:resource;size:100" json:"resource"`
-	Method    string    `gorm:"column:method;size:20" json:"method"`
-	Path      string    `gorm:"column:path;size:255" json:"path"`
-	IP        string    `gorm:"column:ip;size:50" json:"ip"`
-	Remark    string    `gorm:"column:remark;size:255" json:"remark"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	ID           int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	AdminID      int64     `gorm:"column:admin_id;not null;index" json:"admin_id"`
+	Action       string    `gorm:"column:action;size:100;not null;index" json:"action"`
+	Resource     string    `gorm:"column:resource;size:100" json:"resource"`
+	ResourceType string    `gorm:"column:resource_type;size:50;index" json:"resource_type"`
+	ResourceID   string    `gorm:"column:resource_id;size:100;index" json:"resource_id"`
+	ResourceName string    `gorm:"column:resource_name;size:255" json:"resource_name"`
+	Method       string    `gorm:"column:method;size:20" json:"method"`
+	Path         string    `gorm:"column:path;size:255" json:"path"`
+	Result       string    `gorm:"column:result;size:20;not null;default:success;index" json:"result"`
+	ErrorCode    string    `gorm:"column:error_code;size:100" json:"error_code"`
+	ErrorMessage string    `gorm:"column:error_message;size:255" json:"error_message"`
+	IP           string    `gorm:"column:ip;size:50" json:"ip"`
+	Remark       string    `gorm:"column:remark;size:255" json:"remark"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
 }
 
 func (AdminOperationLog) TableName() string { return "admin_operation_logs" }
@@ -72,6 +78,8 @@ type PlatformMessage struct {
 	Content   string    `gorm:"column:content;type:text" json:"content"`
 	Type      string    `gorm:"column:type;size:50" json:"type"`
 	Target    string    `gorm:"column:target;size:50" json:"target"`
+	Channel   string    `gorm:"column:channel;size:30;not null;default:in_app" json:"channel"`
+	CreatorID int64     `gorm:"column:creator_id;not null;default:0;index" json:"creator_id"`
 	Status    int8      `gorm:"column:status;not null;default:1" json:"status"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`

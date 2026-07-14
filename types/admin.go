@@ -350,3 +350,20 @@ type AdminSettingItem struct {
 type AdminSettingsRequest struct {
 	Settings []AdminSettingItem `json:"settings" binding:"required"`
 }
+
+// AdminSystemConfig is the structured contract for the PC system configuration page.
+type AdminSystemConfig struct {
+	SystemName            string `json:"system_name"`
+	ICPRecordNo           string `json:"icp_record_no"`
+	CustomerServicePhone  string `json:"customer_service_phone"`
+	CustomerServiceWechat string `json:"customer_service_wechat"`
+	CustomerServiceEmail  string `json:"customer_service_email"`
+	CustomerServiceHours  string `json:"customer_service_hours"`
+	WithdrawArrivalCycle  string `json:"withdraw_arrival_cycle"`
+}
+
+// PublicSystemConfig is safe to expose before login, for example on the admin login page.
+type PublicSystemConfig struct {
+	SystemName  string `json:"system_name"`
+	ICPRecordNo string `json:"icp_record_no"`
+}
