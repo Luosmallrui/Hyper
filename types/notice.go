@@ -18,11 +18,14 @@ type SystemMessage struct {
 }
 
 type PlatformMessagePayload struct {
-	MessageID int64  `json:"message_id"`
-	TargetID  int64  `json:"target_id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	Type      string `json:"type"`
-	Target    string `json:"target"`
-	CreatedAt string `json:"created_at"`
+	MessageID   int64    `json:"message_id"`
+	TargetID    int64    `json:"target_id"`
+	Title       string   `json:"title"`
+	Content     string   `json:"content"`
+	ContentType string   `json:"content_type"`
+	CoverImage  string   `json:"cover_image"`
+	MediaData   []string `json:"media_data"`
+	Type        string   `json:"type"`
+	Target      string   `json:"target"`
+	CreatedAt   string   `json:"created_at"`
 }

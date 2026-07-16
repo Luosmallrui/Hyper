@@ -62,6 +62,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.PUT("/collections/:id", h.wrap(h.UpdateOrganizerCollection))
 		organizer.DELETE("/collections/:id", h.wrap(h.DeleteOrganizerCollection))
 		organizer.GET("/messages", h.wrap(h.ListOrganizerMessages))
+		organizer.GET("/messages/:id", h.wrap(h.GetOrganizerMessageDetail))
 		organizer.POST("/messages/read-all", h.wrap(h.MarkAllOrganizerMessagesRead))
 		organizer.POST("/messages/:id/read", h.wrap(h.MarkOrganizerMessageRead))
 		organizer.GET("/finance/summary", h.wrap(h.GetOrganizerFinanceSummary))
@@ -85,7 +86,9 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.GET("/audit-status", h.wrap(h.GetOrganizerAuditStatus))
 		organizer.GET("/orders", h.wrap(h.ListOrganizerOrders))
 		organizer.GET("/orders/:order_no", h.wrap(h.GetOrganizerOrderDetail))
+		organizer.POST("/orders/:order_no/cancel", h.wrap(h.CancelOrganizerTicketOrder))
 		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
+		organizer.GET("/refunds/:refund_no", h.wrap(h.GetOrganizerRefundDetail))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
 		organizer.PATCH("/verifier/:id/status", h.wrap(h.UpdateVerifierStatus))
@@ -331,6 +334,22 @@ func (h *Ticketing) ListOrganizerMessages(c *gin.Context) error {
 	unreadOnly := c.Query("unread_only") == "1" || c.Query("unread_only") == "true"
 	resp, err := h.TicketingService.ListOrganizerMessages(c.Request.Context(), currentUserID(c), page(c), size(c), unreadOnly)
 	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerMessageDetail(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.GetOrganizerMessageDetail(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "消息不存在或无权查看")
+		}
 		return err
 	}
 	response.Success(c, resp)
@@ -1243,6 +1262,25 @@ func (h *Ticketing) GetOrganizerOrderDetail(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) CancelOrganizerTicketOrder(c *gin.Context) error {
+	var req types.CancelOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.CancelOrganizerTicketOrder(c.Request.Context(), currentUserID(c), c.Param("order_no"), req.ReasonID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "订单不存在或不属于当前主办方")
+		}
+		if errors.Is(err, service.ErrOrganizerOrderCancelNotAllowed) {
+			return response.NewError(http.StatusConflict, err.Error())
+		}
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) ListOrganizerRefunds(c *gin.Context) error {
 	var status *int8
 	if raw := c.Query("status"); raw != "" {
@@ -1255,6 +1293,18 @@ func (h *Ticketing) ListOrganizerRefunds(c *gin.Context) error {
 	}
 	resp, err := h.TicketingService.ListOrganizerRefunds(c.Request.Context(), currentUserID(c), status, page(c), size(c))
 	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetOrganizerRefundDetail(c *gin.Context) error {
+	resp, err := h.TicketingService.GetOrganizerRefundDetail(c.Request.Context(), currentUserID(c), c.Param("refund_no"))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "退款单不存在或不属于当前主办方")
+		}
 		return err
 	}
 	response.Success(c, resp)

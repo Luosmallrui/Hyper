@@ -84,6 +84,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/orders/:order_no", context.Wrap(a.GetOrderDetail))
 		authorized.POST("/orders/:order_no/refund/approve", context.Wrap(a.ApproveOrderRefund))
 		authorized.POST("/orders/:order_no/refund/reject", context.Wrap(a.RejectOrderRefund))
+		authorized.GET("/refunds/:refund_no", context.Wrap(a.GetRefundDetail))
 
 		// 财务结算
 		authorized.GET("/finance/summary", context.Wrap(a.GetFinanceSummary))
@@ -229,7 +230,7 @@ func adminAuditMetaForRequest(c *gin.Context) adminAuditMeta {
 		meta = adminAuditMeta{Action: "admin.activity_collection." + requestAction(c.Request.Method), ResourceType: "activity_collection"}
 	case strings.HasPrefix(path, "/v1/admin/parties"):
 		meta = adminAuditMeta{Action: "admin.party." + requestAction(c.Request.Method), ResourceType: "party"}
-	case strings.HasPrefix(path, "/v1/admin/orders"):
+	case strings.HasPrefix(path, "/v1/admin/orders"), strings.HasPrefix(path, "/v1/admin/refunds"):
 		meta = adminAuditMeta{Action: "admin.refund." + requestAction(c.Request.Method), ResourceType: "refund"}
 	case strings.HasPrefix(path, "/v1/admin/withdraws"):
 		meta = adminAuditMeta{Action: "admin.withdraw." + requestAction(c.Request.Method), ResourceType: "withdraw"}
@@ -602,9 +603,9 @@ func (a *Admin) ListNotes(c *gin.Context) error {
 }
 
 func (a *Admin) UpdateNoteStatus(c *gin.Context) error {
-	var req types.AdminSimpleStatusRequest
+	var req types.AdminNoteStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		return err
+		return response.NewError(http.StatusBadRequest, "动态状态仅支持 -1删除、0隐藏、1公开")
 	}
 	if err := a.AdminService.UpdateNoteStatus(c.Request.Context(), adminParamID(c), int(req.Status)); err != nil {
 		return err
@@ -1177,6 +1178,19 @@ func (a *Admin) GetOrderDetail(c *gin.Context) error {
 	resp, err := a.AdminService.GetTicketOrderDetail(c.Request.Context(), c.Param("order_no"))
 	if err != nil {
 		return response.NewError(404, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) GetRefundDetail(c *gin.Context) error {
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.refund.view", ResourceType: "refund", ResourceID: c.Param("refund_no"), ResourceName: "退款单 " + c.Param("refund_no")})
+	resp, err := a.AdminService.GetRefundDetail(c.Request.Context(), c.Param("refund_no"))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "退款单不存在")
+		}
+		return response.NewError(http.StatusInternalServerError, "查询退款详情失败")
 	}
 	response.Success(c, resp)
 	return nil

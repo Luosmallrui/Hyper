@@ -187,5 +187,5 @@ func (d *NoteDAO) ListNodeByUserIDs(ctx context.Context, userIDs []int, cursor i
 }
 
 func publicNoteScope(db *gorm.DB) *gorm.DB {
-	return db.Where("notes.status <> ? AND notes.visible_conf = ?", -1, 1)
+	return db.Where("notes.status = ? AND notes.visible_conf = ?", 1, 1)
 }

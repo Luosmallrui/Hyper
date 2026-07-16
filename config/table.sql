@@ -606,6 +606,9 @@ CREATE TABLE IF NOT EXISTS `platform_messages`
     `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '消息ID',
     `title`      varchar(100)    NOT NULL COMMENT '标题',
     `content`    text            NULL COMMENT '内容',
+    `content_type` varchar(20)   NOT NULL DEFAULT 'text' COMMENT '内容类型：text/rich_text',
+    `cover_image` varchar(255)   NOT NULL DEFAULT '' COMMENT '消息封面图',
+    `media_data` text            NULL COMMENT '消息图集JSON数组',
     `type`       varchar(50)     NOT NULL DEFAULT '' COMMENT '消息类型',
     `target`     varchar(50)     NOT NULL DEFAULT '' COMMENT '发送对象',
     `channel`    varchar(30)     NOT NULL DEFAULT 'in_app' COMMENT '发送渠道，当前仅 in_app',
@@ -621,6 +624,9 @@ CREATE TABLE IF NOT EXISTS `platform_messages`
 -- ALTER TABLE `platform_messages` ADD COLUMN `channel` varchar(30) NOT NULL DEFAULT 'in_app' COMMENT '发送渠道，当前仅 in_app' AFTER `target`;
 -- ALTER TABLE `platform_messages` ADD COLUMN `creator_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '创建管理员ID' AFTER `channel`;
 -- ALTER TABLE `platform_messages` ADD KEY `idx_platform_message_creator` (`creator_id`);
+-- ALTER TABLE `platform_messages` ADD COLUMN `content_type` varchar(20) NOT NULL DEFAULT 'text' COMMENT '内容类型：text/rich_text' AFTER `content`;
+-- ALTER TABLE `platform_messages` ADD COLUMN `cover_image` varchar(255) NOT NULL DEFAULT '' COMMENT '消息封面图' AFTER `content_type`;
+-- ALTER TABLE `platform_messages` ADD COLUMN `media_data` text NULL COMMENT '消息图集JSON数组' AFTER `cover_image`;
 
 CREATE TABLE IF NOT EXISTS `organizer_message_reads`
 (
