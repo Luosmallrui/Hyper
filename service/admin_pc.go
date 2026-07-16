@@ -404,7 +404,7 @@ func RequiredAdminPermission(method, path string) string {
 		return "admin.activities"
 	case strings.HasPrefix(path, "/v1/admin/tickets") || strings.HasPrefix(path, "/v1/admin/events/"):
 		return "admin.tickets"
-	case strings.HasPrefix(path, "/v1/admin/orders"):
+	case strings.HasPrefix(path, "/v1/admin/orders"), strings.HasPrefix(path, "/v1/admin/refunds"):
 		return "admin.orders"
 	case strings.HasPrefix(path, "/v1/admin/verifiers"), strings.HasPrefix(path, "/v1/admin/verification-records"):
 		return "admin.verifications"
@@ -528,8 +528,12 @@ func (s *AdminService) ListCategories(ctx context.Context, page, pageSize int, c
 }
 
 func (s *AdminService) SaveCategory(ctx context.Context, id int64, req types.AdminCategoryRequest) (int64, error) {
-	if req.Status == 0 {
-		req.Status = 1
+	status := int8(1)
+	if req.Status != nil {
+		status = *req.Status
+	}
+	if status != 0 && status != 1 {
+		return 0, errors.New("分类状态仅支持 0停用 或 1启用")
 	}
 	if req.Type == "distance" {
 		value := strings.TrimSpace(req.Value)
@@ -542,7 +546,7 @@ func (s *AdminService) SaveCategory(ctx context.Context, id int64, req types.Adm
 		}
 		req.Value = value
 	}
-	row := models.AdminCategory{Type: req.Type, Name: req.Name, Image: req.Image, Value: req.Value, Sort: req.Sort, Status: req.Status}
+	row := models.AdminCategory{Type: req.Type, Name: req.Name, Image: req.Image, Value: req.Value, Sort: req.Sort, Status: status}
 	if id > 0 {
 		return id, s.DB.WithContext(ctx).Model(&models.AdminCategory{}).Where("id = ?", id).Updates(row).Error
 	}
@@ -560,7 +564,13 @@ func (s *AdminService) ListUserRecords(ctx context.Context, userID int64, record
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	switch recordType {
 	case "likes":
-		return adminMapPage(s.DB.WithContext(ctx).Table("note_likes nl").Select("nl.*, n.title AS note_title").Joins("LEFT JOIN notes n ON n.id = nl.note_id").Where("nl.user_id = ? AND nl.status = 1", userID).Order("nl.id desc"), page, pageSize)
+		// "获赞记录" is the likes received by this user's published notes, not the likes they gave.
+		return adminMapPage(s.DB.WithContext(ctx).Table("note_likes nl").
+			Select("nl.id, nl.note_id, nl.user_id AS liker_user_id, nl.created_at, nl.updated_at, n.title AS note_title, n.content AS note_content, u.nickname AS liker_name, u.avatar AS liker_avatar, u.mobile AS liker_mobile").
+			Joins("JOIN notes n ON n.id = nl.note_id").
+			Joins("LEFT JOIN users u ON u.id = nl.user_id").
+			Where("n.user_id = ? AND n.status <> ? AND nl.status = 1", userID, -1).
+			Order("nl.id desc"), page, pageSize)
 	case "collections":
 		return adminMapPage(s.DB.WithContext(ctx).Table("note_collections nc").Select("nc.*, n.title AS note_title").Joins("LEFT JOIN notes n ON n.id = nc.note_id").Where("nc.user_id = ? AND nc.status = 1", userID).Order("nc.id desc"), page, pageSize)
 	case "following":
@@ -713,7 +723,17 @@ func (s *AdminService) ListNotes(ctx context.Context, page, pageSize int, status
 }
 
 func (s *AdminService) UpdateNoteStatus(ctx context.Context, noteID int64, status int) error {
-	return s.DB.WithContext(ctx).Model(&models.Note{}).Where("id = ?", noteID).Update("status", status).Error
+	if status != -1 && status != 0 && status != 1 {
+		return errors.New("动态状态仅支持 -1删除、0隐藏、1公开")
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Note{}).Where("id = ?", noteID).Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (s *AdminService) ListNoteRecords(ctx context.Context, recordType string, page, pageSize int, noteID int64) (*types.AdminPageResponse[map[string]any], error) {
@@ -1092,12 +1112,7 @@ func (s *AdminService) DeleteOrganizerLevelRule(ctx context.Context, id int64) e
 }
 
 func (s *AdminService) ensureDefaultOrganizerLevelRules(ctx context.Context) error {
-	for _, rule := range defaultOrganizerLevelRules() {
-		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+	return ensureDefaultOrganizerLevelRules(s.DB.WithContext(ctx))
 }
 
 func (s *AdminService) ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[map[string]any], error) {
@@ -1154,6 +1169,8 @@ func (s *AdminService) ListMessageDeliveries(ctx context.Context, messageID int6
 func (s *AdminService) CreateMessage(ctx context.Context, adminID int64, req types.PlatformMessageRequest) (int64, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.Content = strings.TrimSpace(req.Content)
+	req.ContentType = strings.TrimSpace(req.ContentType)
+	req.CoverImage = strings.TrimSpace(req.CoverImage)
 	req.Type = strings.TrimSpace(req.Type)
 	req.Target = strings.TrimSpace(req.Target)
 	req.Channel = strings.TrimSpace(req.Channel)
@@ -1166,6 +1183,12 @@ func (s *AdminService) CreateMessage(ctx context.Context, adminID int64, req typ
 	if req.Type == "" {
 		req.Type = "system"
 	}
+	if req.ContentType == "" {
+		req.ContentType = "text"
+	}
+	if req.ContentType != "text" && req.ContentType != "rich_text" {
+		return 0, errors.New("content_type 仅支持 text 或 rich_text")
+	}
 	if req.Target == "" {
 		req.Target = "all"
 	}
@@ -1175,7 +1198,11 @@ func (s *AdminService) CreateMessage(ctx context.Context, adminID int64, req typ
 	if req.Channel != "in_app" {
 		return 0, errors.New("当前仅支持 in_app 站内消息渠道")
 	}
-	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, Type: req.Type, Target: req.Target, Channel: req.Channel, CreatorID: adminID, Status: req.Status}
+	mediaData, err := json.Marshal(req.MediaData)
+	if err != nil {
+		return 0, err
+	}
+	msg := models.PlatformMessage{Title: req.Title, Content: req.Content, ContentType: req.ContentType, CoverImage: req.CoverImage, MediaData: string(mediaData), Type: req.Type, Target: req.Target, Channel: req.Channel, CreatorID: adminID, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&msg).Error; err != nil {
 		return 0, err
 	}
@@ -1202,15 +1229,22 @@ func (s *AdminService) publishPlatformMessage(ctx context.Context, msg models.Pl
 	if s.MqProducer == nil {
 		return errors.New("消息队列未初始化")
 	}
+	mediaData := []string{}
+	if msg.MediaData != "" {
+		_ = json.Unmarshal([]byte(msg.MediaData), &mediaData)
+	}
 	for _, targetID := range targetIDs {
 		payload := types.PlatformMessagePayload{
-			MessageID: msg.ID,
-			TargetID:  targetID,
-			Title:     msg.Title,
-			Content:   msg.Content,
-			Type:      msg.Type,
-			Target:    msg.Target,
-			CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+			MessageID:   msg.ID,
+			TargetID:    targetID,
+			Title:       msg.Title,
+			Content:     msg.Content,
+			ContentType: msg.ContentType,
+			CoverImage:  msg.CoverImage,
+			MediaData:   mediaData,
+			Type:        msg.Type,
+			Target:      msg.Target,
+			CreatedAt:   time.Now().Format("2006-01-02 15:04:05"),
 		}
 		data, _ := json.Marshal(payload)
 		event := types.SystemMessage{Type: "platform_message", Data: json.RawMessage(data)}

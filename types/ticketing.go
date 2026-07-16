@@ -106,14 +106,21 @@ type OrganizerCollectionDetail struct {
 }
 
 type OrganizerMessageItem struct {
-	ID        int64      `json:"id"`
-	Title     string     `json:"title"`
-	Content   string     `json:"content"`
-	Type      string     `json:"type"`
-	Target    string     `json:"target"`
-	IsRead    bool       `json:"is_read"`
-	ReadAt    *time.Time `json:"read_at"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID          int64      `json:"id"`
+	Title       string     `json:"title"`
+	Content     string     `json:"content"`
+	ContentType string     `json:"content_type"`
+	CoverImage  string     `json:"cover_image"`
+	Type        string     `json:"type"`
+	Target      string     `json:"target"`
+	IsRead      bool       `json:"is_read"`
+	ReadAt      *time.Time `json:"read_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type OrganizerMessageDetail struct {
+	OrganizerMessageItem
+	MediaData []string `json:"media_data"`
 }
 
 type OrganizerReadAllResponse struct {
@@ -532,6 +539,13 @@ type CancelOrderRequest struct {
 	ReasonID int64 `json:"reason_id" binding:"required"`
 }
 
+type OrganizerCancelOrderResponse struct {
+	OrderNo        string    `json:"order_no"`
+	Status         int8      `json:"status"`
+	CancelReasonID int64     `json:"cancel_reason_id"`
+	CancelledAt    time.Time `json:"cancelled_at"`
+}
+
 type ApplyRefundRequest struct {
 	OrderNo  string `json:"order_no" binding:"required"`
 	ReasonID int64  `json:"reason_id" binding:"required"`
@@ -594,6 +608,61 @@ type OrganizerRefundListItem struct {
 	TicketSpecName   string    `json:"ticket_spec_name"`
 	Quantity         int       `json:"quantity"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+type OrganizerRefundDetailResponse struct {
+	Refund struct {
+		RefundNo         string    `json:"refund_no"`
+		RefundAmount     int64     `json:"refund_amount"`
+		DeductAmount     int64     `json:"deduct_amount"`
+		Reason           string    `json:"reason"`
+		Status           int8      `json:"status"`
+		WechatRefundID   string    `json:"wechat_refund_id"`
+		WechatStatus     string    `json:"wechat_status"`
+		RejectReason     string    `json:"reject_reason"`
+		ExpectArriveDate string    `json:"expect_arrive_date"`
+		CreatedAt        time.Time `json:"created_at"`
+		UpdatedAt        time.Time `json:"updated_at"`
+	} `json:"refund"`
+	Order struct {
+		OrderNo        string     `json:"order_no"`
+		Status         int8       `json:"status"`
+		ActualPrice    int64      `json:"actual_price"`
+		Quantity       int        `json:"quantity"`
+		UserName       string     `json:"user_name"`
+		UserMobile     string     `json:"user_mobile"`
+		ActivityName   string     `json:"activity_name"`
+		TicketSpecName string     `json:"ticket_spec_name"`
+		PayMethod      string     `json:"pay_method"`
+		PayTime        *time.Time `json:"pay_time"`
+	} `json:"order"`
+	Viewers             []OrderViewerItem                 `json:"viewers"`
+	RefundLogs          []models.RefundLog                `json:"refund_logs"`
+	PayRecords          []OrganizerRefundPayRecord        `json:"pay_records"`
+	VerificationRecords []OrganizerRefundVerificationItem `json:"verification_records"`
+}
+
+type OrganizerRefundPayRecord struct {
+	ID            uint64     `json:"id"`
+	PayPlatform   int8       `json:"pay_platform"`
+	PayMethod     string     `json:"pay_method"`
+	TransactionID string     `json:"transaction_id"`
+	AmountTotal   uint64     `json:"amount_total"`
+	Currency      string     `json:"currency"`
+	PayStatus     int8       `json:"pay_status"`
+	TradeState    string     `json:"trade_state"`
+	FinishedAt    *time.Time `json:"finished_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type OrganizerRefundVerificationItem struct {
+	ID            int64     `json:"id"`
+	VerifierID    int64     `json:"verifier_id"`
+	VerifierName  string    `json:"verifier_name"`
+	VerifierPhone string    `json:"verifier_phone"`
+	ActivityID    int64     `json:"activity_id"`
+	ActivityName  string    `json:"activity_name"`
+	VerifiedAt    time.Time `json:"verified_at"`
 }
 
 type UserRefundListItem struct {

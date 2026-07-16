@@ -41,6 +41,7 @@ type ITicketingService interface {
 	SaveOrganizerCollection(ctx context.Context, userID, collectionID int64, req types.OrganizerCollectionRequest) (int64, error)
 	DeleteOrganizerCollection(ctx context.Context, userID, collectionID int64) error
 	ListOrganizerMessages(ctx context.Context, userID int64, page, size int, unreadOnly bool) (*types.PageResponse[types.OrganizerMessageItem], error)
+	GetOrganizerMessageDetail(ctx context.Context, userID, messageID int64) (*types.OrganizerMessageDetail, error)
 	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
 	MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error)
 	GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error)
@@ -90,6 +91,7 @@ type ITicketingService interface {
 	GetTicketOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.TicketOrderDetailResponse, error)
 	ListCancelReasons(ctx context.Context) ([]models.CancelReason, error)
 	CancelTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) error
+	CancelOrganizerTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) (*types.OrganizerCancelOrderResponse, error)
 	DeleteTicketOrder(ctx context.Context, userID int64, orderNo string) error
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
@@ -97,6 +99,7 @@ type ITicketingService interface {
 	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
 	GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
+	GetOrganizerRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.OrganizerRefundDetailResponse, error)
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
 	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
 	CancelRefund(ctx context.Context, userID int64, refundNo string) error
@@ -120,6 +123,8 @@ type ITicketingService interface {
 	DeleteStore(ctx context.Context, userID, storeID int64) error
 }
 
+var ErrOrganizerOrderCancelNotAllowed = errors.New("已支付订单请通过退款售后流程处理")
+
 type TicketingService struct {
 	DB            *gorm.DB
 	Config        *config.Config
@@ -130,11 +135,11 @@ type TicketingService struct {
 var _ ITicketingService = (*TicketingService)(nil)
 
 func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error) {
-	var org models.Organizer
-	if err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error; err != nil {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
 		return nil, err
 	}
-	resp := buildOrganizerInfo(&org)
+	resp := buildOrganizerInfo(org)
 	if err := s.fillOrganizerLevelInfo(ctx, org.ID, resp); err != nil {
 		return nil, err
 	}
@@ -568,24 +573,72 @@ func (s *TicketingService) ListOrganizerMessages(ctx context.Context, userID int
 		return nil, err
 	}
 	var rows []struct {
-		ID        int64
-		Title     string
-		Content   string
-		Type      string
-		Target    string
-		IsRead    int8
-		ReadAt    *time.Time
-		CreatedAt time.Time
+		ID          int64
+		Title       string
+		Content     string
+		ContentType string
+		CoverImage  string
+		Type        string
+		Target      string
+		IsRead      int8
+		ReadAt      *time.Time
+		CreatedAt   time.Time
 	}
-	if err := query.Select("pm.id, pm.title, pm.content, pm.type, pm.target, COALESCE(omr.is_read,0) AS is_read, omr.read_at, pm.created_at").
+	if err := query.Select("pm.id, pm.title, pm.content, pm.content_type, pm.cover_image, pm.type, pm.target, COALESCE(omr.is_read,0) AS is_read, omr.read_at, pm.created_at").
 		Order("pm.created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	list := make([]types.OrganizerMessageItem, 0, len(rows))
 	for _, row := range rows {
-		list = append(list, types.OrganizerMessageItem{ID: row.ID, Title: row.Title, Content: row.Content, Type: row.Type, Target: row.Target, IsRead: row.IsRead == 1, ReadAt: row.ReadAt, CreatedAt: row.CreatedAt})
+		list = append(list, types.OrganizerMessageItem{ID: row.ID, Title: row.Title, Content: row.Content, ContentType: row.ContentType, CoverImage: row.CoverImage, Type: row.Type, Target: row.Target, IsRead: row.IsRead == 1, ReadAt: row.ReadAt, CreatedAt: row.CreatedAt})
 	}
 	return &types.PageResponse[types.OrganizerMessageItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) GetOrganizerMessageDetail(ctx context.Context, userID, messageID int64) (*types.OrganizerMessageDetail, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var row struct {
+		ID          int64
+		Title       string
+		Content     string
+		ContentType string
+		CoverImage  string
+		MediaData   string
+		Type        string
+		Target      string
+		IsRead      int8
+		ReadAt      *time.Time
+		CreatedAt   time.Time
+	}
+	query := s.DB.WithContext(ctx).Table("platform_messages pm").
+		Joins("LEFT JOIN organizer_message_reads omr ON omr.message_id = pm.id AND omr.organizer_id = ?", org.ID).
+		Joins("LEFT JOIN platform_message_deliveries pmd ON pmd.message_id = pm.id AND pmd.user_id = ?", userID).
+		Where("pm.id = ? AND pm.status = 1 AND (pm.target IN ? OR pm.target = ?) AND (pmd.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM platform_message_deliveries any_delivery WHERE any_delivery.message_id = pm.id))", messageID, []string{"merchant", "organizer", "business", "all"}, "")
+	if err := query.Select("pm.id, pm.title, pm.content, pm.content_type, pm.cover_image, pm.media_data, pm.type, pm.target, COALESCE(omr.is_read,0) AS is_read, omr.read_at, pm.created_at").Limit(1).Scan(&row).Error; err != nil {
+		return nil, err
+	}
+	if row.ID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if row.IsRead == 0 {
+		if err := s.MarkOrganizerMessageRead(ctx, userID, messageID); err != nil {
+			return nil, err
+		}
+		now := time.Now()
+		row.IsRead = 1
+		row.ReadAt = &now
+	}
+	resp := &types.OrganizerMessageDetail{OrganizerMessageItem: types.OrganizerMessageItem{
+		ID: row.ID, Title: row.Title, Content: row.Content, ContentType: row.ContentType, CoverImage: row.CoverImage,
+		Type: row.Type, Target: row.Target, IsRead: row.IsRead == 1, ReadAt: row.ReadAt, CreatedAt: row.CreatedAt,
+	}, MediaData: []string{}}
+	if row.MediaData != "" {
+		_ = json.Unmarshal([]byte(row.MediaData), &resp.MediaData)
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error {
@@ -745,7 +798,7 @@ func (s *TicketingService) ListVenueNotes(ctx context.Context, userID, venueID i
 		Select(`n.id, n.user_id, n.title, n.content, n.type, n.media_data, n.activity_id, n.store_id,
 			n.created_at, n.updated_at, COALESCE(u.avatar, '') AS avatar, COALESCE(u.nickname, '') AS nickname`).
 		Joins("LEFT JOIN users u ON u.id = n.user_id").
-		Where("n.store_id IN ? AND n.status <> ? AND n.visible_conf = ?", storeIDs, -1, types.VisibleConfPublic)
+		Where("n.store_id IN ? AND n.status = ? AND n.visible_conf = ?", storeIDs, 1, types.VisibleConfPublic)
 	if cursor > 0 {
 		query = query.Where("n.created_at < ?", time.Unix(0, cursor))
 	}
@@ -1012,7 +1065,7 @@ func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, ven
 	if err := s.DB.WithContext(ctx).Table("notes n").
 		Select("os.organizer_id, COUNT(n.id) AS count").
 		Joins("JOIN organizer_stores os ON os.id = n.store_id").
-		Where("os.organizer_id IN ? AND n.status <> ? AND n.visible_conf = ?", venueIDs, -1, types.VisibleConfPublic).
+		Where("os.organizer_id IN ? AND n.status = ? AND n.visible_conf = ?", venueIDs, 1, types.VisibleConfPublic).
 		Group("os.organizer_id").
 		Scan(&postRows).Error; err != nil {
 		return err
@@ -2476,6 +2529,61 @@ func (s *TicketingService) CancelTicketOrder(ctx context.Context, userID int64, 
 	})
 }
 
+func (s *TicketingService) CancelOrganizerTicketOrder(ctx context.Context, userID int64, orderNo string, reasonID int64) (*types.OrganizerCancelOrderResponse, error) {
+	var resp *types.OrganizerCancelOrderResponse
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		org, err := s.findOrganizerByUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+
+		var order models.TicketOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Table("ticket_orders o").
+			Select("o.*").
+			Joins("JOIN activities a ON a.id = o.activity_id").
+			Where("o.order_no = ? AND a.organizer_id = ?", orderNo, org.ID).
+			First(&order).Error; err != nil {
+			return err
+		}
+
+		// An already-cancelled order is a no-op so retries cannot release inventory twice.
+		if order.Status == models.TicketOrderStatusCancelled {
+			resp = &types.OrganizerCancelOrderResponse{
+				OrderNo:        order.OrderNo,
+				Status:         order.Status,
+				CancelReasonID: reasonID,
+				CancelledAt:    order.UpdatedAt,
+			}
+			return nil
+		}
+		if order.Status != models.TicketOrderStatusPending {
+			return ErrOrganizerOrderCancelNotAllowed
+		}
+
+		var reason models.CancelReason
+		_ = tx.First(&reason, reasonID).Error
+		if err := cancelPendingTicketOrderTx(tx, &order, reason.Reason); err != nil {
+			return err
+		}
+		now := time.Now()
+		if err := s.createOrganizerLog(tx, org.ID, userID, "cancel_pending_order", "ticket_order", "POST", "/api/v1/organizer/orders/:order_no/cancel", fmt.Sprintf("order_no=%s,reason_id=%d", order.OrderNo, reasonID)); err != nil {
+			return err
+		}
+		resp = &types.OrganizerCancelOrderResponse{
+			OrderNo:        order.OrderNo,
+			Status:         models.TicketOrderStatusCancelled,
+			CancelReasonID: reasonID,
+			CancelledAt:    now,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (s *TicketingService) DeleteTicketOrder(ctx context.Context, userID int64, orderNo string) error {
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var order models.TicketOrder
@@ -2862,6 +2970,115 @@ func (s *TicketingService) ListOrganizerRefunds(ctx context.Context, userID int6
 		})
 	}
 	return &types.PageResponse[types.OrganizerRefundListItem]{List: list, Total: total}, nil
+}
+
+func (s *TicketingService) GetOrganizerRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.OrganizerRefundDetailResponse, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var refund models.Refund
+	if err := s.DB.WithContext(ctx).Table("refunds r").
+		Select("r.*").
+		Joins("JOIN ticket_orders o ON o.id = r.order_id").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("r.refund_no = ? AND a.organizer_id = ?", refundNo, org.ID).
+		First(&refund).Error; err != nil {
+		return nil, err
+	}
+
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Where("id = ?", refund.OrderID).First(&order).Error; err != nil {
+		return nil, err
+	}
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", order.ActivityID, org.ID).First(&activity).Error; err != nil {
+		return nil, err
+	}
+	var ticketSpec models.TicketSpec
+	if err := s.DB.WithContext(ctx).Where("id = ?", order.TicketSpecID).First(&ticketSpec).Error; err != nil {
+		return nil, err
+	}
+
+	resp := &types.OrganizerRefundDetailResponse{}
+	resp.Refund.RefundNo = refund.RefundNo
+	resp.Refund.RefundAmount = refund.RefundAmount
+	resp.Refund.DeductAmount = refund.DeductAmount
+	resp.Refund.Reason = refund.Reason
+	resp.Refund.Status = refund.Status
+	resp.Refund.WechatRefundID = refund.WechatRefundID
+	resp.Refund.WechatStatus = refund.WechatStatus
+	resp.Refund.RejectReason = refund.RejectReason
+	resp.Refund.ExpectArriveDate = refund.ExpectArriveDate
+	resp.Refund.CreatedAt = refund.CreatedAt
+	resp.Refund.UpdatedAt = refund.UpdatedAt
+	resp.Order.OrderNo = order.OrderNo
+	resp.Order.Status = order.Status
+	resp.Order.ActualPrice = order.ActualPrice
+	resp.Order.Quantity = order.Quantity
+	resp.Order.ActivityName = activity.Name
+	resp.Order.TicketSpecName = ticketSpec.Name
+	resp.Order.PayMethod = order.PayMethod
+	resp.Order.PayTime = order.PayTime
+
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("id = ?", order.UserID).First(&user).Error; err == nil {
+		resp.Order.UserName = user.Nickname
+		resp.Order.UserMobile = maskPhone(user.Mobile)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	viewers, err := s.orderViewers(ctx, order.ID)
+	if err != nil {
+		return nil, err
+	}
+	resp.Viewers = orderViewerItems(viewers, false)
+	if err := s.DB.WithContext(ctx).Where("refund_id = ?", refund.ID).Order("id ASC").Find(&resp.RefundLogs).Error; err != nil {
+		return nil, err
+	}
+
+	var payRecords []models.PayRecord
+	if err := s.DB.WithContext(ctx).Where("order_sn = ?", order.OrderNo).Order("id DESC").Find(&payRecords).Error; err != nil {
+		return nil, err
+	}
+	resp.PayRecords = make([]types.OrganizerRefundPayRecord, 0, len(payRecords))
+	for _, record := range payRecords {
+		resp.PayRecords = append(resp.PayRecords, types.OrganizerRefundPayRecord{
+			ID: record.ID, PayPlatform: record.PayPlatform, PayMethod: record.PayMethod,
+			TransactionID: record.TransactionId, AmountTotal: record.AmountTotal, Currency: record.Currency,
+			PayStatus: record.PayStatus, TradeState: record.RawTradeState, FinishedAt: record.FinishedAt, CreatedAt: record.CreatedAt,
+		})
+	}
+
+	var records []struct {
+		ID            int64
+		VerifierID    int64
+		VerifierName  string
+		VerifierPhone string
+		ActivityID    int64
+		ActivityName  string
+		VerifiedAt    time.Time
+	}
+	if err := s.DB.WithContext(ctx).Table("verification_records vr").
+		Select("vr.id, vr.verifier_id, v.name AS verifier_name, v.phone AS verifier_phone, vr.activity_id, a.name AS activity_name, vr.verified_at").
+		Joins("LEFT JOIN verifiers v ON v.id = vr.verifier_id").
+		Joins("LEFT JOIN activities a ON a.id = vr.activity_id").
+		Where("vr.order_id = ?").Order("vr.id DESC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	resp.VerificationRecords = make([]types.OrganizerRefundVerificationItem, 0, len(records))
+	for _, record := range records {
+		resp.VerificationRecords = append(resp.VerificationRecords, types.OrganizerRefundVerificationItem{
+			ID: record.ID, VerifierID: record.VerifierID, VerifierName: record.VerifierName,
+			VerifierPhone: maskPhone(record.VerifierPhone), ActivityID: record.ActivityID,
+			ActivityName: record.ActivityName, VerifiedAt: record.VerifiedAt,
+		})
+	}
+	if err := s.createOrganizerLog(s.DB.WithContext(ctx), org.ID, userID, "organizer.refund.view", "refund", "GET", "/api/v1/organizer/refunds/:refund_no", "refund_no="+refund.RefundNo); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error) {
@@ -3477,8 +3694,12 @@ func (s *TicketingService) ensureActivitiesBelongToOrganizer(ctx context.Context
 }
 
 func (s *TicketingService) ensureDefaultLevelRules(ctx context.Context) error {
+	return ensureDefaultOrganizerLevelRules(s.DB.WithContext(ctx))
+}
+
+func ensureDefaultOrganizerLevelRules(db *gorm.DB) error {
 	for _, rule := range defaultOrganizerLevelRules() {
-		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
+		if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "level"}}, DoNothing: true}).Create(&rule).Error; err != nil {
 			return err
 		}
 	}
@@ -3929,29 +4150,50 @@ func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 func (s *TicketingService) fillOrganizerLevelInfo(ctx context.Context, organizerID int64, resp *types.OrganizerInfoResponse) error {
 	var completed int64
 	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).
-		Where("organizer_id = ? AND end_time < ?", organizerID, time.Now()).
+		Where("organizer_id = ? AND status = ? AND end_time < ?", organizerID, models.ActivityStatusOnline, time.Now()).
 		Count(&completed).Error; err != nil {
 		return err
 	}
-	level, feeRate, next := organizerLevelByCompletedCount(completed)
+	level, feeRate, next, err := organizerLevelByCompletedCount(s.DB.WithContext(ctx), completed)
+	if err != nil {
+		return err
+	}
 	resp.LevelValue = level
 	resp.Level = fmt.Sprintf("LV%d", level)
 	resp.FeeRate = feeRate
 	resp.ServiceFeeRate = feeRate
 	resp.CompletedActivityCount = completed
 	resp.NextLevelRequiredCount = next
-	return nil
+	return s.DB.WithContext(ctx).Model(&models.Organizer{}).Where("id = ?").Updates(map[string]any{
+		"level":            resp.Level,
+		"service_fee_rate": feeRate,
+		"updated_at":       time.Now(),
+	}).Error
 }
 
-func organizerLevelByCompletedCount(completed int64) (level int, feeRate float64, nextRequired int64) {
-	switch {
-	case completed >= 10:
-		return 3, 0, 0
-	case completed >= 5:
-		return 2, 0.03, 10
-	default:
-		return 1, 0.05, 5
+// organizerLevelByCompletedCount resolves the active, platform-configured level rule.
+func organizerLevelByCompletedCount(db *gorm.DB, completed int64) (level int, feeRate float64, nextRequired int64, err error) {
+	if err := ensureDefaultOrganizerLevelRules(db); err != nil {
+		return 0, 0, 0, err
 	}
+	var current models.OrganizerLevelRule
+	if err := db.Where("status = ? AND required_activity_count <= ?", 1, completed).
+		Order("required_activity_count DESC, level DESC").First(&current).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, 0, 0, err
+		}
+		// Keep a safe default even if every configurable rule has been disabled.
+		return 1, 0.05, 5, nil
+	}
+	var next models.OrganizerLevelRule
+	nextRequired = 0
+	if err := db.Where("status = ? AND required_activity_count > ?", 1, completed).
+		Order("required_activity_count ASC, level ASC").First(&next).Error; err == nil {
+		nextRequired = next.RequiredActivityCount
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, 0, 0, err
+	}
+	return current.Level, current.FeeRate, nextRequired, nil
 }
 
 func buildOrganizerBankAuditInfo(audit models.OrganizerBankAccountAudit) types.OrganizerBankAuditInfo {

@@ -73,16 +73,19 @@ type ActivityCollectionItem struct {
 func (ActivityCollectionItem) TableName() string { return "activity_collection_items" }
 
 type PlatformMessage struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	Title     string    `gorm:"column:title;size:100;not null" json:"title"`
-	Content   string    `gorm:"column:content;type:text" json:"content"`
-	Type      string    `gorm:"column:type;size:50" json:"type"`
-	Target    string    `gorm:"column:target;size:50" json:"target"`
-	Channel   string    `gorm:"column:channel;size:30;not null;default:in_app" json:"channel"`
-	CreatorID int64     `gorm:"column:creator_id;not null;default:0;index" json:"creator_id"`
-	Status    int8      `gorm:"column:status;not null;default:1" json:"status"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Title       string    `gorm:"column:title;size:100;not null" json:"title"`
+	Content     string    `gorm:"column:content;type:text" json:"content"`
+	ContentType string    `gorm:"column:content_type;size:20;not null;default:text" json:"content_type"`
+	CoverImage  string    `gorm:"column:cover_image;size:255" json:"cover_image"`
+	MediaData   string    `gorm:"column:media_data;type:text" json:"media_data"`
+	Type        string    `gorm:"column:type;size:50" json:"type"`
+	Target      string    `gorm:"column:target;size:50" json:"target"`
+	Channel     string    `gorm:"column:channel;size:30;not null;default:in_app" json:"channel"`
+	CreatorID   int64     `gorm:"column:creator_id;not null;default:0;index" json:"creator_id"`
+	Status      int8      `gorm:"column:status;not null;default:1" json:"status"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (PlatformMessage) TableName() string { return "platform_messages" }

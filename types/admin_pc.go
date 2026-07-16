@@ -119,11 +119,15 @@ type AdminCategoryRequest struct {
 	Image  string `json:"image"`
 	Value  string `json:"value"`
 	Sort   int    `json:"sort"`
-	Status int8   `json:"status"`
+	Status *int8  `json:"status"`
 }
 
 type AdminSimpleStatusRequest struct {
 	Status int8 `json:"status" binding:"required"`
+}
+
+type AdminNoteStatusRequest struct {
+	Status int8 `json:"status" binding:"oneof=-1 0 1"`
 }
 
 type ActivityCollectionRequest struct {
@@ -151,14 +155,17 @@ type ActivityCollectionItem struct {
 }
 
 type PlatformMessageRequest struct {
-	Title         string  `json:"title" binding:"required"`
-	Content       string  `json:"content" binding:"required"`
-	Type          string  `json:"type"`
-	Target        string  `json:"target"`
-	Channel       string  `json:"channel"`
-	TargetUserIDs []int64 `json:"target_user_ids"`
-	OrganizerIDs  []int64 `json:"organizer_ids"`
-	Status        int8    `json:"status"`
+	Title         string   `json:"title" binding:"required"`
+	Content       string   `json:"content" binding:"required"`
+	ContentType   string   `json:"content_type"`
+	CoverImage    string   `json:"cover_image"`
+	MediaData     []string `json:"media_data"`
+	Type          string   `json:"type"`
+	Target        string   `json:"target"`
+	Channel       string   `json:"channel"`
+	TargetUserIDs []int64  `json:"target_user_ids"`
+	OrganizerIDs  []int64  `json:"organizer_ids"`
+	Status        int8     `json:"status"`
 }
 
 type WithdrawAuditRequest struct {

@@ -50,12 +50,12 @@ func platformFlowOrganizer(tx *gorm.DB, activityID int64) (models.Activity, mode
 func platformServiceFeeRate(tx *gorm.DB, organizerID int64, occurredAt time.Time) (float64, error) {
 	var completed int64
 	if err := tx.Model(&models.Activity{}).
-		Where("organizer_id = ? AND end_time < ?", organizerID, occurredAt).
+		Where("organizer_id = ? AND status = ? AND end_time < ?", organizerID, models.ActivityStatusOnline, occurredAt).
 		Count(&completed).Error; err != nil {
 		return 0, err
 	}
-	_, feeRate, _ := organizerLevelByCompletedCount(completed)
-	return feeRate, nil
+	_, feeRate, _, err := organizerLevelByCompletedCount(tx, completed)
+	return feeRate, err
 }
 
 // recordPlatformTicketPayment snapshots the accounting facts at payment time.

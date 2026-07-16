@@ -130,6 +130,8 @@ coupon_tag        优惠标签
 other             其它分类
 ```
 
+其中 `activity` 可配置活动类型的图片、名称、排序和启停；`note_channel` 可配置“演出、骑行、活动”等动态频道的图片、名称、排序和启停。
+
 请求：
 
 ```json
@@ -156,6 +158,12 @@ other             其它分类
 | 参加活动记录 | GET | `/users/:id/records/attends` |
 | 订阅活动记录 | GET | `/users/:id/records/subscribes` |
 | 观演用户列表 | GET | `/viewers?keyword=` |
+
+记录语义：
+
+- `likes` 为该用户发布的动态收到的点赞明细，返回点赞用户、被点赞动态和点赞时间。
+- `collections` 为该用户自己的动态收藏记录。
+- `following` 为该用户关注的人；`followers` 为关注该用户的人。
 
 用户启停：
 
@@ -215,6 +223,7 @@ other             其它分类
 |---|---|---|
 | 平台订单列表 | GET | `/orders?activity_id=&status=&refund_status=&keyword=` |
 | 订单详情 | GET | `/orders/:order_no` |
+| 退款详情 | GET | `/refunds/:refund_no` |
 | 退款通过 | POST | `/orders/:order_no/refund/approve` |
 | 退款拒绝 | POST | `/orders/:order_no/refund/reject` |
 
@@ -236,6 +245,24 @@ other             其它分类
 | pay_records | 支付流水 |
 | refunds | 退款单 |
 | refund_logs | 退款处理日志 |
+
+退款详情：
+
+```http
+GET /api/v1/admin/refunds/:refund_no
+Authorization: Bearer <admin_access_token>
+```
+
+该接口用于售后订单页按退款单号直接查看详情，无需先跳转订单详情。返回：
+
+- `refund`：当前退款单，包含退款金额、申请原因、审核状态、驳回原因、微信退款单号和到账时间。
+- `order`：关联订单及买家、活动、票种、金额、订单状态。
+- `viewers`：实名观演人。
+- `refund_logs`：仅当前退款单的审核和退款处理时间线。
+- `pay_records`：关联支付流水。
+- `verification_records`：关联核销记录。
+
+退款单不存在时返回 `404`。接口要求管理员拥有 `admin.orders` 权限。
 
 拒绝退款：
 
@@ -268,9 +295,11 @@ other             其它分类
 
 ```json
 {
-  "status": -1
+  "status": 0
 }
 ```
+
+状态约定：`1` 公开，`0` 隐藏或关闭，`-1` 删除。客户端广场、关注流及场地/活动相关动态仅展示 `status=1` 的公开动态；管理端可按状态筛选并将隐藏动态恢复为公开。
 
 ## 消息管理
 

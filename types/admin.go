@@ -192,6 +192,15 @@ type AdminTicketOrderDetail struct {
 	PayRecords          []models.PayRecord   `json:"pay_records"`
 }
 
+type AdminRefundDetail struct {
+	Refund              models.Refund        `json:"refund"`
+	Order               AdminTicketOrderItem `json:"order"`
+	Viewers             []OrderViewerItem    `json:"viewers"`
+	RefundLogs          []models.RefundLog   `json:"refund_logs"`
+	VerificationRecords []map[string]any     `json:"verification_records"`
+	PayRecords          []models.PayRecord   `json:"pay_records"`
+}
+
 // AdminUpdatePartyStatusRequest 更新派对状态
 type AdminUpdatePartyStatusRequest struct {
 	Status string `json:"status" binding:"required"`

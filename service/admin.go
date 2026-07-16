@@ -8,6 +8,7 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type IAdminService interface {
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
 	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword string) (*types.AdminTicketOrderListResponse, error)
 	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
+	GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error)
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
 	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
 	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
@@ -255,7 +257,16 @@ func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, re
 		"updated_at":    time.Now(),
 	}
 	if req.Status == models.OrganizerStatusApproved {
+		if err := ensureDefaultOrganizerLevelRules(s.DB.WithContext(ctx)); err != nil {
+			return err
+		}
+		level, feeRate, _, err := organizerLevelByCompletedCount(s.DB.WithContext(ctx), 0)
+		if err != nil {
+			return err
+		}
 		updates["enabled"] = 1
+		updates["level"] = fmt.Sprintf("LV%d", level)
+		updates["service_fee_rate"] = feeRate
 	}
 	if req.Status == models.OrganizerStatusRejected {
 		updates["reject_reason"] = req.RejectReason
@@ -872,6 +883,36 @@ func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string)
 		RefundLogs:          logs,
 		VerificationRecords: verificationRecords,
 		PayRecords:          payRecords,
+	}, nil
+}
+
+// GetRefundDetail returns one refund and the order context required by the admin refund detail page.
+func (s *AdminService) GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error) {
+	var refund models.Refund
+	if err := s.DB.WithContext(ctx).Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
+		return nil, err
+	}
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Where("id = ?", refund.OrderID).First(&order).Error; err != nil {
+		return nil, err
+	}
+	orderDetail, err := s.GetTicketOrderDetail(ctx, order.OrderNo)
+	if err != nil {
+		return nil, err
+	}
+	logs := make([]models.RefundLog, 0)
+	for _, log := range orderDetail.RefundLogs {
+		if log.RefundID == refund.ID {
+			logs = append(logs, log)
+		}
+	}
+	return &types.AdminRefundDetail{
+		Refund:              refund,
+		Order:               orderDetail.Order,
+		Viewers:             orderDetail.Viewers,
+		RefundLogs:          logs,
+		VerificationRecords: orderDetail.VerificationRecords,
+		PayRecords:          orderDetail.PayRecords,
 	}, nil
 }
 

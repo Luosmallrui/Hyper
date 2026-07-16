@@ -2077,6 +2077,54 @@ Authorization: Bearer <access_token>
 }
 ```
 
+### 主办方取消未支付订单
+
+```http
+POST /api/v1/organizer/orders/:order_no/cancel
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+请求体中的 `reason_id` 使用 `GET /api/v1/order/cancel-reasons` 返回的取消原因：
+
+```json
+{
+  "reason_id": 1
+}
+```
+
+规则：
+
+- 仅当前登录主办方名下活动的订单可操作；其他主办方订单返回 `404`。
+- 仅 `status=0` 的待支付订单可取消。已支付、已核销或售后订单返回 `409`，提示“已支付订单请通过退款售后流程处理”。
+- 取消会回滚票种销量、返还本订单已抵扣积分，并关闭未支付流水。
+- 已取消订单重复提交是幂等操作，不会再次回滚库存或积分。
+- 已支付订单请通过退款售后流程处理，不能通过本接口取消。
+
+响应：
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "order_no": "T2026053114300012ab34cd",
+    "status": 3,
+    "cancel_reason_id": 1,
+    "cancelled_at": "2026-07-15T15:30:00+08:00"
+  }
+}
+```
+
+### 主办方退款详情
+
+```http
+GET /api/v1/organizer/refunds/:refund_no
+Authorization: Bearer <access_token>
+```
+
+仅返回当前主办方名下活动的退款单。响应包含退款单、关联订单、脱敏观演人、退款日志、支付流水和核销记录。详情见 [主办方退款详情接口](./organizer_refund_detail_api_20260716.md)。
+
 ---
 
 ## 8. 退款模块
