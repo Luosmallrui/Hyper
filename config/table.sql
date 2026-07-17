@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS `admin`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT COMMENT '管理员ID',
     `username`   varchar(50)  NOT NULL COMMENT '用户名',
+	`nickname`   varchar(50)  NOT NULL DEFAULT '' COMMENT '展示昵称',
     `password`   varchar(255) NOT NULL COMMENT '密码(bcrypt)',
     `avatar`     varchar(255) NOT NULL DEFAULT '' COMMENT '头像',
     `gender`     tinyint      NOT NULL DEFAULT 3 COMMENT '性别 1:男 2:女 3:未知',
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS `admin`
 -- Existing admin table migration:
 -- ALTER TABLE `admin` ADD COLUMN `role_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '后台角色ID' AFTER `motto`;
 -- ALTER TABLE `admin` ADD KEY `idx_admin_role` (`role_id`);
+-- ALTER TABLE `admin` ADD COLUMN `nickname` varchar(50) NOT NULL DEFAULT '' COMMENT '展示昵称' AFTER `username`;
 
 CREATE TABLE IF NOT EXISTS `admin_wechat_subscribers`
 (
@@ -199,6 +201,8 @@ CREATE TABLE IF NOT EXISTS `organizers`
     `bank_account_name` varchar(50)     NOT NULL DEFAULT '' COMMENT '收款人',
     `bank_account_no`   varchar(50)     NOT NULL DEFAULT '' COMMENT '收款账户',
     `bank_name`         varchar(50)     NOT NULL DEFAULT '' COMMENT '银行名称',
+	`bank_contact_name` varchar(50)     NOT NULL DEFAULT '' COMMENT '收款联系人',
+	`bank_contact_phone` varchar(20)    NOT NULL DEFAULT '' COMMENT '收款联系电话',
     `created_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`        datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`) USING BTREE,
@@ -208,6 +212,8 @@ CREATE TABLE IF NOT EXISTS `organizers`
 -- 如已有 organizers 表，type 字段保留为兼容字段；场地/派对区分请使用 activities.type。
 -- ALTER TABLE `organizers` MODIFY COLUMN `type` varchar(20) NOT NULL DEFAULT 'merchant' COMMENT '兼容字段: 入驻不再区分场地/派对，场地/派对由 activities.type 决定';
 -- ALTER TABLE `organizers` ADD COLUMN `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用' AFTER `status`;
+-- ALTER TABLE `organizers` ADD COLUMN `bank_contact_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款联系人' AFTER `bank_name`;
+-- ALTER TABLE `organizers` ADD COLUMN `bank_contact_phone` varchar(20) NOT NULL DEFAULT '' COMMENT '收款联系电话' AFTER `bank_contact_name`;
 
 CREATE TABLE IF NOT EXISTS `activities`
 (
@@ -251,6 +257,7 @@ CREATE TABLE IF NOT EXISTS `ticket_specs`
     `id`             bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '票券规格ID',
     `activity_id`    bigint unsigned NOT NULL COMMENT '活动ID',
     `name`           varchar(30)     NOT NULL COMMENT '规格名称',
+	`description`    varchar(500)    NOT NULL DEFAULT '' COMMENT '票种说明',
     `is_enabled`     tinyint         NOT NULL DEFAULT 1 COMMENT '启用状态',
     `sale_start`     datetime        NULL COMMENT '开售时间',
     `sale_end`       datetime        NULL COMMENT '停售时间',
@@ -264,6 +271,8 @@ CREATE TABLE IF NOT EXISTS `ticket_specs`
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_ticket_spec_activity` (`activity_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票券规格表';
+
+-- ALTER TABLE `ticket_specs` ADD COLUMN `description` varchar(500) NOT NULL DEFAULT '' COMMENT '票种说明' AFTER `name`;
 
 CREATE TABLE IF NOT EXISTS `activity_subscriptions`
 (
@@ -773,6 +782,8 @@ CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
     `bank_account_name` varchar(50)     NOT NULL COMMENT '收款人',
     `bank_account_no`   varchar(50)     NOT NULL COMMENT '收款账户',
     `bank_name`         varchar(50)     NOT NULL COMMENT '银行名称',
+	`bank_contact_name` varchar(50)     NOT NULL DEFAULT '' COMMENT '收款联系人',
+	`bank_contact_phone` varchar(20)    NOT NULL DEFAULT '' COMMENT '收款联系电话',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1通过 2拒绝',
     `reject_reason`     varchar(255)    NOT NULL DEFAULT '' COMMENT '拒绝原因',
     `reviewed_at`       datetime        NULL COMMENT '审核时间',
@@ -783,6 +794,9 @@ CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
     KEY `idx_bank_audit_user` (`user_id`) USING BTREE,
     KEY `idx_bank_audit_status` (`status`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方收款账户审核表';
+
+-- ALTER TABLE `organizer_bank_account_audits` ADD COLUMN `bank_contact_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款联系人' AFTER `bank_name`;
+-- ALTER TABLE `organizer_bank_account_audits` ADD COLUMN `bank_contact_phone` varchar(20) NOT NULL DEFAULT '' COMMENT '收款联系电话' AFTER `bank_contact_name`;
 
 -- Existing viewers table migration:
 -- 观演人允许被不同购票账号重复添加，仅限制同一账号内身份证/手机号重复。

@@ -575,6 +575,9 @@ func (s *NoteService) GetNoteDetail(ctx context.Context, noteID uint64, currentU
 		}
 		return nil, err
 	}
+	if note.Status == -1 || (note.VisibleConf == types.VisibleConfPrivate && currentUserID != note.UserID) {
+		return nil, errors.New("笔记不存在")
+	}
 
 	var (
 		userInfo       *types.UserProfile

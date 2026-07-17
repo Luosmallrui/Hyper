@@ -76,7 +76,9 @@ type IAdminService interface {
 	SaveActivityCollection(ctx context.Context, id int64, req types.ActivityCollectionRequest) (int64, error)
 	DeleteActivityCollection(ctx context.Context, id int64) error
 	ListVerifiers(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
+	SaveVerifier(ctx context.Context, id int64, req types.AdminVerifierRequest) (int64, error)
 	UpdateVerifierStatus(ctx context.Context, id int64, status int8) error
+	DeleteVerifier(ctx context.Context, id int64) error
 	ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error)
 	ListNotes(ctx context.Context, page, pageSize int, status *int, keyword string) (*types.AdminPageResponse[map[string]any], error)
 	UpdateNoteStatus(ctx context.Context, noteID int64, status int) error
@@ -1281,6 +1283,9 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 func (s *AdminService) GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error) {
 	stats := &types.AdminDashboardStats{}
 	db := s.DB.WithContext(ctx)
+	if err := db.Model(&models.Organizer{}).Where("status = ?", models.OrganizerStatusApproved).Count(&stats.TotalMerchants).Error; err != nil {
+		return nil, err
+	}
 
 	if err := db.Model(&models.Merchant{}).Where("type = ?", "场地").Count(&stats.TotalParties).Error; err != nil {
 		return nil, err

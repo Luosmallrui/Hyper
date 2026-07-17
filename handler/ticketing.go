@@ -1541,6 +1541,8 @@ func buildUploadKey(fileType string, header *multipart.FileHeader) (string, erro
 		"qualification_doc": true,
 		"avatar":            true,
 		"organizer_logo":    true,
+		"collection_share":  true,
+		"post":              true,
 		"misc":              true,
 	}
 	if !allowed[fileType] {

@@ -12,6 +12,7 @@ type AdminPageResponse[T any] struct {
 type AdminProfileResponse struct {
 	ID          int       `json:"id"`
 	Username    string    `json:"username"`
+	Nickname    string    `json:"nickname"`
 	Avatar      string    `json:"avatar"`
 	Mobile      string    `json:"mobile"`
 	Email       string    `json:"email"`
@@ -33,6 +34,7 @@ type AdminRoleSummary struct {
 type AdminAccountItem struct {
 	ID        int              `json:"id"`
 	Username  string           `json:"username"`
+	Nickname  string           `json:"nickname"`
 	Avatar    string           `json:"avatar"`
 	Mobile    string           `json:"mobile"`
 	Email     string           `json:"email"`
@@ -85,10 +87,21 @@ type AdminOperationLogItem struct {
 }
 
 type AdminProfileRequest struct {
-	Avatar string `json:"avatar"`
-	Mobile string `json:"mobile"`
-	Email  string `json:"email"`
-	Motto  string `json:"motto"`
+	Avatar   string `json:"avatar"`
+	Nickname string `json:"nickname"`
+	Mobile   string `json:"mobile"`
+	Email    string `json:"email"`
+	Motto    string `json:"motto"`
+}
+
+type AdminVerifierRequest struct {
+	OrganizerID     int64  `json:"organizer_id" binding:"required"`
+	UserID          int64  `json:"user_id"`
+	Name            string `json:"name" binding:"required"`
+	Phone           string `json:"phone" binding:"required"`
+	Status          int8   `json:"status"`
+	PermissionScope string `json:"permission_scope"`
+	Channel         string `json:"channel"`
 }
 
 type AdminPasswordRequest struct {
@@ -98,6 +111,7 @@ type AdminPasswordRequest struct {
 
 type AdminAccountRequest struct {
 	Username string `json:"username" binding:"required"`
+	Nickname string `json:"nickname"`
 	Password string `json:"password"`
 	Avatar   string `json:"avatar"`
 	Mobile   string `json:"mobile"`

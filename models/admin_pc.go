@@ -179,17 +179,19 @@ const (
 )
 
 type OrganizerBankAccountAudit struct {
-	ID              int64      `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrganizerID     int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
-	UserID          int64      `gorm:"column:user_id;not null;index" json:"user_id"`
-	BankAccountName string     `gorm:"column:bank_account_name;size:50;not null" json:"bank_account_name"`
-	BankAccountNo   string     `gorm:"column:bank_account_no;size:50;not null" json:"bank_account_no"`
-	BankName        string     `gorm:"column:bank_name;size:50;not null" json:"bank_name"`
-	Status          int8       `gorm:"column:status;not null;default:0;index" json:"status"`
-	RejectReason    string     `gorm:"column:reject_reason;size:255" json:"reject_reason"`
-	ReviewedAt      *time.Time `gorm:"column:reviewed_at" json:"reviewed_at"`
-	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID               int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID      int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	UserID           int64      `gorm:"column:user_id;not null;index" json:"user_id"`
+	BankAccountName  string     `gorm:"column:bank_account_name;size:50;not null" json:"bank_account_name"`
+	BankAccountNo    string     `gorm:"column:bank_account_no;size:50;not null" json:"bank_account_no"`
+	BankName         string     `gorm:"column:bank_name;size:50;not null" json:"bank_name"`
+	BankContactName  string     `gorm:"column:bank_contact_name;size:50;not null" json:"bank_contact_name"`
+	BankContactPhone string     `gorm:"column:bank_contact_phone;size:20;not null" json:"bank_contact_phone"`
+	Status           int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	RejectReason     string     `gorm:"column:reject_reason;size:255" json:"reject_reason"`
+	ReviewedAt       *time.Time `gorm:"column:reviewed_at" json:"reviewed_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (OrganizerBankAccountAudit) TableName() string { return "organizer_bank_account_audits" }

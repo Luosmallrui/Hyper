@@ -187,5 +187,7 @@ func (d *NoteDAO) ListNodeByUserIDs(ctx context.Context, userIDs []int, cursor i
 }
 
 func publicNoteScope(db *gorm.DB) *gorm.DB {
-	return db.Where("notes.status = ? AND notes.visible_conf = ?", 1, 1)
+	// Historical user posts use status=0 before review, so public visibility is
+	// controlled by visible_conf; only soft-deleted posts are excluded by status.
+	return db.Where("notes.status <> ? AND notes.visible_conf = ?", -1, 1)
 }

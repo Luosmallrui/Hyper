@@ -42,11 +42,31 @@ func (u *Auth) RegisterRouter(r gin.IRouter) {
 	auth.POST("/send-code", context.Wrap(u.SendCode))
 	auth.POST("/bind-phone", authorize, context.Wrap(u.BindPhone)) //微信获取手机号
 	auth.POST("/refresh", context.Wrap(u.Refresh))
+	auth.GET("/profile", authorize, context.Wrap(u.GetProfile))
 	auth.GET("/token", context.Wrap(u.GetToken))
 	auth.POST("/update-profile", authorize, context.Wrap(u.UpdateUserProfile)) //更新用户信息
 	auth.POST("/send-sms", authorize, context.Wrap(u.SendSms))                 //发送验证码
 	auth.POST("/update-phone", authorize, context.Wrap(u.UpdatePhone))         //更新手机号
 	auth.GET("/test1", authorize, context.Wrap(u.test))
+}
+
+// GetProfile supplies the minimal authenticated profile needed by PC account flows.
+func (u *Auth) GetProfile(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "获取用户身份失败")
+	}
+	user, err := u.UserService.GetUserInfo(c.Request.Context(), int(userID))
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{
+		"user_id":  user.Id,
+		"phone":    user.Mobile,
+		"nickname": user.Nickname,
+		"avatar":   user.Avatar,
+	})
+	return nil
 }
 
 func (u *Auth) test(c *gin.Context) error {
