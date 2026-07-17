@@ -56,6 +56,8 @@ type OrganizerWithdrawRequest struct {
 	BankAccountName string `json:"bank_account_name" binding:"required"`
 	BankAccountNo   string `json:"bank_account_no" binding:"required"`
 	BankName        string `json:"bank_name" binding:"required"`
+	ContactName     string `json:"contact_name"`
+	ContactPhone    string `json:"contact_phone"`
 }
 
 type OrganizerBankAuditInfo struct {
@@ -63,6 +65,8 @@ type OrganizerBankAuditInfo struct {
 	BankAccountName string     `json:"bank_account_name"`
 	BankAccountNo   string     `json:"bank_account_no"`
 	BankName        string     `json:"bank_name"`
+	ContactName     string     `json:"contact_name"`
+	ContactPhone    string     `json:"contact_phone"`
 	Status          int8       `json:"status"`
 	RejectReason    string     `json:"reject_reason"`
 	ReviewedAt      *time.Time `json:"reviewed_at"`
@@ -74,6 +78,8 @@ type OrganizerWithdrawInfoResponse struct {
 	BankAccountName       string                  `json:"bank_account_name"`
 	BankAccountNo         string                  `json:"bank_account_no"`
 	BankName              string                  `json:"bank_name"`
+	ContactName           string                  `json:"contact_name"`
+	ContactPhone          string                  `json:"contact_phone"`
 	CanWithdraw           bool                    `json:"can_withdraw"`
 	GrossAmount           int64                   `json:"gross_amount"`
 	RefundAmount          int64                   `json:"refund_amount"`
@@ -292,11 +298,14 @@ type OrganizerPostItem struct {
 }
 
 type OrganizerFinanceSummary struct {
-	GrossAmount    int64 `json:"gross_amount"`
-	RefundAmount   int64 `json:"refund_amount"`
-	SettleAmount   int64 `json:"settle_amount"`
-	WithdrawAmount int64 `json:"withdraw_amount"`
-	OrderCount     int64 `json:"order_count"`
+	GrossAmount      int64 `json:"gross_amount"`
+	RefundAmount     int64 `json:"refund_amount"`
+	SettleAmount     int64 `json:"settle_amount"`
+	WithdrawAmount   int64 `json:"withdraw_amount"`
+	OrderCount       int64 `json:"order_count"`
+	TodayOrderCount  int64 `json:"today_order_count"`
+	TodayOrderAmount int64 `json:"today_order_amount"`
+	TodayTicketCount int64 `json:"today_ticket_count"`
 }
 
 type OrganizerFinanceFlowItem struct {
@@ -407,6 +416,7 @@ type ActivityListItem struct {
 type TicketSpecSaveItem struct {
 	ID            int64  `json:"id"`
 	Name          string `json:"name" binding:"required"`
+	Description   string `json:"description"`
 	IsEnabled     int8   `json:"is_enabled"`
 	SaleStart     string `json:"sale_start"`
 	SaleEnd       string `json:"sale_end"`

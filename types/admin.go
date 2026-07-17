@@ -273,12 +273,13 @@ type AdminWechatSubscribeRequest struct {
 
 // AdminDashboardStats 后台统计
 type AdminDashboardStats struct {
-	TotalParties int64 `json:"total_parties"`
-	TotalEvents  int64 `json:"total_events"`
-	TotalTickets int64 `json:"total_tickets"`
-	TotalOrders  int64 `json:"total_orders"`
-	TotalUsers   int64 `json:"total_users"`
-	TotalRevenue int64 `json:"total_revenue"` // 单位：分
+	TotalMerchants int64 `json:"total_merchants"`
+	TotalParties   int64 `json:"total_parties"`
+	TotalEvents    int64 `json:"total_events"`
+	TotalTickets   int64 `json:"total_tickets"`
+	TotalOrders    int64 `json:"total_orders"`
+	TotalUsers     int64 `json:"total_users"`
+	TotalRevenue   int64 `json:"total_revenue"` // 单位：分
 }
 
 type AdminFinanceSummary struct {

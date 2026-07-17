@@ -99,7 +99,10 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/users/:id/records/:type", context.Wrap(a.ListUserRecords))
 		authorized.GET("/viewers", context.Wrap(a.ListViewers))
 		authorized.GET("/verifiers", context.Wrap(a.ListVerifiers))
+		authorized.POST("/verifiers", context.Wrap(a.CreateVerifier))
+		authorized.PUT("/verifiers/:id", context.Wrap(a.UpdateVerifier))
 		authorized.PATCH("/verifiers/:id/status", context.Wrap(a.UpdateVerifierStatus))
+		authorized.DELETE("/verifiers/:id", context.Wrap(a.DeleteVerifier))
 		authorized.GET("/verification-records", context.Wrap(a.ListVerificationRecords))
 		authorized.GET("/notes", context.Wrap(a.ListNotes))
 		authorized.PUT("/notes/:id/status", context.Wrap(a.UpdateNoteStatus))
@@ -562,6 +565,32 @@ func (a *Admin) ListVerifiers(c *gin.Context) error {
 	return nil
 }
 
+func (a *Admin) CreateVerifier(c *gin.Context) error {
+	var req types.AdminVerifierRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := a.AdminService.SaveVerifier(c.Request.Context(), 0, req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+func (a *Admin) UpdateVerifier(c *gin.Context) error {
+	var req types.AdminVerifierRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return err
+	}
+	id, err := a.AdminService.SaveVerifier(c.Request.Context(), adminParamID(c), req)
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
 func (a *Admin) UpdateVerifierStatus(c *gin.Context) error {
 	var req struct {
 		Status int8 `json:"status"`
@@ -570,6 +599,14 @@ func (a *Admin) UpdateVerifierStatus(c *gin.Context) error {
 		return err
 	}
 	if err := a.AdminService.UpdateVerifierStatus(c.Request.Context(), adminParamID(c), req.Status); err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) DeleteVerifier(c *gin.Context) error {
+	if err := a.AdminService.DeleteVerifier(c.Request.Context(), adminParamID(c)); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

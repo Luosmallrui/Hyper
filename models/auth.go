@@ -10,6 +10,7 @@ const (
 type Admin struct {
 	Id        int       `gorm:"column:id" db:"id" json:"id" form:"id"`                         // 用户ID
 	Username  string    `gorm:"column:username" db:"username" json:"username" form:"username"` // 用户昵称
+	Nickname  string    `gorm:"column:nickname" db:"nickname" json:"nickname" form:"nickname"` // 展示昵称
 	Password  string    `gorm:"column:password" db:"password" json:"password" form:"password"` // 用户密码
 	Avatar    string    `gorm:"column:avatar" db:"avatar" json:"avatar" form:"avatar"`         // 用户头像
 	Gender    int8      `gorm:"column:gender" db:"gender" json:"gender" form:"gender"`         // 用户性别[1:男;2:女;3:未知]

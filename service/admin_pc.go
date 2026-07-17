@@ -22,7 +22,7 @@ func (s *AdminService) GetAdminProfile(ctx context.Context, adminID int64) (*typ
 	if err := s.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
 		return nil, err
 	}
-	resp := &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, RoleID: admin.RoleID, Status: admin.Status, Permissions: []string{}, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}
+	resp := &types.AdminProfileResponse{ID: admin.Id, Username: admin.Username, Nickname: admin.Nickname, Avatar: admin.Avatar, Mobile: admin.Mobile, Email: admin.Email, Motto: admin.Motto, RoleID: admin.RoleID, Status: admin.Status, Permissions: []string{}, CreatedAt: admin.CreatedAt, UpdatedAt: admin.UpdatedAt}
 	if admin.RoleID == 0 {
 		return resp, nil
 	}
@@ -41,10 +41,11 @@ func (s *AdminService) GetAdminProfile(ctx context.Context, adminID int64) (*typ
 
 func (s *AdminService) UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error {
 	return s.DB.WithContext(ctx).Model(&models.Admin{}).Where("id = ?", adminID).Updates(map[string]any{
-		"avatar": req.Avatar,
-		"mobile": req.Mobile,
-		"email":  req.Email,
-		"motto":  req.Motto,
+		"avatar":   req.Avatar,
+		"nickname": req.Nickname,
+		"mobile":   req.Mobile,
+		"email":    req.Email,
+		"motto":    req.Motto,
 	}).Error
 }
 
@@ -71,21 +72,21 @@ func (s *AdminService) ListAdmins(ctx context.Context, page, pageSize int, keywo
 		return nil, err
 	}
 	var rows []struct {
-		ID                              int
-		Username, Avatar, Mobile, Email string
-		RoleID                          int64
-		Status                          int8
-		CreatedAt, UpdatedAt            time.Time
-		RoleName                        string
-		Permissions                     string
+		ID                                        int
+		Username, Nickname, Avatar, Mobile, Email string
+		RoleID                                    int64
+		Status                                    int8
+		CreatedAt, UpdatedAt                      time.Time
+		RoleName                                  string
+		Permissions                               string
 	}
-	if err := query.Select("a.id, a.username, a.avatar, a.mobile, a.email, a.role_id, a.status, a.created_at, a.updated_at, r.name AS role_name, r.permissions").Order("a.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
+	if err := query.Select("a.id, a.username, a.nickname, a.avatar, a.mobile, a.email, a.role_id, a.status, a.created_at, a.updated_at, r.name AS role_name, r.permissions").Order("a.id desc").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	list := make([]types.AdminAccountItem, 0, len(rows))
 	for _, row := range rows {
 		permissions, _ := normalizeAdminPermissions(row.Permissions)
-		list = append(list, types.AdminAccountItem{ID: row.ID, Username: row.Username, Avatar: row.Avatar, Mobile: row.Mobile, Email: row.Email, RoleID: row.RoleID, Role: types.AdminRoleSummary{ID: row.RoleID, Name: row.RoleName, Permissions: permissions}, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
+		list = append(list, types.AdminAccountItem{ID: row.ID, Username: row.Username, Nickname: row.Nickname, Avatar: row.Avatar, Mobile: row.Mobile, Email: row.Email, RoleID: row.RoleID, Role: types.AdminRoleSummary{ID: row.RoleID, Name: row.RoleName, Permissions: permissions}, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
 	}
 	return &types.AdminPageResponse[types.AdminAccountItem]{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
@@ -100,7 +101,7 @@ func (s *AdminService) CreateAdmin(ctx context.Context, req types.AdminAccountRe
 	if err := s.validateAdminRole(ctx, req.RoleID); err != nil {
 		return 0, err
 	}
-	admin := models.Admin{Username: req.Username, Password: encrypt.HashPassword(req.Password), Avatar: req.Avatar, Mobile: req.Mobile, Email: req.Email, RoleID: req.RoleID, Status: req.Status}
+	admin := models.Admin{Username: req.Username, Nickname: req.Nickname, Password: encrypt.HashPassword(req.Password), Avatar: req.Avatar, Mobile: req.Mobile, Email: req.Email, RoleID: req.RoleID, Status: req.Status}
 	if err := s.DB.WithContext(ctx).Create(&admin).Error; err != nil {
 		return 0, err
 	}
@@ -117,7 +118,7 @@ func (s *AdminService) UpdateAdmin(ctx context.Context, actorID, id int64, req t
 	if err := s.ensureAdminChangeKeepsSuperAdmin(ctx, id, req.RoleID, req.Status); err != nil {
 		return err
 	}
-	updates := map[string]any{"username": req.Username, "avatar": req.Avatar, "mobile": req.Mobile, "email": req.Email, "role_id": req.RoleID}
+	updates := map[string]any{"username": req.Username, "nickname": req.Nickname, "avatar": req.Avatar, "mobile": req.Mobile, "email": req.Email, "role_id": req.RoleID}
 	if req.Status != 0 {
 		updates["status"] = req.Status
 	}
@@ -678,6 +679,54 @@ func (s *AdminService) ListVerifiers(ctx context.Context, page, pageSize int, ke
 	return adminMapPage(query.Order("v.id desc"), page, pageSize)
 }
 
+func (s *AdminService) SaveVerifier(ctx context.Context, id int64, req types.AdminVerifierRequest) (int64, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.PermissionScope = strings.TrimSpace(req.PermissionScope)
+	req.Channel = strings.TrimSpace(req.Channel)
+	if req.Name == "" || req.Phone == "" {
+		return 0, errors.New("核销员姓名和手机号不能为空")
+	}
+	if req.Status != models.VerifierStatusInactive && req.Status != models.VerifierStatusActive {
+		return 0, errors.New("核销员状态无效")
+	}
+	if req.PermissionScope == "" {
+		req.PermissionScope = "活动"
+	}
+	var organizer models.Organizer
+	if err := s.DB.WithContext(ctx).First(&organizer, req.OrganizerID).Error; err != nil {
+		return 0, err
+	}
+	updates := map[string]any{
+		"organizer_id":     req.OrganizerID,
+		"user_id":          req.UserID,
+		"name":             req.Name,
+		"phone":            req.Phone,
+		"status":           req.Status,
+		"permission_scope": req.PermissionScope,
+		"channel":          req.Channel,
+	}
+	if id == 0 {
+		verifier := models.Verifier{OrganizerID: req.OrganizerID, UserID: req.UserID, Name: req.Name, Phone: req.Phone, Status: req.Status, PermissionScope: req.PermissionScope, Channel: req.Channel}
+		if req.UserID > 0 && req.Status == models.VerifierStatusActive {
+			now := time.Now()
+			verifier.BoundAt = &now
+		}
+		if err := s.DB.WithContext(ctx).Create(&verifier).Error; err != nil {
+			return 0, err
+		}
+		return verifier.ID, nil
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Verifier{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return 0, gorm.ErrRecordNotFound
+	}
+	return id, nil
+}
+
 func (s *AdminService) UpdateVerifierStatus(ctx context.Context, id int64, status int8) error {
 	if status != models.VerifierStatusInactive && status != models.VerifierStatusActive {
 		return errors.New("核销员状态无效")
@@ -690,6 +739,26 @@ func (s *AdminService) UpdateVerifierStatus(ctx context.Context, id int64, statu
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func (s *AdminService) DeleteVerifier(ctx context.Context, id int64) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.VerificationRecord{}).Where("verifier_id = ?", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return errors.New("该核销员已有核销记录，不能删除")
+		}
+		result := tx.Delete(&models.Verifier{}, id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (s *AdminService) ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
@@ -726,7 +795,15 @@ func (s *AdminService) UpdateNoteStatus(ctx context.Context, noteID int64, statu
 	if status != -1 && status != 0 && status != 1 {
 		return errors.New("动态状态仅支持 -1删除、0隐藏、1公开")
 	}
-	result := s.DB.WithContext(ctx).Model(&models.Note{}).Where("id = ?", noteID).Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	updates := map[string]any{"status": status, "updated_at": time.Now()}
+	// status=0 is the management-side hide command. Existing historical posts may
+	// also have status=0, so visibility must be changed explicitly to hide them.
+	if status == 0 {
+		updates["visible_conf"] = types.VisibleConfPrivate
+	} else if status == 1 {
+		updates["visible_conf"] = types.VisibleConfPublic
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Note{}).Where("id = ?", noteID).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -1043,10 +1120,12 @@ func (s *AdminService) AuditBankAccount(ctx context.Context, id int64, req types
 		}
 		if req.Status == models.OrganizerBankAuditStatusApproved {
 			if err := tx.Model(&models.Organizer{}).Where("id = ?", audit.OrganizerID).Updates(map[string]any{
-				"bank_account_name": audit.BankAccountName,
-				"bank_account_no":   audit.BankAccountNo,
-				"bank_name":         audit.BankName,
-				"updated_at":        now,
+				"bank_account_name":  audit.BankAccountName,
+				"bank_account_no":    audit.BankAccountNo,
+				"bank_name":          audit.BankName,
+				"bank_contact_name":  audit.BankContactName,
+				"bank_contact_phone": audit.BankContactPhone,
+				"updated_at":         now,
 			}).Error; err != nil {
 				return err
 			}

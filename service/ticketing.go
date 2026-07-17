@@ -247,6 +247,8 @@ func (s *TicketingService) GetWithdrawInfo(ctx context.Context, userID int64) (*
 		BankAccountName:       org.BankAccountName,
 		BankAccountNo:         org.BankAccountNo,
 		BankName:              org.BankName,
+		ContactName:           org.BankContactName,
+		ContactPhone:          org.BankContactPhone,
 		CanWithdraw:           org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "" && funds.AvailableAmount > 0,
 		GrossAmount:           funds.GrossAmount,
 		RefundAmount:          funds.RefundAmount,
@@ -293,12 +295,14 @@ func (s *TicketingService) UpdateWithdrawInfo(ctx context.Context, userID int64,
 		return errors.New("已有待审核的收款账户申请，请勿重复提交")
 	}
 	audit := models.OrganizerBankAccountAudit{
-		OrganizerID:     org.ID,
-		UserID:          org.UserID,
-		BankAccountName: strings.TrimSpace(req.BankAccountName),
-		BankAccountNo:   strings.TrimSpace(req.BankAccountNo),
-		BankName:        strings.TrimSpace(req.BankName),
-		Status:          models.OrganizerBankAuditStatusPending,
+		OrganizerID:      org.ID,
+		UserID:           org.UserID,
+		BankAccountName:  strings.TrimSpace(req.BankAccountName),
+		BankAccountNo:    strings.TrimSpace(req.BankAccountNo),
+		BankName:         strings.TrimSpace(req.BankName),
+		BankContactName:  strings.TrimSpace(req.ContactName),
+		BankContactPhone: strings.TrimSpace(req.ContactPhone),
+		Status:           models.OrganizerBankAuditStatusPending,
 	}
 	if audit.BankAccountName == "" || audit.BankAccountNo == "" || audit.BankName == "" {
 		return errors.New("收款人、收款账户、银行信息不能为空")
@@ -798,7 +802,7 @@ func (s *TicketingService) ListVenueNotes(ctx context.Context, userID, venueID i
 		Select(`n.id, n.user_id, n.title, n.content, n.type, n.media_data, n.activity_id, n.store_id,
 			n.created_at, n.updated_at, COALESCE(u.avatar, '') AS avatar, COALESCE(u.nickname, '') AS nickname`).
 		Joins("LEFT JOIN users u ON u.id = n.user_id").
-		Where("n.store_id IN ? AND n.status = ? AND n.visible_conf = ?", storeIDs, 1, types.VisibleConfPublic)
+		Where("n.store_id IN ? AND n.status <> ? AND n.visible_conf = ?", storeIDs, -1, types.VisibleConfPublic)
 	if cursor > 0 {
 		query = query.Where("n.created_at < ?", time.Unix(0, cursor))
 	}
@@ -1065,7 +1069,7 @@ func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, ven
 	if err := s.DB.WithContext(ctx).Table("notes n").
 		Select("os.organizer_id, COUNT(n.id) AS count").
 		Joins("JOIN organizer_stores os ON os.id = n.store_id").
-		Where("os.organizer_id IN ? AND n.status = ? AND n.visible_conf = ?", venueIDs, 1, types.VisibleConfPublic).
+		Where("os.organizer_id IN ? AND n.status <> ? AND n.visible_conf = ?", venueIDs, -1, types.VisibleConfPublic).
 		Group("os.organizer_id").
 		Scan(&postRows).Error; err != nil {
 		return err
@@ -1435,6 +1439,13 @@ func (s *TicketingService) GetOrganizerFinanceSummary(ctx context.Context, userI
 	if err := s.DB.WithContext(ctx).Table("ticket_orders o").Joins("JOIN activities a ON a.id = o.activity_id").
 		Where("a.organizer_id = ? AND o.status IN ?", org.ID, paidStatuses).
 		Select("COUNT(o.id)").Scan(&resp.OrderCount).Error; err != nil {
+		return nil, err
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	if err := s.DB.WithContext(ctx).Table("ticket_orders o").Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND o.status IN ? AND o.pay_time >= ?", org.ID, paidStatuses, today).
+		Select("COUNT(o.id) AS today_order_count, COALESCE(SUM(o.actual_price),0) AS today_order_amount, COALESCE(SUM(o.quantity),0) AS today_ticket_count").
+		Scan(resp).Error; err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -3064,7 +3075,7 @@ func (s *TicketingService) GetOrganizerRefundDetail(ctx context.Context, userID 
 		Select("vr.id, vr.verifier_id, v.name AS verifier_name, v.phone AS verifier_phone, vr.activity_id, a.name AS activity_name, vr.verified_at").
 		Joins("LEFT JOIN verifiers v ON v.id = vr.verifier_id").
 		Joins("LEFT JOIN activities a ON a.id = vr.activity_id").
-		Where("vr.order_id = ?").Order("vr.id DESC").Find(&records).Error; err != nil {
+		Where("vr.order_id = ?", order.ID).Order("vr.id DESC").Find(&records).Error; err != nil {
 		return nil, err
 	}
 	resp.VerificationRecords = make([]types.OrganizerRefundVerificationItem, 0, len(records))
@@ -4202,6 +4213,8 @@ func buildOrganizerBankAuditInfo(audit models.OrganizerBankAccountAudit) types.O
 		BankAccountName: audit.BankAccountName,
 		BankAccountNo:   audit.BankAccountNo,
 		BankName:        audit.BankName,
+		ContactName:     audit.BankContactName,
+		ContactPhone:    audit.BankContactPhone,
 		Status:          audit.Status,
 		RejectReason:    audit.RejectReason,
 		ReviewedAt:      audit.ReviewedAt,
@@ -4357,6 +4370,7 @@ func buildTicketSpec(activityID int64, item types.TicketSpecSaveItem) (*models.T
 	return &models.TicketSpec{
 		ActivityID:    activityID,
 		Name:          item.Name,
+		Description:   item.Description,
 		IsEnabled:     item.IsEnabled,
 		SaleStart:     start,
 		SaleEnd:       end,
