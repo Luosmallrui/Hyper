@@ -18,6 +18,7 @@ type Config struct {
 	Server          *Server          `json:"server" yaml:"server"`
 	RocketMQ        *RocketMQConfig  `json:"rocketmq" yaml:"rocketmq"`
 	WechatPayConfig *WechatPayConfig `json:"wechat_pay" yaml:"wechat_pay"`
+	Llm             *LlmConfig       `json:"llm" yaml:"llm"`
 }
 
 type Server struct {

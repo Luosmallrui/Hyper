@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"Hyper/config"
+	"Hyper/middleware"
 	"Hyper/models"
 	"Hyper/pkg/context"
 	"Hyper/pkg/response"
@@ -19,6 +21,7 @@ import (
 )
 
 type Map struct {
+	Config     *config.Config
 	MapService service.IMapService
 	OssService service.IOssService
 	Redis      *redis.Client
@@ -32,7 +35,7 @@ func (m *Map) RegisterRouter(r gin.IRouter) {
 	mapGroup.GET("/tree", context.Wrap(m.GetDistrictTree))
 
 	markerGroup := r.Group("/v1/map")
-	markerGroup.GET("/markers", context.Wrap(m.GetMarkers))
+	markerGroup.GET("/markers", middleware.OptionalAuth([]byte(m.Config.Jwt.Secret)), context.Wrap(m.GetMarkers))
 }
 
 func (m *Map) Test(c *gin.Context) error {
@@ -259,6 +262,9 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 		}
 	}
 
+	followingMap := m.loadFollowingSet(c, userIDs)
+	subscribedMap := m.loadActivitySubscriptionSet(c, activityIDs)
+
 	priceMap := make(map[int64]int64)
 	if len(activityIDs) > 0 {
 		var rows []struct {
@@ -322,6 +328,8 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			marker.UserName = organizer.Name
 			marker.UserAvatar = organizer.Logo
 			marker.UserAvatarCamel = organizer.Logo
+			marker.IsFollow = followingMap[int(organizer.UserID)]
+			marker.IsSubscriber = subscribedMap[activity.ID]
 			if user, ok := userMap[int(organizer.UserID)]; ok {
 				if user.Nickname != "" {
 					marker.User = user.Nickname
@@ -336,6 +344,26 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 		markers = append(markers, marker)
 	}
 	return markers, nil
+}
+
+// loadActivitySubscriptionSet batch-loads current user's subscriptions for
+// activity markers. Anonymous requests intentionally return an empty set.
+func (m *Map) loadActivitySubscriptionSet(c *gin.Context, activityIDs []int64) map[int64]bool {
+	subscribed := make(map[int64]bool)
+	userID := currentUserID(c)
+	if userID <= 0 || len(activityIDs) == 0 {
+		return subscribed
+	}
+	var subscribedIDs []int64
+	if err := m.DB.WithContext(c.Request.Context()).Model(&models.ActivitySubscription{}).
+		Where("user_id = ? AND activity_id IN ?", userID, activityIDs).
+		Pluck("activity_id", &subscribedIDs).Error; err != nil {
+		return subscribed
+	}
+	for _, id := range subscribedIDs {
+		subscribed[id] = true
+	}
+	return subscribed
 }
 
 func (m *Map) GetDistrictTree(c *gin.Context) error {
@@ -475,6 +503,25 @@ func markerDistance(c *gin.Context, lat, lng float64) float64 {
 		return 0
 	}
 	return haversineKM(userLat, userLng, lat, lng)
+}
+
+// loadFollowingSet 批量查询当前登录用户已关注的目标用户 ID，避免每个 marker 单独查询
+func (m *Map) loadFollowingSet(c *gin.Context, ownerUserIDs []int) map[int]bool {
+	following := make(map[int]bool)
+	userID := currentUserID(c)
+	if userID <= 0 || len(ownerUserIDs) == 0 {
+		return following
+	}
+	var followeeIDs []int
+	if err := m.DB.WithContext(c.Request.Context()).Model(&models.UserFollow{}).
+		Where("follower_id = ? AND followee_id IN ? AND status = 1", userID, ownerUserIDs).
+		Pluck("followee_id", &followeeIDs).Error; err != nil {
+		return following
+	}
+	for _, id := range followeeIDs {
+		following[id] = true
+	}
+	return following
 }
 
 func exceedsDistance(c *gin.Context, distance float64) bool {
