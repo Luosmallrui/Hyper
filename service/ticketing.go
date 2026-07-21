@@ -1808,6 +1808,12 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 			Where("activity_id = ? AND user_id = ?", activityID, userID).
 			Count(&count).Error
 		resp.IsSubscribe = count > 0
+
+		var followCount int64
+		_ = s.DB.WithContext(ctx).Model(&models.UserFollow{}).
+			Where("follower_id = ? AND followee_id = ? AND status = 1", userID, org.UserID).
+			Count(&followCount).Error
+		resp.IsFollow = followCount > 0
 	}
 	return resp, nil
 }

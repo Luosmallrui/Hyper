@@ -400,6 +400,7 @@ type ActivityDetailResponse struct {
 	TicketSpecs []models.TicketSpec `json:"ticket_specs"`
 	Organizer   *models.Organizer   `json:"organizer,omitempty"`
 	IsSubscribe bool                `json:"is_subscribe"`
+	IsFollow    bool                `json:"is_follow"`
 }
 
 type ActivityListItem struct {

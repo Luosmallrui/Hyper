@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"Hyper/config"
 	"Hyper/pkg/log"
 	"context"
 	"fmt"
@@ -15,10 +16,14 @@ import (
 
 var client openai.Client
 
-func init() {
+func Init(cfg *config.LlmConfig) {
+	if cfg == nil {
+		log.L.Warn("llm config missing, tag generation disabled")
+		return
+	}
 	client = openai.NewClient(
-		option.WithAPIKey("sk-798f3a22651446b1b4c441675dea02eb"),
-		option.WithBaseURL("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+		option.WithAPIKey(cfg.APIKey),
+		option.WithBaseURL(cfg.BaseURL),
 	)
 }
 func GenNoteTag(ctx context.Context, ossURL string) []string {
@@ -32,10 +37,10 @@ func GenNoteTag(ctx context.Context, ossURL string) []string {
 			},
 		},
 		{
-			// 第二个元素：纯图片
+			// 第二个元素：纯图片，缩小分辨率以降低视觉模型的输入 token 消耗
 			OfImageURL: &openai.ChatCompletionContentPartImageParam{
 				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-					URL: ossURL,
+					URL: ossURL + "?x-oss-process=image/resize,w_200",
 				},
 			},
 		},

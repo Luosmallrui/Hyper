@@ -2,6 +2,7 @@ package main
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/llm"
 	"Hyper/pkg/log"
 	"Hyper/pkg/server"
 	"fmt"
@@ -18,6 +19,7 @@ func main() {
 	}
 	path := fmt.Sprintf("configs/config.%s.yaml", env)
 	cfg := config.New(path)
+	llm.Init(cfg.Llm)
 	appProvider := InitServer(cfg)
 	cliApp := &cli.App{
 		Name: "api-server",

@@ -89,6 +89,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		DB:     db,
 	}
 	handlerMap := &handler.Map{
+		Config:     cfg,
 		MapService: mapService,
 		OssService: iOssService,
 		Redis:      redisClient,
