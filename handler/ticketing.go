@@ -29,19 +29,20 @@ type Ticketing struct {
 
 func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	auth := middleware.Auth([]byte(h.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(h.Config.Jwt.Secret))
 	v1 := r.Group("/v1")
 	v1.GET("/points/rules", auth, h.wrap(h.GetPointsRule))
 	v1.GET("/subscriptions", auth, h.wrap(h.ListSubscriptions))
 
-	venues := v1.Group("/venues", auth)
+	venues := v1.Group("/venues")
 	{
-		venues.GET("", h.wrap(h.ListVenues))
-		venues.GET("/:id", h.wrap(h.GetVenueDetail))
-		venues.GET("/:id/notes", h.wrap(h.ListVenueNotes))
-		venues.POST("/:id/follow", h.wrap(h.FollowVenue))
-		venues.DELETE("/:id/follow", h.wrap(h.UnfollowVenue))
-		venues.POST("/:id/subscribe", h.wrap(h.SubscribeVenue))
-		venues.DELETE("/:id/subscribe", h.wrap(h.UnsubscribeVenue))
+		venues.GET("", optionalAuth, h.wrap(h.ListVenues))
+		venues.GET("/:id", optionalAuth, h.wrap(h.GetVenueDetail))
+		venues.GET("/:id/notes", optionalAuth, h.wrap(h.ListVenueNotes))
+		venues.POST("/:id/follow", auth, h.wrap(h.FollowVenue))
+		venues.DELETE("/:id/follow", auth, h.wrap(h.UnfollowVenue))
+		venues.POST("/:id/subscribe", auth, h.wrap(h.SubscribeVenue))
+		venues.DELETE("/:id/subscribe", auth, h.wrap(h.UnsubscribeVenue))
 	}
 
 	organizer := v1.Group("/organizer", auth)
@@ -100,21 +101,21 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.DELETE("/stores/:id", h.wrap(h.DeleteStore))
 	}
 
-	activity := v1.Group("/activity", auth)
+	activity := v1.Group("/activity")
 	{
-		activity.POST("/create", h.wrap(h.SaveActivityStep))
-		activity.GET("/my-list", h.wrap(h.GetMyActivities))
-		activity.GET("/search", h.wrap(h.SearchActivities))
-		activity.GET("/subscriptions", h.wrap(h.ListSubscribedActivities))
-		activity.GET("/:id/statistics", h.wrap(h.GetActivityStatistics))
-		activity.GET("/:id/statistics/daily", h.wrap(h.GetActivityDailyStatistics))
-		activity.GET("/:id", h.wrap(h.GetActivity))
-		activity.POST("/:id/subscribe", h.wrap(h.SubscribeActivity))
-		activity.POST("/:id/unsubscribe", h.wrap(h.UnsubscribeActivity))
-		activity.DELETE("/:id", h.wrap(h.DeleteActivity))
-		activity.POST("/:id/submit-audit", h.wrap(h.SubmitActivityAudit))
-		activity.GET("/:id/ticket-specs", h.wrap(h.GetTicketSpecs))
-		activity.POST("/:id/ticket-specs", h.wrap(h.SaveTicketSpecs))
+		activity.POST("/create", auth, h.wrap(h.SaveActivityStep))
+		activity.GET("/my-list", auth, h.wrap(h.GetMyActivities))
+		activity.GET("/search", optionalAuth, h.wrap(h.SearchActivities))
+		activity.GET("/subscriptions", auth, h.wrap(h.ListSubscribedActivities))
+		activity.GET("/:id/statistics", auth, h.wrap(h.GetActivityStatistics))
+		activity.GET("/:id/statistics/daily", auth, h.wrap(h.GetActivityDailyStatistics))
+		activity.GET("/:id", optionalAuth, h.wrap(h.GetActivity))
+		activity.POST("/:id/subscribe", auth, h.wrap(h.SubscribeActivity))
+		activity.POST("/:id/unsubscribe", auth, h.wrap(h.UnsubscribeActivity))
+		activity.DELETE("/:id", auth, h.wrap(h.DeleteActivity))
+		activity.POST("/:id/submit-audit", auth, h.wrap(h.SubmitActivityAudit))
+		activity.GET("/:id/ticket-specs", auth, h.wrap(h.GetTicketSpecs))
+		activity.POST("/:id/ticket-specs", auth, h.wrap(h.SaveTicketSpecs))
 	}
 
 	v1.DELETE("/ticket-spec/:id", auth, h.wrap(h.DeleteTicketSpec))
@@ -733,7 +734,7 @@ func (h *Ticketing) CreateOrganizerPost(c *gin.Context) error {
 	}
 	id, err := h.TicketingService.SaveOrganizerPost(c.Request.Context(), currentUserID(c), 0, req)
 	if err != nil {
-		return err
+		return ticketingContentSafetyError(err)
 	}
 	response.Success(c, gin.H{"id": id})
 	return nil
@@ -750,10 +751,20 @@ func (h *Ticketing) UpdateOrganizerPost(c *gin.Context) error {
 	}
 	savedID, err := h.TicketingService.SaveOrganizerPost(c.Request.Context(), currentUserID(c), id, req)
 	if err != nil {
-		return err
+		return ticketingContentSafetyError(err)
 	}
 	response.Success(c, gin.H{"id": savedID})
 	return nil
+}
+
+func ticketingContentSafetyError(err error) error {
+	if errors.Is(err, service.ErrContentUnsafe) {
+		return response.NewError(http.StatusBadRequest, "内容含违规信息")
+	}
+	if errors.Is(err, service.ErrContentSafetyUnavailable) {
+		return response.NewError(http.StatusServiceUnavailable, "内容安全验证失败，请稍后重试")
+	}
+	return err
 }
 
 func (h *Ticketing) UpdateOrganizerPostVisibility(c *gin.Context) error {

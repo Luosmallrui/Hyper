@@ -39,6 +39,7 @@ type Note struct {
 
 func (n *Note) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
 
 	g.GET("/gen", authorize, context.Wrap(n.Gen))
@@ -47,8 +48,8 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
-	g.GET("/list", authorize, context.Wrap(n.ListNote))
-	g.GET("/related", authorize, context.Wrap(n.ListRelatedNotes))
+	g.GET("/list", optionalAuth, context.Wrap(n.ListNote))
+	g.GET("/related", optionalAuth, context.Wrap(n.ListRelatedNotes))
 	g.GET("/followed", authorize, context.Wrap(n.ListFollowedNotes))
 	// Like APIs
 	g.POST("/:note_id/like", authorize, context.Wrap(n.Like))
@@ -64,7 +65,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.DELETE("/:note_id", authorize, context.Wrap(n.DeleteNote))
 	g.PATCH("/:note_id/relation", authorize, context.Wrap(n.UpdateNoteRelation))
 	g.PUT("/:note_id/relation", authorize, context.Wrap(n.UpdateNoteRelation))
-	g.GET("/:note_id", authorize, context.Wrap(n.GetNoteDetail))
+	g.GET("/:note_id", optionalAuth, context.Wrap(n.GetNoteDetail))
 }
 
 func (n *Note) RecordShare(c *gin.Context) error {
@@ -152,6 +153,12 @@ func (n *Note) CreateNote(c *gin.Context) error {
 	// 调用 MessageService 层创建笔记
 	noteID, err := n.NoteService.CreateNote(c.Request.Context(), uint64(userID), &req)
 	if err != nil {
+		if errors.Is(err, service.ErrContentUnsafe) {
+			return response.NewError(http.StatusBadRequest, "内容含违规信息")
+		}
+		if errors.Is(err, service.ErrContentSafetyUnavailable) {
+			return response.NewError(http.StatusServiceUnavailable, "内容安全验证失败，请稍后重试")
+		}
 		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
 	}
 	go n.Gen(c)

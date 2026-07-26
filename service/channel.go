@@ -95,6 +95,17 @@ func (s *ChannelService) GenerateKey(useID int) string {
 }
 
 func (s *ChannelService) GetUserChannelView(ctx context.Context, userID int, AllGlobalChannels []models.Channel) (*types.ChannelViewResponse, error) {
+	if userID <= 0 {
+		otherChannels := make([]*models.Channel, 0, len(AllGlobalChannels))
+		for _, channel := range AllGlobalChannels {
+			item := channel
+			otherChannels = append(otherChannels, &item)
+		}
+		return &types.ChannelViewResponse{
+			Mychannels:    make([]*models.Channel, 0),
+			Otherchannels: otherChannels,
+		}, nil
+	}
 	key := s.GenerateKey(userID)
 
 	count, err := s.Redis.ZCard(ctx, key).Result()
