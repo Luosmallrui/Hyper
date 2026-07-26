@@ -10,16 +10,91 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 var _ IWeChatService = (*WeChatService)(nil)
+
+var (
+	// ErrContentUnsafe is deliberately generic so callers never expose moderation details.
+	ErrContentUnsafe = errors.New("内容含违规信息")
+	// ErrContentSafetyUnavailable prevents unverified user-generated content from being published.
+	ErrContentSafetyUnavailable = errors.New("内容安全验证暂不可用")
+)
 
 type IWeChatService interface {
 	Code2Session(ctx context.Context, code string) (*types.WxLoginResponse, error)
 	GetAccessToken() (string, error)
 	GetUserPhoneNumber(code string) (string, error)
+	CheckTextSecurity(ctx context.Context, content, openID, nickname, title string, scene int) error
 	GenerateUnlimitedQRCode(ctx context.Context, scene, page string) ([]byte, error)
 	SendSubscribeMessage(ctx context.Context, req types.WeChatSubscribeMessageRequest) error
+}
+
+// CheckTextSecurity invokes WeChat msgSecCheck V2 before user-generated text is persisted.
+// scene: 1 profile, 2 comment, 3 forum, 4 social feed.
+func (w *WeChatService) CheckTextSecurity(ctx context.Context, content, openID, nickname, title string, scene int) error {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	if len([]rune(content)) > 2500 {
+		return fmt.Errorf("%w: 文本长度超过内容安全接口限制", ErrContentSafetyUnavailable)
+	}
+	if strings.TrimSpace(openID) == "" {
+		return fmt.Errorf("%w: 当前用户缺少微信 openid", ErrContentSafetyUnavailable)
+	}
+	if scene < 1 || scene > 4 {
+		return fmt.Errorf("%w: 内容场景无效", ErrContentSafetyUnavailable)
+	}
+
+	accessToken, err := w.GetAccessToken()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrContentSafetyUnavailable, err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"content":  content,
+		"version":  2,
+		"openid":   openID,
+		"scene":    scene,
+		"nickname": strings.TrimSpace(nickname),
+		"title":    strings.TrimSpace(title),
+	})
+	if err != nil {
+		return fmt.Errorf("%w: 请求编码失败", ErrContentSafetyUnavailable)
+	}
+	url := fmt.Sprintf("https://api.weixin.qq.com/wxa/msg_sec_check?access_token=%s", accessToken)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("%w: 请求创建失败", ErrContentSafetyUnavailable)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrContentSafetyUnavailable, err)
+	}
+	defer resp.Body.Close()
+
+	var wxResp struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		Result  struct {
+			Suggest string `json:"suggest"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&wxResp); err != nil {
+		return fmt.Errorf("%w: 响应解析失败", ErrContentSafetyUnavailable)
+	}
+	if wxResp.ErrCode == 87014 {
+		return ErrContentUnsafe
+	}
+	if wxResp.ErrCode != 0 {
+		return fmt.Errorf("%w: 微信返回 %d", ErrContentSafetyUnavailable, wxResp.ErrCode)
+	}
+	if wxResp.Result.Suggest != "" && wxResp.Result.Suggest != "pass" {
+		return ErrContentUnsafe
+	}
+	return nil
 }
 
 type WeChatService struct {

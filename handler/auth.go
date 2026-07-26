@@ -9,6 +9,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -405,6 +406,12 @@ func (u *Auth) UpdateUserProfile(c *gin.Context) error {
 	}
 	err = u.UserService.UpdateUserProfile(c.Request.Context(), int(userId), &req)
 	if err != nil {
+		if errors.Is(err, service.ErrContentUnsafe) {
+			return response.NewError(http.StatusBadRequest, "内容含违规信息")
+		}
+		if errors.Is(err, service.ErrContentSafetyUnavailable) {
+			return response.NewError(http.StatusServiceUnavailable, "内容安全验证失败，请稍后重试")
+		}
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 	response.Success(c, req)

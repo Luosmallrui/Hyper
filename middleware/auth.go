@@ -71,6 +71,10 @@ func OptionalAuth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, err.Error())
 			return
 		}
+		if time.Until(claims.ExpiresAt.Time) < 20 {
+			newToken, _ := jwt.GenerateToken(secret, claims.UserID, claims.OpenID, "access", 60*time.Second)
+			c.Header("X-New-Access-Token", newToken)
+		}
 		c.Set("user_id", int(claims.UserID))
 		c.Set("openid", claims.OpenID)
 		c.Next()

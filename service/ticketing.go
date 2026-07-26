@@ -1297,6 +1297,17 @@ func (s *TicketingService) SaveOrganizerPost(ctx context.Context, userID int64, 
 	if strings.TrimSpace(req.Title) == "" {
 		return 0, errors.New("动态标题不能为空")
 	}
+	var publisher models.Users
+	if err := s.DB.WithContext(ctx).First(&publisher, org.UserID).Error; err != nil {
+		return 0, err
+	}
+	if s.WeChatService == nil {
+		return 0, ErrContentSafetyUnavailable
+	}
+	contentForCheck := strings.TrimSpace(req.Title + "\n" + req.Content)
+	if err := s.WeChatService.CheckTextSecurity(ctx, contentForCheck, publisher.OpenID, publisher.Nickname, req.Title, 4); err != nil {
+		return 0, err
+	}
 	if err := s.ensureOrganizerPostRelations(ctx, org.ID, req.ActivityID, req.StoreID); err != nil {
 		return 0, err
 	}

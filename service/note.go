@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,7 @@ type NoteService struct {
 	NoteDAO         *dao.NoteDAO
 	CommentDAO      *dao.Comment
 	UserService     IUserService
+	WeChatService   IWeChatService
 	LikeService     ILikeService
 	RedisClient     *redis.Client
 	StatsDAO        *dao.NoteStatsDAO
@@ -446,6 +448,17 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 	if req.Title == "" {
 		return 0, errors.New("标题不能为空")
 	}
+	user, err := s.UserService.GetUserInfo(ctx, int(userID))
+	if err != nil {
+		return 0, err
+	}
+	if s.WeChatService == nil {
+		return 0, ErrContentSafetyUnavailable
+	}
+	content := strings.TrimSpace(req.Title + "\n" + req.Content)
+	if err := s.WeChatService.CheckTextSecurity(ctx, content, user.OpenID, user.Nickname, req.Title, 4); err != nil {
+		return 0, err
+	}
 
 	noteID := uint64(snowflake.GenUserID())
 
@@ -485,7 +498,7 @@ func (s *NoteService) CreateNote(ctx context.Context, userID uint64, req *types.
 		StoreID:     req.StoreID,
 	}
 
-	err := s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
+	err = s.NoteDAO.Transaction(ctx, func(tx *gorm.DB) error {
 		if err := tx.Create(note).Error; err != nil {
 			return err
 		}

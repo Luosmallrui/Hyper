@@ -24,14 +24,15 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	db := database.NewDB(cfg)
 	users := dao.NewUsers(db)
 	redisClient := client.NewRedisClient(cfg)
-	userService := &service.UserService{
-		Config:    cfg,
-		UsersRepo: users,
-		Redis:     redisClient,
-		DB:        db,
-	}
 	weChatService := &service.WeChatService{
 		Config: cfg,
+	}
+	userService := &service.UserService{
+		Config:        cfg,
+		UsersRepo:     users,
+		Redis:         redisClient,
+		DB:            db,
+		WeChatService: weChatService,
 	}
 	ossConfig := config.ProvideOssConfig(cfg)
 	image := dao.NewImage(db)
@@ -139,6 +140,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CommentDAO:     comment,
 		CommentLikeDAO: commentLike,
 		UserService:    userService,
+		WeChatService:  weChatService,
 		Redis:          redisClient,
 	}
 	topic := dao.NewTopic(db)
@@ -155,6 +157,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		NoteDAO:         noteDAO,
 		CommentDAO:      comment,
 		UserService:     userService,
+		WeChatService:   weChatService,
 		LikeService:     likeService,
 		RedisClient:     redisClient,
 		StatsDAO:        noteStatsDAO,

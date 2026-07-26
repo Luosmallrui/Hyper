@@ -39,10 +39,11 @@ type IUserService interface {
 }
 
 type UserService struct {
-	Config    *config.Config
-	UsersRepo *dao.Users
-	Redis     *redis.Client
-	DB        *gorm.DB
+	Config        *config.Config
+	UsersRepo     *dao.Users
+	Redis         *redis.Client
+	DB            *gorm.DB
+	WeChatService IWeChatService
 }
 
 func (s *UserService) GetUserInfo(ctx context.Context, uid int) (*models.Users, error) {
@@ -338,6 +339,29 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 }
 
 func (s *UserService) UpdateUserProfile(ctx context.Context, userId int, req *types.UpdateUserProfileRequest) error {
+	if req.Username != nil || req.Motto != nil || req.Signature != nil {
+		var user models.Users
+		if err := s.DB.WithContext(ctx).First(&user, userId).Error; err != nil {
+			return err
+		}
+		if s.WeChatService == nil {
+			return ErrContentSafetyUnavailable
+		}
+		nickname := user.Nickname
+		if req.Username != nil {
+			nickname = *req.Username
+		}
+		signature := user.Motto
+		if req.Motto != nil {
+			signature = *req.Motto
+		}
+		if req.Signature != nil {
+			signature = *req.Signature
+		}
+		if err := s.WeChatService.CheckTextSecurity(ctx, nickname+"\n"+signature, user.OpenID, nickname, "", 1); err != nil {
+			return err
+		}
+	}
 
 	updates := make(map[string]interface{})
 

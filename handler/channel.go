@@ -20,11 +20,13 @@ type Channel struct {
 
 func (ch *Channel) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(ch.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(ch.Config.Jwt.Secret))
 	channel := r.Group("/v1/channel")
-	channel.GET("/list", authorize, context.Wrap(ch.GetChannelsList)) //创建
+	channel.GET("/list", optionalAuth, context.Wrap(ch.GetChannelsList))
 	channel.POST("/create", authorize, context.Wrap(ch.CreateChannel))
 	channel.POST("/upload", authorize, context.Wrap(ch.UploadIcon))
-	channel.GET("/", authorize, context.Wrap(ch.GetUserChannelView))
+	channel.GET("/", optionalAuth, context.Wrap(ch.GetUserChannelView))
+	channel.GET("", optionalAuth, context.Wrap(ch.GetUserChannelView))
 	channel.POST("/subscribe", authorize, context.Wrap(ch.SubscribeChannel))
 	channel.POST("/unsubscribe", authorize, context.Wrap(ch.UnsubscribeChannel))
 }

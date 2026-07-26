@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -20,10 +21,11 @@ type CommentsHandler struct {
 
 func (ch *CommentsHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(ch.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(ch.Config.Jwt.Secret))
 	comments := r.Group("/v1/comments")
 	comments.POST("/create", authorize, context.Wrap(ch.CreateComment)) //创建评论
-	comments.GET("/list/:note_id", authorize, context.Wrap(ch.GetComments))
-	comments.GET("/replies/:rootId", authorize, context.Wrap(ch.GetReplyComments))
+	comments.GET("/list/:note_id", optionalAuth, context.Wrap(ch.GetComments))
+	comments.GET("/replies/:rootId", optionalAuth, context.Wrap(ch.GetReplyComments))
 	comments.POST("/delete", authorize, context.Wrap(ch.DeleteComment))
 	comments.POST("/like", authorize, context.Wrap(ch.LikeComment)) //点赞评论
 	comments.POST("/unlike", authorize, context.Wrap(ch.UnlikeComment))
@@ -47,6 +49,12 @@ func (ch *CommentsHandler) CreateComment(c *gin.Context) error {
 	}
 	comment, err := ch.CommentsService.CreateComment(c, &req, userID)
 	if err != nil {
+		if errors.Is(err, service.ErrContentUnsafe) {
+			return response.NewError(http.StatusBadRequest, "内容含违规信息")
+		}
+		if errors.Is(err, service.ErrContentSafetyUnavailable) {
+			return response.NewError(http.StatusServiceUnavailable, "内容安全验证失败，请稍后重试")
+		}
 		return response.NewError(http.StatusBadRequest, "创建评论失败: "+err.Error())
 	}
 

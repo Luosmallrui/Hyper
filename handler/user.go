@@ -34,13 +34,13 @@ type User struct {
 
 func (u *User) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(u.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(u.Config.Jwt.Secret))
 	g := r.Group("/v1/user")
-	g.Use(authorize)
-	g.POST("/info", context.Wrap(u.UpdateUserInfo))
-	g.POST("/avatar", context.Wrap(u.UploadAvatar))
-	g.GET("/info", context.Wrap(u.GetUserInfo))
-	g.GET("/note", context.Wrap(u.GetUserNote))
-	g.GET("/my-notes", context.Wrap(u.GetMyNotes))
+	g.POST("/info", authorize, context.Wrap(u.UpdateUserInfo))
+	g.POST("/avatar", authorize, context.Wrap(u.UploadAvatar))
+	g.GET("/info", optionalAuth, context.Wrap(u.GetUserInfo))
+	g.GET("/note", optionalAuth, context.Wrap(u.GetUserNote))
+	g.GET("/my-notes", authorize, context.Wrap(u.GetMyNotes))
 
 }
 
@@ -73,11 +73,8 @@ func (u *User) GetUserNote(c *gin.Context) error {
 func (u *User) GetUserInfo(c *gin.Context) error {
 	ctx := c.Request.Context()
 
-	// 1. 获取当前登录用户ID
-	loginUID, err := context.GetUserID(c)
-	if err != nil {
-		return response.NewError(http.StatusUnauthorized, "获取用户身份失败")
-	}
+	// 登录态可选；没有 user_id 参数时仍然只能查看本人资料。
+	loginUID, loginErr := context.GetUserID(c)
 
 	//  确定要查询的用户ID（默认自己）
 	queryID := int(loginUID)
@@ -90,6 +87,8 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 		}
 		queryID = parsedID
 		isQueryOther = true
+	} else if loginErr != nil || loginUID == 0 {
+		return response.NewError(http.StatusUnauthorized, "请先登录后查看本人资料")
 	}
 
 	//  获取用户基础信息
@@ -106,7 +105,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 
 	// 是否关注
 	isFollowing := false
-	if isQueryOther {
+	if isQueryOther && loginUID > 0 {
 		isFollowing, _ = u.FollowService.IsFollowing(
 			ctx,
 			uint64(loginUID),
@@ -115,7 +114,7 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 	}
 
 	var verifierInfo *types.VerifierInfo
-	if !isQueryOther && u.DB != nil {
+	if !isQueryOther && loginUID > 0 && u.DB != nil {
 		var verifier models.Verifier
 		if err := u.DB.WithContext(ctx).
 			Where("user_id = ? AND status = ?", loginUID, models.VerifierStatusActive).
@@ -136,13 +135,18 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 		}
 	}
 
+	isSelf := loginUID > 0 && int64(queryID) == loginUID
+	phoneNumber := ""
+	if isSelf {
+		phoneNumber = userInfo.Mobile
+	}
 	rep := types.UserProfileResp{
 		User: types.UserBasicInfo{
 			Id:          userInfo.Id,
 			UserID:      utils.GenHashID(u.Config.Jwt.Secret, userInfo.Id),
 			NumericID:   userInfo.Id,
 			Nickname:    userInfo.Nickname,
-			PhoneNumber: userInfo.Mobile,
+			PhoneNumber: phoneNumber,
 			AvatarURL:   userInfo.Avatar,
 			Signature:   userInfo.Motto,
 			CreatedAt:   userInfo.CreatedAt,

@@ -19,9 +19,10 @@ type SearchHandler struct {
 
 func (s *SearchHandler) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(s.Config.Jwt.Secret))
 
 	serchGroup := r.Group("/v1/search")
-	serchGroup.GET("/", authorize, context.Wrap(s.Globalserch))
+	serchGroup.GET("/", optionalAuth, context.Wrap(s.Globalserch))
 	serchGroup.GET("/history", authorize, context.Wrap(s.GetSearchHistory))
 	serchGroup.DELETE("/history", authorize, context.Wrap(s.DeleteSearchKeyword))
 
@@ -62,7 +63,7 @@ func (s *SearchHandler) Globalserch(c *gin.Context) error {
 	}
 
 	res, err := s.Serch.GlobalSerch(c.Request.Context(), req)
-	if req.Keyword != "" {
+	if req.Keyword != "" && c.GetInt("user_id") > 0 {
 		s.Serch.SaveSearchHistory(c, c.GetInt("user_id"), req.Keyword)
 	}
 	if err != nil {

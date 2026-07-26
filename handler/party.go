@@ -10,6 +10,7 @@ import (
 	"Hyper/types"
 	stdcontext "context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,31 +31,64 @@ type Merchant struct {
 
 func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(pc.Config.Jwt.Secret))
+	optionalAuth := middleware.OptionalAuth([]byte(pc.Config.Jwt.Secret))
 	m := r.Group("/v1/merchant")
-	m.Use(authorize)
 	{
-		// 公开接口
-		m.GET("/list", context.Wrap(pc.GetPartyList))  // 获取派对列表
-		m.GET("/:id", context.Wrap(pc.GetPartyDetail)) // 获取派对详情
+		m.GET("/list", optionalAuth, context.Wrap(pc.GetPartyList))
+		m.GET("/:id/follower/count", optionalAuth, context.Wrap(pc.GetPartyFollowerCount))
+		m.GET("/:id/goods", optionalAuth, context.Wrap(pc.GetPartyGoods))
+		m.GET("/:id", optionalAuth, context.Wrap(pc.GetPartyDetail))
+		m.GET("/tags", optionalAuth, pc.GetTags)
 
-		m.POST("/create", pc.CreateMerchant) // 创建商家
+		m.POST("/create", authorize, pc.CreateMerchant) // 创建商家
 
-		m.POST("/:id/attend", pc.AttendParty)                   // 报名
-		m.DELETE("/:id/attend", pc.CancelAttend)                // 取消报名
-		m.POST("/subscribe", context.Wrap(pc.subscribeParty))   // 订阅派对
-		m.POST("/unsubscribe", context.Wrap(pc.UnsubcribParty)) // 取消订阅
-
-		m.GET("/tags", pc.GetTags)
+		m.POST("/:id/attend", authorize, pc.AttendParty)
+		m.DELETE("/:id/attend", authorize, pc.CancelAttend)
+		m.POST("/subscribe", authorize, context.Wrap(pc.subscribeParty))
+		m.POST("/unsubscribe", authorize, context.Wrap(pc.UnsubcribParty))
 
 	}
 	c := r.Group("/v1/category")
 	{
-		c.GET("/list", authorize, context.Wrap(pc.GetCategoryList))
+		c.GET("/list", optionalAuth, context.Wrap(pc.GetCategoryList))
 	}
 	s := r.Group("/v1/subscribe")
 	{
 		s.GET("/list", authorize, context.Wrap(pc.GetSubscribeList))
 	}
+}
+
+func (pc *Merchant) GetPartyFollowerCount(c *gin.Context) error {
+	partyID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || partyID <= 0 {
+		return response.NewError(http.StatusBadRequest, "商家ID无效")
+	}
+	var party models.Merchant
+	if err := pc.DB.WithContext(c.Request.Context()).First(&party, partyID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "商家不存在")
+		}
+		return err
+	}
+	count, err := pc.FollowService.GetFollowerCount(c.Request.Context(), uint64(party.UserID))
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"follower_count": count})
+	return nil
+}
+
+func (pc *Merchant) GetPartyGoods(c *gin.Context) error {
+	partyID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || partyID <= 0 {
+		return response.NewError(http.StatusBadRequest, "商家ID无效")
+	}
+	goods := make([]models.Product, 0)
+	if err := pc.DB.WithContext(c.Request.Context()).Where("party_id = ?", partyID).Find(&goods).Error; err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"list": goods, "total": len(goods)})
+	return nil
 }
 
 func (pc *Merchant) GetSubscribeList(c *gin.Context) error {

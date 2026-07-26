@@ -31,6 +31,7 @@ type CommentsService struct {
 	CommentDAO     *dao.Comment
 	CommentLikeDAO *dao.CommentLike
 	UserService    IUserService
+	WeChatService  IWeChatService
 	Redis          *redis.Client
 }
 
@@ -413,9 +414,19 @@ func (s *CommentsService) DeleteComment(ctx context.Context, commentID, userID u
 // CreateComment 创建评论
 func (s *CommentsService) CreateComment(ctx context.Context, req *types.CreateCommentRequest, userID uint64) (*types.CommentResponse, error) {
 	// 1. 参数验证
-	//if err := s.validateCreateComment(req); err != nil {
-	//	return nil, err
-	//}
+	if err := s.validateCreateComment(req); err != nil {
+		return nil, err
+	}
+	moderationUser, err := s.UserService.GetUserInfo(ctx, int(userID))
+	if err != nil {
+		return nil, err
+	}
+	if s.WeChatService == nil {
+		return nil, ErrContentSafetyUnavailable
+	}
+	if err := s.WeChatService.CheckTextSecurity(ctx, req.Content, moderationUser.OpenID, moderationUser.Nickname, "", 2); err != nil {
+		return nil, err
+	}
 
 	// 2. 生成评论ID
 	commentID := uint64(snowflake.GenUserID())
@@ -439,7 +450,7 @@ func (s *CommentsService) CreateComment(ctx context.Context, req *types.CreateCo
 	}
 
 	// 4. 使用事务保存
-	err := s.CommentDAO.Transaction(ctx, func(tx *gorm.DB) error {
+	err = s.CommentDAO.Transaction(ctx, func(tx *gorm.DB) error {
 		// 4.1 创建评论
 		if err := tx.Create(comment).Error; err != nil {
 			return err
