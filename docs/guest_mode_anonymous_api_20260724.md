@@ -29,6 +29,8 @@ GET /api/v1/channel/list
 GET /api/v1/search/
 ```
 
+地图分类筛选同时支持 `source=party|venue`、`type=party|venue` 和现有的 `category_id`。为兼容旧小程序分类，`category_id=1` 映射为场地，`category_id=2` 映射为派对；如果分类表配置了名称包含“场地/venue”或“派对/party”的分类，则优先按名称映射。
+
 ### 场地与他人主页
 
 ```http

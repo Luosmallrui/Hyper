@@ -205,11 +205,8 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", models.ActivityStatusOnline).
 		Where("latitude <> 0 AND longitude <> 0")
-	switch c.DefaultQuery("source", "all") {
-	case "party":
-		query = query.Where("type = ?", models.ActivityTypeParty)
-	case "venue":
-		query = query.Where("type = ?", models.ActivityTypeVenue)
+	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
+		query = query.Where("type = ?", activityType)
 	}
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
@@ -344,6 +341,52 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 		markers = append(markers, marker)
 	}
 	return markers, nil
+}
+
+// resolveActivityTypeFilter keeps category switching compatible while activity
+// type is stored directly on activities rather than in the legacy categories table.
+// Explicit source/type takes precedence over category_id.
+func (m *Map) resolveActivityTypeFilter(c *gin.Context) string {
+	switch strings.ToLower(strings.TrimSpace(c.Query("source"))) {
+	case models.ActivityTypeParty:
+		return models.ActivityTypeParty
+	case models.ActivityTypeVenue:
+		return models.ActivityTypeVenue
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Query("type"))) {
+	case models.ActivityTypeParty:
+		return models.ActivityTypeParty
+	case models.ActivityTypeVenue:
+		return models.ActivityTypeVenue
+	}
+
+	categoryID := queryInt(c, "category_id")
+	if categoryID <= 0 {
+		return ""
+	}
+
+	// Prefer the configured category name so a deployment can customize IDs.
+	var category models.Category
+	if err := m.DB.WithContext(c.Request.Context()).First(&category, categoryID).Error; err == nil {
+		name := strings.ToLower(strings.TrimSpace(category.Name))
+		switch {
+		case strings.Contains(name, "场地"), strings.Contains(name, "venue"):
+			return models.ActivityTypeVenue
+		case strings.Contains(name, "派对"), strings.Contains(name, "party"):
+			return models.ActivityTypeParty
+		}
+	}
+
+	// Legacy category data uses 1 for venues and 2 for parties. Keep this
+	// fallback so existing mini-program category selectors work without changes.
+	switch categoryID {
+	case 1:
+		return models.ActivityTypeVenue
+	case 2:
+		return models.ActivityTypeParty
+	default:
+		return ""
+	}
 }
 
 // loadActivitySubscriptionSet batch-loads current user's subscriptions for

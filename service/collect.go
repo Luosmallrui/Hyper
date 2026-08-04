@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,14 +34,10 @@ func (s *CollectService) CheckCollectStatus(ctx context.Context, userID, noteID 
 		return false, nil
 	}
 
-	// 类似点赞的逻辑,先查 Redis,再查数据库
-	key := fmt.Sprintf("user:collected:notes:%d", userID)
-	exists, err := s.Redis.SIsMember(ctx, key, noteID).Result()
-	if err == nil {
-		return exists, nil
-	}
-
-	return s.CollectionDAO.CheckExists(ctx, userID, noteID)
+	// 收藏关系以 note_collections.status 为准。此前这里读取 Redis Set，
+	// 但收藏/取消收藏流程并没有维护该 Set；Redis 对不存在的 Set 会返回
+	// false 而不会报错，导致详情页始终把已收藏显示成未收藏。
+	return s.CollectionDAO.IsCollected(ctx, noteID, userID)
 }
 func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint64) error {
 	exist, err := s.NoteDAO.IsExist(ctx, "id = ?", noteID)
