@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS `activities`
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
     `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
     `type`              varchar(20)     NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地',
+	`discount_tags`     int             NOT NULL DEFAULT 0 COMMENT '优惠标签位: 1积分立减 2买单立减 4新人优惠',
     `name`              varchar(80)     NOT NULL COMMENT '活动名称',
     `share_title`       varchar(20)     NOT NULL DEFAULT '' COMMENT '分享标题',
     `start_time`        datetime        NULL COMMENT '开始时间',
@@ -251,6 +252,7 @@ CREATE TABLE IF NOT EXISTS `activities`
 -- 如已有 activities 表，执行以下 ALTER 添加活动类型字段:
 -- ALTER TABLE `activities` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地' AFTER `organizer_id`;
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_type` (`type`);
+-- ALTER TABLE `activities` ADD COLUMN `discount_tags` int NOT NULL DEFAULT 0 COMMENT '优惠标签位: 1积分立减 2买单立减 4新人优惠' AFTER `type`;
 
 CREATE TABLE IF NOT EXISTS `ticket_specs`
 (

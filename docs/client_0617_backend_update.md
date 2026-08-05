@@ -79,9 +79,10 @@ GET /api/v1/map/markers?source=all&keyword=电音&distance=5&district=锦江区&
 
 参数口径：
 
-- `category_id` 只对旧派对/场地分支生效；票务活动当前没有分类字段，不按该参数过滤。
+- `category_id=1` 映射场地（`venue`），`category_id=2` 映射派对（`party`）；也可直接传 `source=venue|party` 或 `type=venue|party`。
 - `district` 可以传中文名或数字 ID，例如 `武侯区` 或 `1`。
 - `area` 可以传商圈中文名或数字 ID。
+- `tags` / `tag_ids` 使用优惠标签位：`1` 积分立减、`2` 买单立减、`4` 新人优惠。多个值以逗号分隔，活动必须同时包含所有所选标签才会返回。
 
 返回字段补充：
 
@@ -91,7 +92,8 @@ GET /api/v1/map/markers?source=all&keyword=电音&distance=5&district=锦江区&
   "district": "锦江区",
   "area": "春熙路",
   "support_points": true,
-  "discount_tags": []
+  "tag_ids": [1, 4],
+  "discount_tags": ["积分立减", "新人优惠"]
 }
 ```
 
@@ -99,7 +101,7 @@ GET /api/v1/map/markers?source=all&keyword=电音&distance=5&district=锦江区&
 
 - `distance` 单位 km。
 - 未传 `lat/lng` 时不做距离过滤。
-- 票务活动暂不做优惠标签硬过滤，返回 `discount_tags: []`，前端可先做选中态和空态。
+- 票务活动已按 `tags` / `tag_ids` 做优惠标签硬过滤，并返回真实 `tag_ids`、`discount_tags`。
 
 ### 商家/场地列表
 
