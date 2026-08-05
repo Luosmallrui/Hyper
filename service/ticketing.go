@@ -1811,8 +1811,17 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 		return nil, err
 	}
 	var org models.Organizer
-	_ = s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error
-	resp := &types.ActivityDetailResponse{Activity: act, TicketSpecs: specs, Organizer: &org}
+	if err := s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error; err != nil {
+		return nil, err
+	}
+	resp := &types.ActivityDetailResponse{
+		Activity:     act,
+		UserID:       org.UserID,
+		TagIDs:       models.DiscountTagIDs(act.DiscountTags),
+		DiscountTags: models.DiscountTagNames(act.DiscountTags),
+		TicketSpecs:  specs,
+		Organizer:    &org,
+	}
 	if userID > 0 {
 		var count int64
 		_ = s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
@@ -4298,6 +4307,13 @@ func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
 			return nil, err
 		}
 		updates["type"] = activityType
+	}
+	if req.TagIDs != nil {
+		bits, err := models.DiscountTagBits(*req.TagIDs)
+		if err != nil {
+			return nil, err
+		}
+		updates["discount_tags"] = bits
 	}
 	putString(updates, "name", req.Name)
 	putString(updates, "share_title", req.ShareTitle)

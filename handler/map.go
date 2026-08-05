@@ -208,6 +208,13 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
 		query = query.Where("type = ?", activityType)
 	}
+	activityTagBits := parseTagBits(c.Query("tag_ids"))
+	if activityTagBits == 0 {
+		activityTagBits = parseTagBits(c.Query("tags"))
+	}
+	if activityTagBits > 0 {
+		query = query.Where("discount_tags & ? = ?", activityTagBits, activityTagBits)
+	}
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR description LIKE ?", like, like, like, like, like, like)
@@ -311,10 +318,11 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			StartTime:     formatMarkerTime(activity.StartTime),
 			EndTime:       formatMarkerTime(activity.EndTime),
 			Status:        activity.Status,
+			TagIDs:        models.DiscountTagIDs(activity.DiscountTags),
 			District:      activity.District,
 			Distance:      markerDistance(c, activity.Latitude, activity.Longitude),
 			SupportPoints: true,
-			DiscountTags:  []string{},
+			DiscountTags:  models.DiscountTagNames(activity.DiscountTags),
 		}
 		if exceedsDistance(c, marker.Distance) {
 			continue

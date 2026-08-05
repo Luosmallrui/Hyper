@@ -150,13 +150,13 @@ Query:
 | source | 否 | `all` / `activity` / `party` / `venue` / `merchant`，默认 `all`；`party`、`venue` 按 `activities.type` 过滤，`merchant` 暂保留但返回空列表 |
 | limit | 否 | 最多返回数量，默认 `200`，最大 `500` |
 | keyword | 否 | 关键词，匹配标题、地址、描述 |
-| category_id | 否 | 预留字段，当前活动暂未按分类过滤 |
+| category_id | 否 | 兼容分类筛选：`1` 映射场地 `venue`，`2` 映射派对 `party`；也可直接使用 `source` 或 `type` |
 | district_id | 否 | 行政区 ID，会转为行政区名称后按 `activities.district` 匹配 |
 | district | 否 | 行政区名称或 ID；如 `武侯区`，票务活动按 `activities.district` 匹配 |
 | area_id | 否 | 预留字段 |
 | area | 否 | 商圈/区域名称或 ID，活动按地址模糊匹配 |
 | business_area | 否 | 商圈名称，按地址/位置模糊匹配 |
-| tags/tag_ids | 否 | 预留字段，当前活动暂未按标签过滤 |
+| tags/tag_ids | 否 | 优惠标签硬过滤：`1` 积分立减，`2` 买单立减，`4` 新人优惠；多值逗号分隔且需同时满足 |
 | lat/lng | 否 | 用户经纬度，配合 `distance` 使用 |
 | distance | 否 | 距离，单位 km；传 `lat/lng` 时生效 |
 
@@ -166,7 +166,7 @@ Query:
 GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
 ```
 
-注意：新票务活动当前没有分类字段，因此 `category_id` 暂不生效。
+注意：新票务活动使用 `activities.type` 区分场地与派对；`category_id=1/2` 是为现有分类选择器保留的兼容映射。
 
 数据来源：
 

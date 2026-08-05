@@ -374,6 +374,7 @@ type ActivityCreateRequest struct {
 	ActivityID       int64                `json:"activity_id"`
 	Step             int                  `json:"step" binding:"required,min=1,max=5"`
 	Type             *string              `json:"type"`
+	TagIDs           *[]int               `json:"tag_ids"`
 	Name             *string              `json:"name"`
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
@@ -397,10 +398,13 @@ type ActivityCreateRequest struct {
 
 type ActivityDetailResponse struct {
 	models.Activity
-	TicketSpecs []models.TicketSpec `json:"ticket_specs"`
-	Organizer   *models.Organizer   `json:"organizer,omitempty"`
-	IsSubscribe bool                `json:"is_subscribe"`
-	IsFollow    bool                `json:"is_follow"`
+	UserID       int64               `json:"user_id"`
+	TagIDs       []int               `json:"tag_ids"`
+	DiscountTags []string            `json:"discount_tags"`
+	TicketSpecs  []models.TicketSpec `json:"ticket_specs"`
+	Organizer    *models.Organizer   `json:"organizer,omitempty"`
+	IsSubscribe  bool                `json:"is_subscribe"`
+	IsFollow     bool                `json:"is_follow"`
 }
 
 type ActivityListItem struct {

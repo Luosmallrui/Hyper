@@ -410,45 +410,101 @@ func (pc *Merchant) resolveAreaID(c *gin.Context, raw string) int {
 // GetPartyDetail 获取派对详情
 // GET /api/v1/party/:id
 func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
-	MerchantID := c.Param("id")
-	if MerchantID == "" {
-		response.Success(c, nil)
+	merchantID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || merchantID <= 0 {
+		return response.NewError(http.StatusBadRequest, "商家ID无效")
 	}
 
-	resp := types.MerchantDetail{}
-	var marchant models.Merchant
-	if err := pc.DB.Where("id = ?", MerchantID).First(&marchant).Error; err != nil {
+	var merchant models.Merchant
+	err = pc.DB.WithContext(c.Request.Context()).Where("id = ?", merchantID).First(&merchant).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 首页已迁移到 organizers/activities。保留旧 merchant 详情路径，
+		// 使仍使用该路径的客户端能够拿到新场地的 owner user_id。
+		resp, fallbackErr := pc.getOrganizerMerchantDetail(c, merchantID)
+		if fallbackErr != nil {
+			if errors.Is(fallbackErr, gorm.ErrRecordNotFound) {
+				return response.NewError(http.StatusNotFound, "商家不存在")
+			}
+			return fallbackErr
+		}
+		response.Success(c, resp)
+		return nil
 	}
-
-	resp.AvgPrice = 7600
-	resp.UserId = marchant.UserID
-	resp.Name = marchant.Title
-	resp.LocationName = marchant.LocationName
-	images := make([]string, 0)
-	_ = json.Unmarshal([]byte(marchant.ImagesJSON), &images)
-	resp.Images = images
-
-	goods := make([]models.Product, 0)
-	if err := pc.DB.Where("party_id = ?", MerchantID).Find(&goods).Error; err != nil {
-	}
-	resp.Goods = goods
-
-	avatar, nickname, _ := pc.UserService.GetUserAvatar(c.Request.Context(), int64(marchant.UserID))
-	resp.UserAvatar = avatar
-	resp.UserName = nickname
-	resp.Id = marchant.ID
-	isFollow, _ := pc.FollowService.CheckFollowStatus(c, uint64(c.GetInt("user_id")), uint64(marchant.UserID))
-	isSub, err := pc.MerchantService.CheckSubcribe(c, int(c.GetInt("user_id")), int(marchant.ID))
 	if err != nil {
-		return response.NewError(http.StatusInternalServerError, "查询订阅状态失败")
+		return err
 	}
-	resp.IsSubscribe = isSub
-	resp.BusinessHours = "19:30-次日02:30"
-	resp.IsFollow = isFollow
+
+	resp := types.MerchantDetail{
+		Id:            merchant.ID,
+		UserId:        merchant.UserID,
+		Name:          merchant.Title,
+		AvgPrice:      7600,
+		LocationName:  merchant.LocationName,
+		Images:        make([]string, 0),
+		Goods:         make([]models.Product, 0),
+		BusinessHours: "19:30-次日02:30",
+	}
+	_ = json.Unmarshal([]byte(merchant.ImagesJSON), &resp.Images)
+	if err := pc.DB.WithContext(c.Request.Context()).Where("party_id = ?", merchantID).Find(&resp.Goods).Error; err != nil {
+		return err
+	}
+	resp.UserAvatar, resp.UserName, _ = pc.UserService.GetUserAvatar(c.Request.Context(), int64(merchant.UserID))
+	if userID := c.GetInt("user_id"); userID > 0 {
+		resp.IsFollow, _ = pc.FollowService.CheckFollowStatus(c, uint64(userID), uint64(merchant.UserID))
+		isSubscribed, err := pc.MerchantService.CheckSubcribe(c, userID, int(merchant.ID))
+		if err != nil {
+			return response.NewError(http.StatusInternalServerError, "查询订阅状态失败")
+		}
+		resp.IsSubscribe = isSubscribed
+	}
 
 	response.Success(c, resp)
 	return nil
+}
 
+// getOrganizerMerchantDetail is a backward-compatible detail adapter for the
+// retired merchant endpoint. New venues belong to organizers, not parties.
+func (pc *Merchant) getOrganizerMerchantDetail(c *gin.Context, organizerID int64) (*types.MerchantDetail, error) {
+	var organizer models.Organizer
+	if err := pc.DB.WithContext(c.Request.Context()).
+		Where("id = ? AND status = ? AND enabled = 1", organizerID, models.OrganizerStatusApproved).
+		First(&organizer).Error; err != nil {
+		return nil, err
+	}
+
+	var profile models.OrganizerProfile
+	if err := pc.DB.WithContext(c.Request.Context()).Where("organizer_id = ?", organizer.ID).First(&profile).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	images := make([]string, 0)
+	if profile.Gallery != "" {
+		_ = json.Unmarshal([]byte(profile.Gallery), &images)
+	}
+	if len(images) == 0 && profile.CoverImage != "" {
+		images = append(images, profile.CoverImage)
+	}
+	resp := &types.MerchantDetail{
+		Id:            organizer.ID,
+		UserId:        int(organizer.UserID),
+		Name:          organizer.Name,
+		AvgPrice:      profile.AverageSpend,
+		LocationName:  profile.Address,
+		Images:        images,
+		Goods:         make([]models.Product, 0),
+		BusinessHours: profile.BusinessHours,
+	}
+	resp.UserAvatar, resp.UserName, _ = pc.UserService.GetUserAvatar(c.Request.Context(), organizer.UserID)
+	if userID := c.GetInt("user_id"); userID > 0 {
+		resp.IsFollow, _ = pc.FollowService.CheckFollowStatus(c, uint64(userID), uint64(organizer.UserID))
+		var count int64
+		if err := pc.DB.WithContext(c.Request.Context()).Model(&models.VenueSubscription{}).
+			Where("organizer_id = ? AND user_id = ?", organizer.ID, userID).Count(&count).Error; err != nil {
+			return nil, err
+		}
+		resp.IsSubscribe = count > 0
+	}
+	return resp, nil
 }
 
 // AttendParty 报名参加派对
