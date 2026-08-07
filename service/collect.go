@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -62,6 +64,7 @@ func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint
 	if err := s.StatsDAO.IncrCollCount(ctx, noteID, 1); err != nil {
 		return err
 	}
+	s.invalidateStatsCache(ctx, noteID)
 	return nil
 }
 
@@ -88,7 +91,15 @@ func (s *CollectService) Uncollect(ctx context.Context, userID uint64, noteID ui
 	if err := s.StatsDAO.IncrCollCount(ctx, noteID, -1); err != nil {
 		return err
 	}
+	s.invalidateStatsCache(ctx, noteID)
 	return nil
+}
+
+// invalidateStatsCache 使 note:stats:{note_id} 缓存失效，下次读取会回源到数据库最新值。
+// 与点赞流程（service/like.go 的 updateRedisAfterLike/Unlike）保持一致，避免收藏数长期读到旧缓存。
+func (s *CollectService) invalidateStatsCache(ctx context.Context, noteID uint64) {
+	statsKey := fmt.Sprintf(NoteStatsKey, noteID)
+	s.Redis.Del(ctx, statsKey)
 }
 
 func (s *CollectService) IsCollected(ctx context.Context, userID uint64, noteID uint64) (bool, error) {
