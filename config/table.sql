@@ -291,6 +291,34 @@ CREATE TABLE IF NOT EXISTS `ticket_specs`
 
 -- ALTER TABLE `ticket_specs` ADD COLUMN `description` varchar(500) NOT NULL DEFAULT '' COMMENT '票种说明' AFTER `name`;
 
+CREATE TABLE IF NOT EXISTS `activity_daily_stats`
+(
+    `id`            bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `activity_id`   bigint unsigned NOT NULL COMMENT '活动ID',
+    `stat_date`     date            NOT NULL COMMENT '统计日期',
+    `view_count`    bigint          NOT NULL DEFAULT 0 COMMENT '浏览量PV',
+    `visitor_count` bigint          NOT NULL DEFAULT 0 COMMENT '独立访客数UV',
+    `created_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_activity_daily_stat` (`activity_id`, `stat_date`) USING BTREE,
+    KEY `idx_activity_daily_stat_date` (`stat_date`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动每日浏览统计';
+
+CREATE TABLE IF NOT EXISTS `activity_daily_visitors`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `activity_id` bigint unsigned NOT NULL COMMENT '活动ID',
+    `stat_date`   date            NOT NULL COMMENT '统计日期',
+    `visitor_key` varchar(80)     NOT NULL COMMENT '用户ID或匿名访客哈希',
+    `user_id`     bigint unsigned NOT NULL DEFAULT 0 COMMENT '登录用户ID，匿名为0',
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_activity_daily_visitor` (`activity_id`, `stat_date`, `visitor_key`) USING BTREE,
+    KEY `idx_activity_daily_visitor_date` (`stat_date`) USING BTREE,
+    KEY `idx_activity_daily_visitor_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动每日独立访客';
+
 CREATE TABLE IF NOT EXISTS `activity_subscriptions`
 (
     `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '订阅ID',
@@ -328,6 +356,7 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     `points_amount`   bigint          NOT NULL DEFAULT 0 COMMENT '抵扣积分数量',
     `points_discount` bigint          NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)',
     `pay_method`      varchar(20)     NOT NULL DEFAULT '',
+    `sales_channel`   varchar(20)     NOT NULL DEFAULT 'wechat' COMMENT '销售渠道：wechat/douyin/web/other',
     `pay_time`        datetime        NULL,
     `buyer_name`      varchar(50)     NOT NULL DEFAULT '',
     `buyer_id_card`   varchar(20)     NOT NULL DEFAULT '',
@@ -342,12 +371,15 @@ CREATE TABLE IF NOT EXISTS `ticket_orders`
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `uk_ticket_order_no` (`order_no`) USING BTREE,
     KEY `idx_ticket_order_user` (`user_id`) USING BTREE,
-    KEY `idx_ticket_order_activity` (`activity_id`) USING BTREE
+    KEY `idx_ticket_order_activity` (`activity_id`) USING BTREE,
+    KEY `idx_ticket_order_sales_channel` (`sales_channel`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='票务订单表';
 
 -- Existing deployments:
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_amount` bigint NOT NULL DEFAULT 0 COMMENT '抵扣积分数量' AFTER `actual_price`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `points_discount` bigint NOT NULL DEFAULT 0 COMMENT '积分抵扣金额(分)' AFTER `points_amount`;
+-- ALTER TABLE `ticket_orders` ADD COLUMN `sales_channel` varchar(20) NOT NULL DEFAULT 'wechat' COMMENT '销售渠道：wechat/douyin/web/other' AFTER `pay_method`;
+-- ALTER TABLE `ticket_orders` ADD KEY `idx_ticket_order_sales_channel` (`sales_channel`);
 -- ALTER TABLE `ticket_orders` ADD COLUMN `qr_code_url` varchar(255) NOT NULL DEFAULT '' COMMENT '取票二维码图片URL' AFTER `qr_code`;
 -- ALTER TABLE `ticket_orders` ADD COLUMN `user_deleted_at` datetime NULL COMMENT '用户侧删除/隐藏时间' AFTER `cancel_reason`;
 
@@ -803,6 +835,26 @@ CREATE TABLE IF NOT EXISTS `organizer_withdraws`
 -- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_account_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款人快照' AFTER `amount`;
 -- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_account_no` varchar(50) NOT NULL DEFAULT '' COMMENT '收款账户快照' AFTER `bank_account_name`;
 -- ALTER TABLE `organizer_withdraws` ADD COLUMN `bank_name` varchar(50) NOT NULL DEFAULT '' COMMENT '银行名称快照' AFTER `bank_account_no`;
+
+CREATE TABLE IF NOT EXISTS `organizer_withdraw_allocations`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `withdraw_id`  bigint unsigned NOT NULL COMMENT '提现申请ID',
+    `organizer_id` bigint unsigned NOT NULL COMMENT '主办方ID',
+    `order_id`     bigint unsigned NOT NULL COMMENT '订单ID',
+    `order_no`     varchar(30)     NOT NULL COMMENT '订单号',
+    `activity_id`  bigint unsigned NOT NULL COMMENT '活动ID',
+    `amount`       bigint          NOT NULL COMMENT '本提现分配金额(分)',
+    `status`       tinyint         NOT NULL DEFAULT 0 COMMENT '0提现审核中 1已提现 2已释放',
+    `created_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_withdraw_order` (`withdraw_id`, `order_id`) USING BTREE,
+    KEY `idx_withdraw_allocation_organizer` (`organizer_id`) USING BTREE,
+    KEY `idx_withdraw_allocation_order` (`order_id`) USING BTREE,
+    KEY `idx_withdraw_allocation_activity` (`activity_id`) USING BTREE,
+    KEY `idx_withdraw_allocation_status` (`status`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方提现订单分配明细';
 
 CREATE TABLE IF NOT EXISTS `organizer_bank_account_audits`
 (

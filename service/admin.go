@@ -34,7 +34,7 @@ type IAdminService interface {
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
 	GetAllTickets(ctx context.Context, page, pageSize int, keyword string) (*types.AdminTicketListResponse, error)
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
-	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword string) (*types.AdminTicketOrderListResponse, error)
+	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error)
 	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
 	GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error)
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
@@ -843,7 +843,7 @@ func (s *AdminService) GetOrderList(ctx context.Context, page, pageSize int, eve
 	}, nil
 }
 
-func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword string) (*types.AdminTicketOrderListResponse, error) {
+func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -872,6 +872,13 @@ func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize in
 				SELECT MAX(rf2.id) FROM refunds rf2 WHERE rf2.order_id = ticket_orders.id
 			)
 		)`, *refundStatus)
+	}
+	normalizedSalesChannel, err := NormalizeSalesChannel(salesChannel, false)
+	if err != nil {
+		return nil, err
+	}
+	if normalizedSalesChannel != "" {
+		query = query.Where("ticket_orders.sales_channel = ?", normalizedSalesChannel)
 	}
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
@@ -1322,6 +1329,7 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 			ActivityID:     order.ActivityID,
 			TicketSpecID:   order.TicketSpecID,
 			PayMethod:      order.PayMethod,
+			SalesChannel:   order.SalesChannel,
 			PayTime:        formatAdminPtrTime(order.PayTime),
 			ExpireTime:     formatAdminTime(order.ExpireTime),
 			CreatedAt:      order.CreatedAt.Format("2006-01-02 15:04:05"),
