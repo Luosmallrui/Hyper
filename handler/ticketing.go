@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/dao"
 	"Hyper/middleware"
 	"Hyper/pkg/response"
 	"Hyper/pkg/snowflake"
@@ -397,12 +398,25 @@ func (h *Ticketing) ListSubscriptions(c *gin.Context) error {
 }
 
 func (h *Ticketing) ListVenues(c *gin.Context) error {
-	resp, err := h.TicketingService.ListVenues(c.Request.Context(), currentUserID(c), c.Query("keyword"), page(c), size(c))
+	tagIDs, err := dao.ParseContentTagIDs(firstTicketingQuery(c, "tag_ids", "tags"))
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	resp, err := h.TicketingService.ListVenues(c.Request.Context(), currentUserID(c), c.Query("keyword"), tagIDs, page(c), size(c))
 	if err != nil {
 		return err
 	}
 	response.Success(c, resp)
 	return nil
+}
+
+func firstTicketingQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := c.Query(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (h *Ticketing) GetVenueDetail(c *gin.Context) error {
@@ -909,7 +923,7 @@ func queryTime(c *gin.Context, key string) *time.Time {
 }
 
 func (h *Ticketing) SearchActivities(c *gin.Context) error {
-	list, err := h.TicketingService.SearchActivities(c.Request.Context(), c.Query("keyword"))
+	list, err := h.TicketingService.SearchActivities(c.Request.Context(), currentUserID(c), c.Query("keyword"))
 	if err != nil {
 		return err
 	}

@@ -139,27 +139,31 @@ type OrganizerSubscriptionSummary struct {
 }
 
 type VenueListItem struct {
-	ID             int64     `json:"id"`
-	UserID         int64     `json:"user_id"`
-	Name           string    `json:"name"`
-	Logo           string    `json:"logo"`
-	CoverImage     string    `json:"cover_image"`
-	Description    string    `json:"description"`
-	BusinessHours  string    `json:"business_hours"`
-	ServicePhone   string    `json:"service_phone"`
-	Province       string    `json:"province"`
-	City           string    `json:"city"`
-	District       string    `json:"district"`
-	Address        string    `json:"address"`
-	Latitude       float64   `json:"latitude"`
-	Longitude      float64   `json:"longitude"`
-	AverageSpend   int64     `json:"average_spend"`
-	IsFollow       bool      `json:"is_follow"`
-	IsSubscribe    bool      `json:"is_subscribe"`
-	FollowCount    int64     `json:"follow_count"`
-	SubscribeCount int64     `json:"subscribe_count"`
-	PostCount      int64     `json:"post_count"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID               int64            `json:"id"`
+	UserID           int64            `json:"user_id"`
+	Name             string           `json:"name"`
+	Logo             string           `json:"logo"`
+	CoverImage       string           `json:"cover_image"`
+	Description      string           `json:"description"`
+	BusinessHours    string           `json:"business_hours"`
+	ServicePhone     string           `json:"service_phone"`
+	Province         string           `json:"province"`
+	City             string           `json:"city"`
+	District         string           `json:"district"`
+	Address          string           `json:"address"`
+	Latitude         float64          `json:"latitude"`
+	Longitude        float64          `json:"longitude"`
+	AverageSpend     int64            `json:"average_spend"`
+	IsFollow         bool             `json:"is_follow"`
+	IsSubscribe      bool             `json:"is_subscribe"`
+	FollowCount      int64            `json:"follow_count"`
+	FollowTargetType string           `json:"follow_target_type"`
+	FollowTargetID   int64            `json:"follow_target_id"`
+	SubscribeCount   int64            `json:"subscribe_count"`
+	PostCount        int64            `json:"post_count"`
+	TagIDs           []int64          `json:"tag_ids"`
+	Tags             []ContentTagItem `json:"tags"`
+	CreatedAt        time.Time        `json:"created_at"`
 }
 
 type VenueDetailResponse struct {
@@ -374,7 +378,6 @@ type ActivityCreateRequest struct {
 	ActivityID       int64                `json:"activity_id"`
 	Step             int                  `json:"step" binding:"required,min=1,max=5"`
 	Type             *string              `json:"type"`
-	TagIDs           *[]int               `json:"tag_ids"`
 	Name             *string              `json:"name"`
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
@@ -398,24 +401,33 @@ type ActivityCreateRequest struct {
 
 type ActivityDetailResponse struct {
 	models.Activity
-	UserID       int64               `json:"user_id"`
-	TagIDs       []int               `json:"tag_ids"`
-	DiscountTags []string            `json:"discount_tags"`
-	TicketSpecs  []models.TicketSpec `json:"ticket_specs"`
-	Organizer    *models.Organizer   `json:"organizer,omitempty"`
-	IsSubscribe  bool                `json:"is_subscribe"`
-	IsFollow     bool                `json:"is_follow"`
+	UserID           int64               `json:"user_id"`
+	TagIDs           []int64             `json:"tag_ids"`
+	Tags             []ContentTagItem    `json:"tags"`
+	TicketSpecs      []models.TicketSpec `json:"ticket_specs"`
+	Organizer        *models.Organizer   `json:"organizer,omitempty"`
+	IsSubscribe      bool                `json:"is_subscribe"`
+	IsFollow         bool                `json:"is_follow"`
+	FollowCount      int64               `json:"follow_count"`
+	FollowTargetType string              `json:"follow_target_type"`
+	FollowTargetID   int64               `json:"follow_target_id"`
 }
 
 type ActivityListItem struct {
-	ID          int64     `json:"id"`
-	Type        string    `json:"type"`
-	Name        string    `json:"name"`
-	PosterList  string    `json:"poster_list"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time"`
-	Status      int8      `json:"status"`
-	IsSubscribe bool      `json:"is_subscribe,omitempty"`
+	ID               int64            `json:"id"`
+	Type             string           `json:"type"`
+	Name             string           `json:"name"`
+	PosterList       string           `json:"poster_list"`
+	StartTime        time.Time        `json:"start_time"`
+	EndTime          time.Time        `json:"end_time"`
+	Status           int8             `json:"status"`
+	TagIDs           []int64          `json:"tag_ids"`
+	Tags             []ContentTagItem `json:"tags"`
+	IsSubscribe      bool             `json:"is_subscribe,omitempty"`
+	IsFollow         bool             `json:"is_follow"`
+	FollowCount      int64            `json:"follow_count"`
+	FollowTargetType string           `json:"follow_target_type"`
+	FollowTargetID   int64            `json:"follow_target_id"`
 }
 
 type TicketSpecSaveItem struct {

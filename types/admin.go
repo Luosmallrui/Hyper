@@ -41,9 +41,11 @@ type AdminPartyItem struct {
 // AdminPartyDetail 管理后台派对详情
 type AdminPartyDetail struct {
 	models.Merchant
-	UserName   string `json:"user_name"`
-	UserAvatar string `json:"user_avatar"`
-	UserMobile string `json:"user_mobile"`
+	UserName   string           `json:"user_name"`
+	UserAvatar string           `json:"user_avatar"`
+	UserMobile string           `json:"user_mobile"`
+	TagIDs     []int64          `json:"tag_ids"`
+	Tags       []ContentTagItem `json:"tags"`
 }
 
 // AdminTicketItem 票券列表项
@@ -136,6 +138,8 @@ type AdminActivityDetail struct {
 	models.Activity
 	Organizer   *models.Organizer   `json:"organizer,omitempty"`
 	TicketSpecs []models.TicketSpec `json:"ticket_specs"`
+	TagIDs      []int64             `json:"tag_ids"`
+	Tags        []ContentTagItem    `json:"tags"`
 }
 
 // AdminOrderItem 订单列表项
@@ -249,9 +253,11 @@ type AdminActivityFilter struct {
 // AdminOrganizerDetail 管理后台入驻申请详情
 type AdminOrganizerDetail struct {
 	models.Organizer
-	UserName   string `json:"user_name"`
-	UserAvatar string `json:"user_avatar"`
-	UserMobile string `json:"user_mobile"`
+	UserName   string           `json:"user_name"`
+	UserAvatar string           `json:"user_avatar"`
+	UserMobile string           `json:"user_mobile"`
+	TagIDs     []int64          `json:"tag_ids"`
+	Tags       []ContentTagItem `json:"tags"`
 }
 
 // AdminAuditOrganizerRequest 审核入驻申请

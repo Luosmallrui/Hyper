@@ -20,6 +20,8 @@ var _ IFollowService = (*FollowService)(nil)
 type IFollowService interface {
 	Follow(ctx context.Context, followerID, followeeID uint64) error
 	Unfollow(ctx context.Context, followerID, followeeID uint64) error
+	FollowContent(ctx context.Context, userID int64, targetType string, targetID int64) error
+	UnfollowContent(ctx context.Context, userID int64, targetType string, targetID int64) error
 	IsFollowing(ctx context.Context, followerID, followeeID uint64) (bool, error)
 	GetFollowerCount(ctx context.Context, userID uint64) (int64, error)
 	GetFollowingCount(ctx context.Context, userID uint64) (int64, error)
@@ -115,6 +117,14 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 	}()
 
 	return nil
+}
+
+func (s *FollowService) FollowContent(ctx context.Context, userID int64, targetType string, targetID int64) error {
+	return dao.FollowContent(ctx, s.FollowDAO.Db, userID, targetType, targetID)
+}
+
+func (s *FollowService) UnfollowContent(ctx context.Context, userID int64, targetType string, targetID int64) error {
+	return dao.UnfollowContent(ctx, s.FollowDAO.Db, userID, targetType, targetID)
 }
 
 func (s *FollowService) Unfollow(ctx context.Context, followerID, followeeID uint64) error {

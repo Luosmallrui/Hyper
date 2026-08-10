@@ -7,12 +7,14 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type Follow struct {
@@ -32,20 +34,31 @@ func (f *Follow) RegisterRouter(r gin.IRouter) {
 	g.GET("/list", authorize, context.Wrap(f.GetFollowingList))
 }
 
-// FollowUser 关注用户
+// FollowUser keeps the existing user-follow request and additionally accepts
+// target_type + target_id for object-level follows.
 func (f *Follow) FollowUser(c *gin.Context) error {
-
 	var req types.FollowerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
+	selfID := int64(c.GetInt("user_id"))
+	if req.HasContentTarget() {
+		if !req.HasCompleteContentTarget() {
+			return response.NewError(http.StatusBadRequest, "target_type 和 target_id 必须同时传入")
+		}
+		if err := f.FollowService.FollowContent(c.Request.Context(), selfID, req.TargetType, req.TargetID); err != nil {
+			return contentFollowError(err)
+		}
+		response.Success(c, gin.H{"followed": true, "is_follow": true, "target_type": req.TargetType, "target_id": req.TargetID})
+		return nil
+	}
+
 	uid, err := strconv.Atoi(req.UserId)
 	if err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	selfID := uint64(c.GetInt("user_id"))
-	err = f.FollowService.Follow(c.Request.Context(), selfID, uint64(uid))
+	err = f.FollowService.Follow(c.Request.Context(), uint64(selfID), uint64(uid))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
@@ -59,19 +72,37 @@ func (f *Follow) UnfollowUser(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
+	selfID := int64(c.GetInt("user_id"))
+	if req.HasContentTarget() {
+		if !req.HasCompleteContentTarget() {
+			return response.NewError(http.StatusBadRequest, "target_type 和 target_id 必须同时传入")
+		}
+		if err := f.FollowService.UnfollowContent(c.Request.Context(), selfID, req.TargetType, req.TargetID); err != nil {
+			return contentFollowError(err)
+		}
+		response.Success(c, gin.H{"followed": false, "is_follow": false, "target_type": req.TargetType, "target_id": req.TargetID})
+		return nil
+	}
+
 	uid, err := strconv.Atoi(req.UserId)
 	if err != nil {
 		return response.NewError(http.StatusBadRequest, err.Error())
 	}
 
-	selfID := uint64(c.GetInt("user_id"))
-	err = f.FollowService.Unfollow(c.Request.Context(), selfID, uint64(uid))
+	err = f.FollowService.Unfollow(c.Request.Context(), uint64(selfID), uint64(uid))
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
 
 	response.Success(c, gin.H{"followed": false})
 	return nil
+}
+
+func contentFollowError(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return response.NewError(http.StatusNotFound, "关注目标不存在或不可见")
+	}
+	return response.NewError(http.StatusBadRequest, err.Error())
 }
 
 // GetFollowStatus 查询是否已关注

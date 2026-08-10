@@ -156,7 +156,7 @@ Query:
 | area_id | 否 | 预留字段 |
 | area | 否 | 商圈/区域名称或 ID，活动按地址模糊匹配 |
 | business_area | 否 | 商圈名称，按地址/位置模糊匹配 |
-| tags/tag_ids | 否 | 优惠标签硬过滤：`1` 积分立减，`2` 买单立减，`4` 新人优惠；多值逗号分隔且需同时满足 |
+| tags/tag_ids | 否 | 优惠标签硬过滤：传 `GET /api/v1/tags` 返回的动态标签 ID；多值逗号分隔且需同时满足 |
 | lat/lng | 否 | 用户经纬度，配合 `distance` 使用 |
 | distance | 否 | 距离，单位 km；传 `lat/lng` 时生效 |
 
@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS `activity_subscriptions`
 - `organizer_profiles`：介绍、图册、地址、营业时间、定位等资料。
 - `organizer_stores`：门店/场地位置。
 - `notes.store_id`：场地相关动态。
-- `user_follow`：关注场地主办方用户。
+- `content_follows`：关注场地对象。
 - `venue_subscriptions`：订阅场地。
 
 ### 场地列表
@@ -421,7 +421,7 @@ Authorization: Bearer <access_token>
 
 ### 关注/取消关注场地
 
-关注的是场地所属主办方用户，落表 `user_follow`。
+关注的是场地对象，落表 `content_follows`。完整对象关注参数和响应字段见 [content_follow_api_20260810.md](content_follow_api_20260810.md)。
 
 ```http
 POST /api/v1/venues/:id/follow

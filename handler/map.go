@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/dao"
 	"Hyper/middleware"
 	"Hyper/models"
 	"Hyper/pkg/context"
@@ -70,6 +71,10 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 	if limit > 500 {
 		limit = 500
 	}
+	tagIDs, err := dao.ParseContentTagIDs(firstNonEmptyQuery(c, "tag_ids", "tags"))
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
 
 	markers := make([]types.MapMarker, 0)
 	if source == "merchant" {
@@ -77,7 +82,7 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 		return nil
 	}
 	if source == "all" || source == "activity" || source == "party" || source == "venue" {
-		activities, err := m.getActivityMarkers(c, limit)
+		activities, err := m.getActivityMarkers(c, limit, tagIDs)
 		if err != nil {
 			return err
 		}
@@ -91,7 +96,7 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 	return nil
 }
 
-func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, error) {
+func (m *Map) getPartyMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
 	var parties []models.Merchant
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", "active").
@@ -111,12 +116,7 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	if areaID := m.resolveAreaID(c, c.Query("area")); areaID > 0 {
 		query = query.Where("area_id = ?", areaID)
 	}
-	if tagBits := parseTagBits(c.Query("tag_ids")); tagBits > 0 {
-		query = query.Where("tags & ? = ?", tagBits, tagBits)
-	}
-	if tagBits := parseTagBits(c.Query("tags")); tagBits > 0 {
-		query = query.Where("tags & ? = ?", tagBits, tagBits)
-	}
+	query = dao.ApplyContentTagFilter(query, models.ContentTagTargetParty, "parties.id", tagIDs)
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("title LIKE ? OR location_name LIKE ? OR address LIKE ? OR description LIKE ?", like, like, like, like)
@@ -143,6 +143,18 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 			userMap[user.Id] = user
 		}
 	}
+	partyIDs := make([]int64, 0, len(parties))
+	for _, party := range parties {
+		partyIDs = append(partyIDs, party.ID)
+	}
+	tagMap, err := dao.LoadContentTags(c.Request.Context(), m.DB, models.ContentTagTargetParty, partyIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	followCounts, followed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetParty, partyIDs, int64(currentUserID(c)))
+	if err != nil {
+		return nil, err
+	}
 
 	markers := make([]types.MapMarker, 0, len(parties))
 	requestedSource := c.DefaultQuery("source", "all")
@@ -159,31 +171,37 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 		if requestedSource == "merchant" && source != "merchant" {
 			continue
 		}
+		tags := tagMap[party.ID]
 		marker := types.MapMarker{
-			ID:           fmt.Sprintf("party-%d", party.ID),
-			Source:       source,
-			SourceID:     party.ID,
-			DetailType:   "merchant",
-			DetailURL:    fmt.Sprintf("/api/v1/merchant/%d", party.ID),
-			UserID:       int64(party.UserID),
-			Title:        party.Title,
-			Type:         party.Type,
-			Location:     party.LocationName,
-			Address:      party.Address,
-			Lat:          party.Latitude,
-			Lng:          party.Longitude,
-			CoverImage:   party.CoverImage,
-			CreatedAt:    formatMarkerTime(party.CreatedAt),
-			AvgPrice:     7600,
-			CurrentCount: 9932,
-			PostCount:    372,
-			Icon:         icon,
-			Status:       party.Status,
-			CategoryID:   party.Category,
-			DistrictID:   party.DistrictID,
-			AreaID:       party.AreaID,
-			TagIDs:       tagBitsToIDs(party.Tags),
-			DiscountTags: []string{},
+			ID:               fmt.Sprintf("party-%d", party.ID),
+			Source:           source,
+			SourceID:         party.ID,
+			DetailType:       "merchant",
+			DetailURL:        fmt.Sprintf("/api/v1/merchant/%d", party.ID),
+			UserID:           int64(party.UserID),
+			Title:            party.Title,
+			Type:             party.Type,
+			Location:         party.LocationName,
+			Address:          party.Address,
+			Lat:              party.Latitude,
+			Lng:              party.Longitude,
+			CoverImage:       party.CoverImage,
+			CreatedAt:        formatMarkerTime(party.CreatedAt),
+			AvgPrice:         7600,
+			CurrentCount:     9932,
+			PostCount:        372,
+			Icon:             icon,
+			Status:           party.Status,
+			CategoryID:       party.Category,
+			DistrictID:       party.DistrictID,
+			AreaID:           party.AreaID,
+			TagIDs:           types.ContentTagIDs(tags),
+			DiscountTags:     types.ContentTagNames(tags),
+			Tags:             types.BuildContentTagItems(tags),
+			IsFollow:         followed[party.ID],
+			FollowCount:      followCounts[party.ID],
+			FollowTargetType: models.ContentFollowTargetParty,
+			FollowTargetID:   party.ID,
 		}
 		marker.Distance = markerDistance(c, marker.Lat, marker.Lng)
 		if exceedsDistance(c, marker.Distance) {
@@ -200,7 +218,7 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int) ([]types.MapMarker, err
 	return markers, nil
 }
 
-func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, error) {
+func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
 	var activities []models.Activity
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", models.ActivityStatusOnline).
@@ -208,12 +226,15 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
 		query = query.Where("type = ?", activityType)
 	}
-	activityTagBits := parseTagBits(c.Query("tag_ids"))
-	if activityTagBits == 0 {
-		activityTagBits = parseTagBits(c.Query("tags"))
-	}
-	if activityTagBits > 0 {
-		query = query.Where("discount_tags & ? = ?", activityTagBits, activityTagBits)
+	if len(tagIDs) > 0 {
+		activityMatch, activityArgs := dao.ContentTagMatchSQL(models.ContentTagTargetActivity, "activities.id", tagIDs)
+		venueMatch, venueArgs := dao.ContentTagMatchSQL(models.ContentTagTargetVenue, "activities.organizer_id", tagIDs)
+		args := make([]any, 0, len(activityArgs)+len(venueArgs)+2)
+		args = append(args, models.ActivityTypeVenue)
+		args = append(args, venueArgs...)
+		args = append(args, models.ActivityTypeVenue)
+		args = append(args, activityArgs...)
+		query = query.Where("((activities.type = ? AND "+venueMatch+") OR (activities.type <> ? AND "+activityMatch+"))", args...)
 	}
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
@@ -237,9 +258,24 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 
 	organizerIDs := make([]int64, 0, len(activities))
 	activityIDs := make([]int64, 0, len(activities))
+	activityFollowIDs := make([]int64, 0, len(activities))
+	venueFollowIDs := make([]int64, 0, len(activities))
 	for _, activity := range activities {
 		organizerIDs = append(organizerIDs, activity.OrganizerID)
 		activityIDs = append(activityIDs, activity.ID)
+		if activity.Type == models.ActivityTypeVenue {
+			venueFollowIDs = append(venueFollowIDs, activity.OrganizerID)
+		} else {
+			activityFollowIDs = append(activityFollowIDs, activity.ID)
+		}
+	}
+	activityTags, err := dao.LoadContentTags(c.Request.Context(), m.DB, models.ContentTagTargetActivity, activityIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	venueTags, err := dao.LoadContentTags(c.Request.Context(), m.DB, models.ContentTagTargetVenue, organizerIDs, false)
+	if err != nil {
+		return nil, err
 	}
 
 	organizerMap := make(map[int64]models.Organizer)
@@ -266,8 +302,15 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 		}
 	}
 
-	followingMap := m.loadFollowingSet(c, userIDs)
 	subscribedMap := m.loadActivitySubscriptionSet(c, activityIDs)
+	activityFollowCounts, activityFollowed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetActivity, activityFollowIDs, int64(currentUserID(c)))
+	if err != nil {
+		return nil, err
+	}
+	venueFollowCounts, venueFollowed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetVenue, venueFollowIDs, int64(currentUserID(c)))
+	if err != nil {
+		return nil, err
+	}
 
 	priceMap := make(map[int64]int64)
 	if len(activityIDs) > 0 {
@@ -297,32 +340,49 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 		if activityType == models.ActivityTypeVenue {
 			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
 		}
+		tags := activityTags[activity.ID]
+		followCount := activityFollowCounts[activity.ID]
+		isFollow := activityFollowed[activity.ID]
+		followTargetType := models.ContentFollowTargetActivity
+		followTargetID := activity.ID
+		if activityType == models.ActivityTypeVenue {
+			tags = venueTags[activity.OrganizerID]
+			followCount = venueFollowCounts[activity.OrganizerID]
+			isFollow = venueFollowed[activity.OrganizerID]
+			followTargetType = models.ContentFollowTargetVenue
+			followTargetID = activity.OrganizerID
+		}
 		marker := types.MapMarker{
-			ID:            fmt.Sprintf("activity-%d", activity.ID),
-			Source:        "activity",
-			SourceID:      activity.ID,
-			DetailType:    "activity",
-			DetailURL:     fmt.Sprintf("/api/v1/activity/%d", activity.ID),
-			Title:         activity.Name,
-			Type:          activityType,
-			Location:      activity.Address,
-			Address:       activity.Address,
-			Lat:           activity.Latitude,
-			Lng:           activity.Longitude,
-			CoverImage:    activity.PosterList,
-			CreatedAt:     formatMarkerTime(activity.CreatedAt),
-			AvgPrice:      priceMap[activity.ID],
-			CurrentCount:  0,
-			PostCount:     0,
-			Icon:          icon,
-			StartTime:     formatMarkerTime(activity.StartTime),
-			EndTime:       formatMarkerTime(activity.EndTime),
-			Status:        activity.Status,
-			TagIDs:        models.DiscountTagIDs(activity.DiscountTags),
-			District:      activity.District,
-			Distance:      markerDistance(c, activity.Latitude, activity.Longitude),
-			SupportPoints: true,
-			DiscountTags:  models.DiscountTagNames(activity.DiscountTags),
+			ID:               fmt.Sprintf("activity-%d", activity.ID),
+			Source:           "activity",
+			SourceID:         activity.ID,
+			DetailType:       "activity",
+			DetailURL:        fmt.Sprintf("/api/v1/activity/%d", activity.ID),
+			Title:            activity.Name,
+			Type:             activityType,
+			Location:         activity.Address,
+			Address:          activity.Address,
+			Lat:              activity.Latitude,
+			Lng:              activity.Longitude,
+			CoverImage:       activity.PosterList,
+			CreatedAt:        formatMarkerTime(activity.CreatedAt),
+			AvgPrice:         priceMap[activity.ID],
+			CurrentCount:     0,
+			PostCount:        0,
+			Icon:             icon,
+			IsFollow:         isFollow,
+			FollowCount:      followCount,
+			FollowTargetType: followTargetType,
+			FollowTargetID:   followTargetID,
+			StartTime:        formatMarkerTime(activity.StartTime),
+			EndTime:          formatMarkerTime(activity.EndTime),
+			Status:           activity.Status,
+			TagIDs:           types.ContentTagIDs(tags),
+			District:         activity.District,
+			Distance:         markerDistance(c, activity.Latitude, activity.Longitude),
+			SupportPoints:    true,
+			DiscountTags:     types.ContentTagNames(tags),
+			Tags:             types.BuildContentTagItems(tags),
 		}
 		if exceedsDistance(c, marker.Distance) {
 			continue
@@ -333,7 +393,6 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int) ([]types.MapMarker, 
 			marker.UserName = organizer.Name
 			marker.UserAvatar = organizer.Logo
 			marker.UserAvatarCamel = organizer.Logo
-			marker.IsFollow = followingMap[int(organizer.UserID)]
 			marker.IsSubscriber = subscribedMap[activity.ID]
 			if user, ok := userMap[int(organizer.UserID)]; ok {
 				if user.Nickname != "" {
@@ -522,29 +581,13 @@ func queryInt(c *gin.Context, key string) int {
 	return value
 }
 
-func parseTagBits(raw string) int {
-	var bits int
-	for _, item := range strings.Split(raw, ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		id, _ := strconv.Atoi(item)
-		if id > 0 {
-			bits |= id
+func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := c.Query(key); value != "" {
+			return value
 		}
 	}
-	return bits
-}
-
-func tagBitsToIDs(bits int) []int {
-	ids := make([]int, 0)
-	for bit := 1; bit <= bits; bit <<= 1 {
-		if bits&bit == bit {
-			ids = append(ids, bit)
-		}
-	}
-	return ids
+	return ""
 }
 
 func markerDistance(c *gin.Context, lat, lng float64) float64 {

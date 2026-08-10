@@ -2,6 +2,7 @@ package service
 
 import (
 	"Hyper/config"
+	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/log"
 	"Hyper/pkg/snowflake"
@@ -45,7 +46,7 @@ type ITicketingService interface {
 	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
 	MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error)
 	GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error)
-	ListVenues(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[types.VenueListItem], error)
+	ListVenues(ctx context.Context, userID int64, keyword string, tagIDs []int64, page, size int) (*types.PageResponse[types.VenueListItem], error)
 	GetVenueDetail(ctx context.Context, userID, venueID int64) (*types.VenueDetailResponse, error)
 	ListVenueNotes(ctx context.Context, userID, venueID int64, cursor int64, pageSize int) (*types.VenueNotesResponse, error)
 	FollowVenue(ctx context.Context, userID, venueID int64) error
@@ -78,7 +79,7 @@ type ITicketingService interface {
 	ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
 	SaveActivityStep(ctx context.Context, userID int64, req types.ActivityCreateRequest) (int64, error)
 	GetMyActivities(ctx context.Context, userID int64, page, size int, filter types.ActivityListFilter) (*types.PageResponse[types.ActivityListItem], error)
-	SearchActivities(ctx context.Context, keyword string) ([]types.ActivityListItem, error)
+	SearchActivities(ctx context.Context, userID int64, keyword string) ([]types.ActivityListItem, error)
 	DeleteActivity(ctx context.Context, userID, activityID int64) error
 	SubmitActivityAudit(ctx context.Context, userID, activityID int64) error
 	GetActivityStatistics(ctx context.Context, userID, activityID int64) (*types.ActivityStatisticsResponse, error)
@@ -714,7 +715,7 @@ func (s *TicketingService) GetOrganizerSubscriptionSummary(ctx context.Context, 
 	return resp, nil
 }
 
-func (s *TicketingService) ListVenues(ctx context.Context, userID int64, keyword string, page, size int) (*types.PageResponse[types.VenueListItem], error) {
+func (s *TicketingService) ListVenues(ctx context.Context, userID int64, keyword string, tagIDs []int64, page, size int) (*types.PageResponse[types.VenueListItem], error) {
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Table("organizers o").
 		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district, o.created_at,
@@ -728,6 +729,7 @@ func (s *TicketingService) ListVenues(ctx context.Context, userID int64, keyword
 			COALESCE(p.average_spend, 0) AS average_spend`).
 		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
 		Where(visibleVenueOrganizerSQL(), models.OrganizerStatusApproved, models.ActivityTypeVenue, models.ActivityStatusOnline)
+	query = dao.ApplyContentTagFilter(query, models.ContentTagTargetVenue, "o.id", tagIDs)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("o.name LIKE ? OR p.address LIKE ? OR p.description LIKE ? OR o.district LIKE ?", like, like, like, like)
@@ -849,28 +851,11 @@ func (s *TicketingService) ListVenueNotes(ctx context.Context, userID, venueID i
 }
 
 func (s *TicketingService) FollowVenue(ctx context.Context, userID, venueID int64) error {
-	venue, err := s.getVisibleVenue(ctx, venueID)
-	if err != nil {
-		return err
-	}
-	if userID == venue.UserID {
-		return errors.New("不能关注自己的场地")
-	}
-	return s.DB.WithContext(ctx).Exec(`
-		INSERT INTO user_follow (follower_id, followee_id, status, created_at, updated_at)
-		VALUES (?, ?, 1, NOW(), NOW())
-		ON DUPLICATE KEY UPDATE status = 1, updated_at = NOW()
-	`, userID, venue.UserID).Error
+	return dao.FollowContent(ctx, s.DB, userID, models.ContentFollowTargetVenue, venueID)
 }
 
 func (s *TicketingService) UnfollowVenue(ctx context.Context, userID, venueID int64) error {
-	venue, err := s.getVisibleVenue(ctx, venueID)
-	if err != nil {
-		return err
-	}
-	return s.DB.WithContext(ctx).Model(&models.UserFollow{}).
-		Where("follower_id = ? AND followee_id = ?", userID, venue.UserID).
-		Updates(map[string]any{"status": 0, "updated_at": time.Now()}).Error
+	return dao.UnfollowContent(ctx, s.DB, userID, models.ContentFollowTargetVenue, venueID)
 }
 
 func (s *TicketingService) SubscribeVenue(ctx context.Context, userID, venueID int64) error {
@@ -1023,26 +1008,13 @@ func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, ven
 		return nil
 	}
 	venueIDs := make([]int64, 0, len(venues))
-	ownerUserIDs := make([]int64, 0, len(venues))
 	for _, venue := range venues {
 		venueIDs = append(venueIDs, venue.ID)
-		ownerUserIDs = append(ownerUserIDs, venue.UserID)
 	}
 
-	followCounts := map[int64]int64{}
-	var followRows []struct {
-		FolloweeID int64
-		Count      int64
-	}
-	if err := s.DB.WithContext(ctx).Model(&models.UserFollow{}).
-		Select("followee_id, COUNT(*) AS count").
-		Where("followee_id IN ? AND status = 1", ownerUserIDs).
-		Group("followee_id").
-		Scan(&followRows).Error; err != nil {
+	followCounts, followed, err := dao.LoadContentFollowStats(ctx, s.DB, models.ContentFollowTargetVenue, venueIDs, userID)
+	if err != nil {
 		return err
-	}
-	for _, row := range followRows {
-		followCounts[row.FolloweeID] = row.Count
 	}
 
 	subCounts := map[int64]int64{}
@@ -1078,18 +1050,8 @@ func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, ven
 		postCounts[row.OrganizerID] = row.Count
 	}
 
-	followed := map[int64]bool{}
 	subscribed := map[int64]bool{}
 	if userID > 0 {
-		var followedIDs []int64
-		if err := s.DB.WithContext(ctx).Model(&models.UserFollow{}).
-			Where("follower_id = ? AND followee_id IN ? AND status = 1", userID, ownerUserIDs).
-			Pluck("followee_id", &followedIDs).Error; err != nil {
-			return err
-		}
-		for _, id := range followedIDs {
-			followed[id] = true
-		}
 		var subscribedIDs []int64
 		if err := s.DB.WithContext(ctx).Model(&models.VenueSubscription{}).
 			Where("user_id = ? AND organizer_id IN ?", userID, venueIDs).
@@ -1102,11 +1064,22 @@ func (s *TicketingService) fillVenueStats(ctx context.Context, userID int64, ven
 	}
 
 	for i := range venues {
-		venues[i].FollowCount = followCounts[venues[i].UserID]
+		venues[i].FollowCount = followCounts[venues[i].ID]
 		venues[i].SubscribeCount = subCounts[venues[i].ID]
 		venues[i].PostCount = postCounts[venues[i].ID]
-		venues[i].IsFollow = followed[venues[i].UserID]
+		venues[i].IsFollow = followed[venues[i].ID]
+		venues[i].FollowTargetType = models.ContentFollowTargetVenue
+		venues[i].FollowTargetID = venues[i].ID
 		venues[i].IsSubscribe = subscribed[venues[i].ID]
+	}
+	tagMap, err := dao.LoadContentTags(ctx, s.DB, models.ContentTagTargetVenue, venueIDs, false)
+	if err != nil {
+		return err
+	}
+	for i := range venues {
+		tags := tagMap[venues[i].ID]
+		venues[i].TagIDs = types.ContentTagIDs(tags)
+		venues[i].Tags = types.BuildContentTagItems(tags)
 	}
 	return nil
 }
@@ -1814,13 +1787,30 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	if err := s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error; err != nil {
 		return nil, err
 	}
+	targetType, targetID := models.ContentTagTargetActivity, act.ID
+	if defaultActivityType(act.Type) == models.ActivityTypeVenue {
+		targetType, targetID = models.ContentTagTargetVenue, act.OrganizerID
+	}
+	tagMap, err := dao.LoadContentTags(ctx, s.DB, targetType, []int64{targetID}, false)
+	if err != nil {
+		return nil, err
+	}
+	tags := tagMap[targetID]
+	followCounts, followed, err := dao.LoadContentFollowStats(ctx, s.DB, contentFollowTargetForActivity(act), []int64{contentFollowIDForActivity(act)}, userID)
+	if err != nil {
+		return nil, err
+	}
 	resp := &types.ActivityDetailResponse{
-		Activity:     act,
-		UserID:       org.UserID,
-		TagIDs:       models.DiscountTagIDs(act.DiscountTags),
-		DiscountTags: models.DiscountTagNames(act.DiscountTags),
-		TicketSpecs:  specs,
-		Organizer:    &org,
+		Activity:         act,
+		UserID:           org.UserID,
+		TagIDs:           types.ContentTagIDs(tags),
+		Tags:             types.BuildContentTagItems(tags),
+		TicketSpecs:      specs,
+		Organizer:        &org,
+		IsFollow:         followed[contentFollowIDForActivity(act)],
+		FollowCount:      followCounts[contentFollowIDForActivity(act)],
+		FollowTargetType: contentFollowTargetForActivity(act),
+		FollowTargetID:   contentFollowIDForActivity(act),
 	}
 	if userID > 0 {
 		var count int64
@@ -1828,12 +1818,6 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 			Where("activity_id = ? AND user_id = ?", activityID, userID).
 			Count(&count).Error
 		resp.IsSubscribe = count > 0
-
-		var followCount int64
-		_ = s.DB.WithContext(ctx).Model(&models.UserFollow{}).
-			Where("follower_id = ? AND followee_id = ? AND status = 1", userID, org.UserID).
-			Count(&followCount).Error
-		resp.IsFollow = followCount > 0
 	}
 	return resp, nil
 }
@@ -1868,16 +1852,17 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 	}
 
 	var rows []struct {
-		ID         int64
-		Type       string
-		Name       string
-		PosterList string
-		StartTime  time.Time
-		EndTime    time.Time
-		Status     int8
+		ID          int64
+		OrganizerID int64
+		Type        string
+		Name        string
+		PosterList  string
+		StartTime   time.Time
+		EndTime     time.Time
+		Status      int8
 	}
 	if err := query.
-		Select("a.id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status").
+		Select("a.id, a.organizer_id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status").
 		Order("sub.created_at DESC").
 		Offset((page - 1) * size).
 		Limit(size).
@@ -1885,17 +1870,31 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 		return nil, err
 	}
 
+	activities := make([]models.Activity, 0, len(rows))
+	for _, row := range rows {
+		activities = append(activities, models.Activity{ID: row.ID, OrganizerID: row.OrganizerID, Type: row.Type})
+	}
+	followCounts, followed, err := s.loadActivityFollowStats(ctx, userID, activities)
+	if err != nil {
+		return nil, err
+	}
+
 	list := make([]types.ActivityListItem, 0, len(rows))
 	for _, row := range rows {
+		activity := models.Activity{ID: row.ID, OrganizerID: row.OrganizerID, Type: row.Type}
 		list = append(list, types.ActivityListItem{
-			ID:          row.ID,
-			Type:        defaultActivityType(row.Type),
-			Name:        row.Name,
-			PosterList:  row.PosterList,
-			StartTime:   row.StartTime,
-			EndTime:     row.EndTime,
-			Status:      row.Status,
-			IsSubscribe: true,
+			ID:               row.ID,
+			Type:             defaultActivityType(row.Type),
+			Name:             row.Name,
+			PosterList:       row.PosterList,
+			StartTime:        row.StartTime,
+			EndTime:          row.EndTime,
+			Status:           row.Status,
+			IsSubscribe:      true,
+			IsFollow:         followed[row.ID],
+			FollowCount:      followCounts[row.ID],
+			FollowTargetType: contentFollowTargetForActivity(activity),
+			FollowTargetID:   contentFollowIDForActivity(activity),
 		})
 	}
 	return &types.PageResponse[types.ActivityListItem]{List: list, Total: total}, nil
@@ -1929,15 +1928,15 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 	if filter.ActivityTo != nil {
 		query = query.Where("start_time <= ?", *filter.ActivityTo)
 	}
-	return s.listActivities(query, page, size)
+	return s.listActivities(query, page, size, userID)
 }
 
-func (s *TicketingService) SearchActivities(ctx context.Context, keyword string) ([]types.ActivityListItem, error) {
+func (s *TicketingService) SearchActivities(ctx context.Context, userID int64, keyword string) ([]types.ActivityListItem, error) {
 	query := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ?", models.ActivityStatusOnline)
 	if keyword != "" {
 		query = query.Where("name LIKE ?", "%"+keyword+"%")
 	}
-	resp, err := s.listActivities(query, 1, 50)
+	resp, err := s.listActivities(query, 1, 50, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -3851,7 +3850,7 @@ func (s *TicketingService) ensureOrganizer(ctx context.Context, userID int64) (*
 	return org, nil
 }
 
-func (s *TicketingService) listActivities(query *gorm.DB, page, size int) (*types.PageResponse[types.ActivityListItem], error) {
+func (s *TicketingService) listActivities(query *gorm.DB, page, size int, userID int64) (*types.PageResponse[types.ActivityListItem], error) {
 	page, size = normalizePage(page, size)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -3861,9 +3860,43 @@ func (s *TicketingService) listActivities(query *gorm.DB, page, size int) (*type
 	if err := query.Order("created_at desc").Offset((page - 1) * size).Limit(size).Find(&acts).Error; err != nil {
 		return nil, err
 	}
+	activityIDs := make([]int64, 0, len(acts))
+	venueIDs := make([]int64, 0, len(acts))
+	for _, activity := range acts {
+		if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+			venueIDs = append(venueIDs, activity.OrganizerID)
+		} else {
+			activityIDs = append(activityIDs, activity.ID)
+		}
+	}
+	activityTags, err := dao.LoadContentTags(query.Statement.Context, s.DB, models.ContentTagTargetActivity, activityIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	venueTags, err := dao.LoadContentTags(query.Statement.Context, s.DB, models.ContentTagTargetVenue, venueIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	activityFollowCounts, activityFollowed, err := dao.LoadContentFollowStats(query.Statement.Context, s.DB, models.ContentFollowTargetActivity, activityIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	venueFollowCounts, venueFollowed, err := dao.LoadContentFollowStats(query.Statement.Context, s.DB, models.ContentFollowTargetVenue, venueIDs, userID)
+	if err != nil {
+		return nil, err
+	}
 	list := make([]types.ActivityListItem, 0, len(acts))
 	for _, a := range acts {
-		list = append(list, types.ActivityListItem{ID: a.ID, Type: defaultActivityType(a.Type), Name: a.Name, PosterList: a.PosterList, StartTime: a.StartTime, EndTime: a.EndTime, Status: a.Status})
+		activityType := defaultActivityType(a.Type)
+		tags := activityTags[a.ID]
+		followCount := activityFollowCounts[a.ID]
+		isFollow := activityFollowed[a.ID]
+		if activityType == models.ActivityTypeVenue {
+			tags = venueTags[a.OrganizerID]
+			followCount = venueFollowCounts[a.OrganizerID]
+			isFollow = venueFollowed[a.OrganizerID]
+		}
+		list = append(list, types.ActivityListItem{ID: a.ID, Type: activityType, Name: a.Name, PosterList: a.PosterList, StartTime: a.StartTime, EndTime: a.EndTime, Status: a.Status, TagIDs: types.ContentTagIDs(tags), Tags: types.BuildContentTagItems(tags), IsFollow: isFollow, FollowCount: followCount, FollowTargetType: contentFollowTargetForActivity(a), FollowTargetID: contentFollowIDForActivity(a)})
 	}
 	return &types.PageResponse[types.ActivityListItem]{List: list, Total: total}, nil
 }
@@ -4308,13 +4341,6 @@ func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
 		}
 		updates["type"] = activityType
 	}
-	if req.TagIDs != nil {
-		bits, err := models.DiscountTagBits(*req.TagIDs)
-		if err != nil {
-			return nil, err
-		}
-		updates["discount_tags"] = bits
-	}
 	putString(updates, "name", req.Name)
 	putString(updates, "share_title", req.ShareTitle)
 	putInt8(updates, "real_name_mode", req.RealNameMode)
@@ -4373,6 +4399,52 @@ func defaultActivityType(raw string) string {
 		return models.ActivityTypeParty
 	}
 	return activityType
+}
+
+func contentFollowTargetForActivity(activity models.Activity) string {
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return models.ContentFollowTargetVenue
+	}
+	return models.ContentFollowTargetActivity
+}
+
+func contentFollowIDForActivity(activity models.Activity) int64 {
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return activity.OrganizerID
+	}
+	return activity.ID
+}
+
+func (s *TicketingService) loadActivityFollowStats(ctx context.Context, userID int64, activities []models.Activity) (map[int64]int64, map[int64]bool, error) {
+	counts := make(map[int64]int64, len(activities))
+	followed := make(map[int64]bool, len(activities))
+	activityIDs := make([]int64, 0, len(activities))
+	venueIDs := make([]int64, 0, len(activities))
+	for _, activity := range activities {
+		if contentFollowTargetForActivity(activity) == models.ContentFollowTargetVenue {
+			venueIDs = append(venueIDs, activity.OrganizerID)
+		} else {
+			activityIDs = append(activityIDs, activity.ID)
+		}
+	}
+	activityCounts, activityFollowed, err := dao.LoadContentFollowStats(ctx, s.DB, models.ContentFollowTargetActivity, activityIDs, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	venueCounts, venueFollowed, err := dao.LoadContentFollowStats(ctx, s.DB, models.ContentFollowTargetVenue, venueIDs, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, activity := range activities {
+		if contentFollowTargetForActivity(activity) == models.ContentFollowTargetVenue {
+			counts[activity.ID] = venueCounts[activity.OrganizerID]
+			followed[activity.ID] = venueFollowed[activity.OrganizerID]
+			continue
+		}
+		counts[activity.ID] = activityCounts[activity.ID]
+		followed[activity.ID] = activityFollowed[activity.ID]
+	}
+	return counts, followed, nil
 }
 
 func validateChinaCoordinate(latitude, longitude float64) error {

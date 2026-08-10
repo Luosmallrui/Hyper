@@ -70,7 +70,6 @@ type Activity struct {
 	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID      int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
 	Type             string    `gorm:"column:type;size:20;not null;default:party;index" json:"type"`
-	DiscountTags     int       `gorm:"column:discount_tags;not null;default:0" json:"-"`
 	Name             string    `gorm:"column:name;size:80;not null" json:"name"`
 	ShareTitle       string    `gorm:"column:share_title;size:20" json:"share_title"`
 	StartTime        time.Time `gorm:"column:start_time" json:"start_time"`

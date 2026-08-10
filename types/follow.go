@@ -14,5 +14,16 @@ type GetFollowingListRequest struct {
 }
 
 type FollowerRequest struct {
-	UserId string `json:"user_id"`
+	UserId     string `json:"user_id"`
+	TargetType string `json:"target_type"`
+	TargetID   int64  `json:"target_id"`
+}
+
+func (r FollowerRequest) HasContentTarget() bool {
+	return r.TargetType != "" || r.TargetID != 0
+
+}
+
+func (r FollowerRequest) HasCompleteContentTarget() bool {
+	return r.TargetType != "" && r.TargetID > 0
 }

@@ -58,6 +58,8 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/organizers/:id", context.Wrap(a.GetOrganizerDetail))
 		authorized.PUT("/organizers/:id/audit", context.Wrap(a.AuditOrganizer))
 		authorized.PATCH("/organizers/:id/status", context.Wrap(a.UpdateOrganizerEnabled))
+		authorized.PUT("/organizers/:id/tags", context.Wrap(a.UpdateOrganizerTags))
+		authorized.PUT("/venues/:id/tags", context.Wrap(a.UpdateOrganizerTags))
 		authorized.DELETE("/organizers/:id", context.Wrap(a.DeleteOrganizer))
 		authorized.POST("/wechat-subscribe", context.Wrap(a.BindWechatSubscribe))
 
@@ -65,11 +67,13 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/parties", context.Wrap(a.GetPartyList))
 		authorized.GET("/parties/:id", context.Wrap(a.GetPartyDetail))
 		authorized.PUT("/parties/:id/status", context.Wrap(a.UpdatePartyStatus))
+		authorized.PUT("/parties/:id/tags", context.Wrap(a.UpdatePartyTags))
 
 		// 活动审核管理
 		authorized.GET("/activities", context.Wrap(a.GetActivityList))
 		authorized.GET("/activities/:id", context.Wrap(a.GetActivityDetail))
 		authorized.PUT("/activities/:id/audit", context.Wrap(a.AuditActivity))
+		authorized.PUT("/activities/:id/tags", context.Wrap(a.UpdateActivityTags))
 		authorized.GET("/activity-collections", context.Wrap(a.ListActivityCollections))
 		authorized.POST("/activity-collections", context.Wrap(a.CreateActivityCollection))
 		authorized.PUT("/activity-collections/:id", context.Wrap(a.UpdateActivityCollection))
@@ -227,6 +231,8 @@ func adminAuditMetaForRequest(c *gin.Context) adminAuditMeta {
 		meta = adminAuditMeta{Action: "admin.role." + requestAction(c.Request.Method), ResourceType: "role"}
 	case strings.HasPrefix(path, "/v1/admin/organizers"):
 		meta = adminAuditMeta{Action: "admin.organizer." + requestAction(c.Request.Method), ResourceType: "organizer"}
+	case strings.HasPrefix(path, "/v1/admin/venues"):
+		meta = adminAuditMeta{Action: "admin.venue." + requestAction(c.Request.Method), ResourceType: "venue"}
 	case strings.HasPrefix(path, "/v1/admin/activities"):
 		meta = adminAuditMeta{Action: "admin.activity." + requestAction(c.Request.Method), ResourceType: "activity"}
 	case strings.HasPrefix(path, "/v1/admin/activity-collections"):
@@ -492,6 +498,38 @@ func (a *Admin) DeleteCategory(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func (a *Admin) UpdateActivityTags(c *gin.Context) error {
+	return a.updateContentTags(c, models.ContentTagTargetActivity, "activity")
+}
+
+func (a *Admin) UpdateOrganizerTags(c *gin.Context) error {
+	return a.updateContentTags(c, models.ContentTagTargetVenue, "venue")
+}
+
+func (a *Admin) UpdatePartyTags(c *gin.Context) error {
+	return a.updateContentTags(c, models.ContentTagTargetParty, "party")
+}
+
+func (a *Admin) updateContentTags(c *gin.Context, targetType, resourceType string) error {
+	id := adminParamID(c)
+	if id <= 0 {
+		return response.NewError(http.StatusBadRequest, "无效的ID")
+	}
+	var req types.ContentTagBindingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
+	}
+	if err := a.AdminService.SaveContentTags(c.Request.Context(), targetType, id, req.TagIDs); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "目标不存在")
+		}
+		return response.NewError(http.StatusBadRequest, err.Error())
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin." + resourceType + ".tags.update", ResourceType: resourceType, ResourceID: strconv.FormatInt(id, 10), Remark: "更新优惠标签"})
+	response.Success(c, gin.H{"success": true, "tag_ids": req.TagIDs})
 	return nil
 }
 

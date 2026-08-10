@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Hyper/config"
+	"Hyper/dao"
 	"Hyper/middleware"
 	"Hyper/models"
 	"Hyper/pkg/context"
@@ -38,7 +39,7 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 		m.GET("/:id/follower/count", optionalAuth, context.Wrap(pc.GetPartyFollowerCount))
 		m.GET("/:id/goods", optionalAuth, context.Wrap(pc.GetPartyGoods))
 		m.GET("/:id", optionalAuth, context.Wrap(pc.GetPartyDetail))
-		m.GET("/tags", optionalAuth, pc.GetTags)
+		m.GET("/tags", optionalAuth, context.Wrap(pc.GetTags))
 
 		m.POST("/create", authorize, pc.CreateMerchant) // 创建商家
 
@@ -48,6 +49,7 @@ func (pc *Merchant) RegisterRouter(r gin.IRouter) {
 		m.POST("/unsubscribe", authorize, context.Wrap(pc.UnsubcribParty))
 
 	}
+	r.GET("/v1/tags", optionalAuth, context.Wrap(pc.GetTags))
 	c := r.Group("/v1/category")
 	{
 		c.GET("/list", optionalAuth, context.Wrap(pc.GetCategoryList))
@@ -70,11 +72,11 @@ func (pc *Merchant) GetPartyFollowerCount(c *gin.Context) error {
 		}
 		return err
 	}
-	count, err := pc.FollowService.GetFollowerCount(c.Request.Context(), uint64(party.UserID))
+	counts, _, err := dao.LoadContentFollowStats(c.Request.Context(), pc.DB, models.ContentFollowTargetParty, []int64{party.ID}, 0)
 	if err != nil {
 		return err
 	}
-	response.Success(c, gin.H{"follower_count": count})
+	response.Success(c, gin.H{"follower_count": counts[party.ID]})
 	return nil
 }
 
@@ -111,14 +113,13 @@ func (pc *Merchant) GetCategoryList(c *gin.Context) error {
 	return nil
 }
 
-func (pc *Merchant) GetTags(c *gin.Context) {
-	configs := []types.TagConfigResp{
-		{Name: "积分立减", Id: 1},
-		{Name: "买单立减", Id: 2},
-		{Name: "新人优惠", Id: 4},
+func (pc *Merchant) GetTags(c *gin.Context) error {
+	tags, err := dao.ListActiveCouponTags(c.Request.Context(), pc.DB)
+	if err != nil {
+		return err
 	}
-	c.JSON(200, gin.H{"code": 200, "msg": "ok", "data": configs})
-
+	response.Success(c, types.BuildContentTagItems(tags))
+	return nil
 }
 
 func (pc *Merchant) CreateMerchant(c *gin.Context) {
@@ -246,19 +247,11 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 			query = query.Where("category IN ?", filtered)
 		}
 	}
-	tagsParam := c.Query("tag_ids")
-	if tagsParam == "" {
-		tagsParam = c.Query("tags")
+	tagIDs, err := dao.ParseContentTagIDs(firstNonEmptyQuery(c, "tag_ids", "tags"))
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, err.Error())
 	}
-	tagStrings := strings.Split(tagsParam, ",")
-	var requiredTags int
-	for _, s := range tagStrings {
-		val, _ := strconv.Atoi(s)
-		requiredTags |= val
-	}
-	if requiredTags > 0 {
-		query = query.Where("tags & ? = ?", requiredTags, requiredTags)
-	}
+	query = dao.ApplyContentTagFilter(query, models.ContentTagTargetParty, "parties.id", tagIDs)
 	lat, latErr := strconv.ParseFloat(c.Query("lat"), 64)
 	lng, lngErr := strconv.ParseFloat(c.Query("lng"), 64)
 	distanceLimit, _ := strconv.ParseFloat(c.Query("distance"), 64)
@@ -321,9 +314,19 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 
 	userIDArr := make([]uint64, 0)
 	memIdSlice := make([]int, 0)
+	partyIDs := make([]int64, 0, len(merchant))
 	for _, m := range merchant {
 		userIDArr = append(userIDArr, uint64(m.UserID))
 		memIdSlice = append(memIdSlice, int(m.ID))
+		partyIDs = append(partyIDs, m.ID)
+	}
+	tagMap, err := dao.LoadContentTags(ctx, pc.DB, models.ContentTagTargetParty, partyIDs, false)
+	if err != nil {
+		return err
+	}
+	followCounts, followed, err := dao.LoadContentFollowStats(ctx, pc.DB, models.ContentFollowTargetParty, partyIDs, int64(c.GetInt("user_id")))
+	if err != nil {
+		return err
 	}
 
 	isSubcribe, _ := pc.GetPartyLikeStatus(c.GetInt("user_id"), memIdSlice)
@@ -332,7 +335,6 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 
 	list := make([]models.MerchantListItem, 0, len(merchant))
 	for _, m := range merchant {
-		isFollow, _ := pc.FollowService.CheckFollowStatus(c, uint64(c.GetInt("user_id")), uint64(m.UserID))
 		userId := uint64(m.UserID)
 		userAvatar := userMap[userId].Avatar
 		userName := userMap[userId].Nickname
@@ -342,28 +344,34 @@ func (pc *Merchant) GetPartyList(c *gin.Context) error {
 		} else {
 			icon = "https://cdn.hypercn.cn/icon/party.png"
 		}
+		tags := tagMap[m.ID]
 		list = append(list, models.MerchantListItem{
-			ID:           m.ID,
-			UserID:       m.UserID,
-			UserAvatar:   userAvatar,
-			UserName:     userName,
-			CoverImage:   m.CoverImage,
-			Title:        m.Title,
-			Type:         m.Type,
-			CreatedAt:    m.CreatedAt,
-			Lat:          m.Latitude,
-			Lng:          m.Longitude,
-			Location:     m.LocationName,
-			CurrentCount: 9932,
-			AvgPrice:     7600,
-			PostCount:    372,
-			Icon:         icon,
-			IsFollow:     isFollow,
-			IsSubscriber: isSubcribe[int(m.ID)],
-			CategoryID:   m.Category,
-			DistrictID:   m.DistrictID,
-			AreaID:       m.AreaID,
-			TagIDs:       tagBitsToIDs(m.Tags),
+			ID:               m.ID,
+			UserID:           m.UserID,
+			UserAvatar:       userAvatar,
+			UserName:         userName,
+			CoverImage:       m.CoverImage,
+			Title:            m.Title,
+			Type:             m.Type,
+			CreatedAt:        m.CreatedAt,
+			Lat:              m.Latitude,
+			Lng:              m.Longitude,
+			Location:         m.LocationName,
+			CurrentCount:     9932,
+			AvgPrice:         7600,
+			PostCount:        372,
+			Icon:             icon,
+			IsFollow:         followed[m.ID],
+			FollowCount:      followCounts[m.ID],
+			FollowTargetType: models.ContentFollowTargetParty,
+			FollowTargetID:   m.ID,
+			IsSubscriber:     isSubcribe[int(m.ID)],
+			CategoryID:       m.Category,
+			DistrictID:       m.DistrictID,
+			AreaID:           m.AreaID,
+			TagIDs:           types.ContentTagIDs(tags),
+			DiscountTags:     types.ContentTagNames(tags),
+			Tags:             types.BuildContentTagItems(tags),
 		})
 	}
 
@@ -444,13 +452,26 @@ func (pc *Merchant) GetPartyDetail(c *gin.Context) error {
 		Goods:         make([]models.Product, 0),
 		BusinessHours: "19:30-次日02:30",
 	}
+	tagMap, err := dao.LoadContentTags(c.Request.Context(), pc.DB, models.ContentTagTargetParty, []int64{merchant.ID}, false)
+	if err != nil {
+		return err
+	}
+	resp.TagIDs = types.ContentTagIDs(tagMap[merchant.ID])
+	resp.Tags = types.BuildContentTagItems(tagMap[merchant.ID])
+	followCounts, followed, err := dao.LoadContentFollowStats(c.Request.Context(), pc.DB, models.ContentFollowTargetParty, []int64{merchant.ID}, int64(c.GetInt("user_id")))
+	if err != nil {
+		return err
+	}
+	resp.FollowCount = followCounts[merchant.ID]
+	resp.IsFollow = followed[merchant.ID]
+	resp.FollowTargetType = models.ContentFollowTargetParty
+	resp.FollowTargetID = merchant.ID
 	_ = json.Unmarshal([]byte(merchant.ImagesJSON), &resp.Images)
 	if err := pc.DB.WithContext(c.Request.Context()).Where("party_id = ?", merchantID).Find(&resp.Goods).Error; err != nil {
 		return err
 	}
 	resp.UserAvatar, resp.UserName, _ = pc.UserService.GetUserAvatar(c.Request.Context(), int64(merchant.UserID))
 	if userID := c.GetInt("user_id"); userID > 0 {
-		resp.IsFollow, _ = pc.FollowService.CheckFollowStatus(c, uint64(userID), uint64(merchant.UserID))
 		isSubscribed, err := pc.MerchantService.CheckSubcribe(c, userID, int(merchant.ID))
 		if err != nil {
 			return response.NewError(http.StatusInternalServerError, "查询订阅状态失败")
@@ -494,9 +515,22 @@ func (pc *Merchant) getOrganizerMerchantDetail(c *gin.Context, organizerID int64
 		Goods:         make([]models.Product, 0),
 		BusinessHours: profile.BusinessHours,
 	}
+	tagMap, err := dao.LoadContentTags(c.Request.Context(), pc.DB, models.ContentTagTargetVenue, []int64{organizer.ID}, false)
+	if err != nil {
+		return nil, err
+	}
+	resp.TagIDs = types.ContentTagIDs(tagMap[organizer.ID])
+	resp.Tags = types.BuildContentTagItems(tagMap[organizer.ID])
+	followCounts, followed, err := dao.LoadContentFollowStats(c.Request.Context(), pc.DB, models.ContentFollowTargetVenue, []int64{organizer.ID}, int64(c.GetInt("user_id")))
+	if err != nil {
+		return nil, err
+	}
+	resp.FollowCount = followCounts[organizer.ID]
+	resp.IsFollow = followed[organizer.ID]
+	resp.FollowTargetType = models.ContentFollowTargetVenue
+	resp.FollowTargetID = organizer.ID
 	resp.UserAvatar, resp.UserName, _ = pc.UserService.GetUserAvatar(c.Request.Context(), organizer.UserID)
 	if userID := c.GetInt("user_id"); userID > 0 {
-		resp.IsFollow, _ = pc.FollowService.CheckFollowStatus(c, uint64(userID), uint64(organizer.UserID))
 		var count int64
 		if err := pc.DB.WithContext(c.Request.Context()).Model(&models.VenueSubscription{}).
 			Where("organizer_id = ? AND user_id = ?", organizer.ID, userID).Count(&count).Error; err != nil {
