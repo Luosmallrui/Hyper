@@ -317,15 +317,26 @@ type OrganizerOrderSummary struct {
 	OrderCount         int64                        `json:"order_count"`
 	TicketCount        int64                        `json:"ticket_count"`
 	AverageOrderAmount int64                        `json:"average_order_amount"`
+	ViewCount          int64                        `json:"view_count"`
+	VisitorCount       int64                        `json:"visitor_count"`
+	PaidOrderCount     int64                        `json:"paid_order_count"`
+	ConversionRate     float64                      `json:"conversion_rate"`
 	ActivityRanks      []OrganizerOrderActivityRank `json:"activity_ranks"`
 }
 
 type OrganizerOrderActivityRank struct {
-	ActivityID   int64  `json:"activity_id"`
-	ActivityName string `json:"activity_name"`
-	OrderCount   int64  `json:"order_count"`
-	TicketCount  int64  `json:"ticket_count"`
-	TotalAmount  int64  `json:"total_amount"`
+	ActivityID              int64   `json:"activity_id"`
+	ActivityName            string  `json:"activity_name"`
+	OrderCount              int64   `json:"order_count"`
+	TicketCount             int64   `json:"ticket_count"`
+	TotalAmount             int64   `json:"total_amount"`
+	ViewCount               int64   `json:"view_count"`
+	VisitorCount            int64   `json:"visitor_count"`
+	PaidOrderCount          int64   `json:"paid_order_count"`
+	ConversionRate          float64 `json:"conversion_rate"`
+	AvailableWithdrawAmount int64   `json:"available_withdraw_amount"`
+	PendingWithdrawAmount   int64   `json:"pending_withdraw_amount"`
+	WithdrawnAmount         int64   `json:"withdrawn_amount"`
 }
 
 type OrganizerFinanceFlowItem struct {
@@ -473,6 +484,7 @@ type CreateTicketOrderRequest struct {
 	Viewers      []OrderViewerInput `json:"viewers"`
 	UsePoints    bool               `json:"use_points"`
 	PointsAmount int64              `json:"points_amount"`
+	SalesChannel string             `json:"sales_channel"`
 }
 
 type OrderViewerInput struct {
@@ -501,6 +513,7 @@ type CreateTicketOrderResponse struct {
 	PointsAmount   int64             `json:"points_amount"`
 	PointsDiscount int64             `json:"points_discount"`
 	ActualPrice    int64             `json:"actual_price"`
+	SalesChannel   string            `json:"sales_channel"`
 	QRCode         string            `json:"qr_code"`
 	QRCodeURL      string            `json:"qr_code_url"`
 	Viewers        []OrderViewerItem `json:"viewers,omitempty"`
@@ -527,16 +540,17 @@ type TicketOrderDetailResponse struct {
 	TicketSpec struct {
 		Name string `json:"name"`
 	} `json:"ticket_spec"`
-	BuyerName   string            `json:"buyer_name"`
-	BuyerIDCard string            `json:"buyer_id_card"`
-	Viewers     []OrderViewerItem `json:"viewers,omitempty"`
-	PayMethod   string            `json:"pay_method"`
-	PayTime     *time.Time        `json:"pay_time"`
-	CreatedAt   time.Time         `json:"created_at"`
-	QRCode      string            `json:"qr_code"`
-	QRCodeURL   string            `json:"qr_code_url"`
-	ExpireTime  time.Time         `json:"expire_time"`
-	RefundInfo  *struct {
+	BuyerName    string            `json:"buyer_name"`
+	BuyerIDCard  string            `json:"buyer_id_card"`
+	Viewers      []OrderViewerItem `json:"viewers,omitempty"`
+	PayMethod    string            `json:"pay_method"`
+	SalesChannel string            `json:"sales_channel"`
+	PayTime      *time.Time        `json:"pay_time"`
+	CreatedAt    time.Time         `json:"created_at"`
+	QRCode       string            `json:"qr_code"`
+	QRCodeURL    string            `json:"qr_code_url"`
+	ExpireTime   time.Time         `json:"expire_time"`
+	RefundInfo   *struct {
 		RefundNo         string `json:"refund_no"`
 		RefundAmount     int64  `json:"refund_amount"`
 		Status           int8   `json:"status"`
@@ -618,17 +632,22 @@ type OrganizerOrderListItem struct {
 	TicketSpecID   int64             `json:"ticket_spec_id"`
 	TicketSpecName string            `json:"ticket_spec_name"`
 	PayMethod      string            `json:"pay_method"`
+	SalesChannel   string            `json:"sales_channel"`
 	PayTime        *time.Time        `json:"pay_time"`
 	CreatedAt      time.Time         `json:"created_at"`
 	ExpireTime     time.Time         `json:"expire_time"`
+	WithdrawStatus string            `json:"withdraw_status"`
+	WithdrawAmount int64             `json:"withdraw_amount"`
 }
 
 type OrganizerOrderDetailResponse struct {
 	TicketOrderDetailResponse
-	UserID     int64  `json:"user_id"`
-	UserName   string `json:"user_name"`
-	UserMobile string `json:"user_mobile"`
-	UserAvatar string `json:"user_avatar"`
+	UserID         int64  `json:"user_id"`
+	UserName       string `json:"user_name"`
+	UserMobile     string `json:"user_mobile"`
+	UserAvatar     string `json:"user_avatar"`
+	WithdrawStatus string `json:"withdraw_status"`
+	WithdrawAmount int64  `json:"withdraw_amount"`
 }
 
 type OrganizerRefundListItem struct {
@@ -804,21 +823,30 @@ type VerifiedListItem struct {
 }
 
 type ActivityStatisticsResponse struct {
-	VerifyRate         float64 `json:"verify_rate"`
-	TicketCount        int64   `json:"ticket_count"`
-	BuyerCount         int64   `json:"buyer_count"`
-	GrossAmount        int64   `json:"gross_amount"`
-	RefundAmount       int64   `json:"refund_amount"`
-	NetAmount          int64   `json:"net_amount"`
-	AverageTicketPrice int64   `json:"average_ticket_price"`
-	VerifiedCount      int64   `json:"verified_count"`
+	VerifyRate              float64 `json:"verify_rate"`
+	TicketCount             int64   `json:"ticket_count"`
+	BuyerCount              int64   `json:"buyer_count"`
+	GrossAmount             int64   `json:"gross_amount"`
+	RefundAmount            int64   `json:"refund_amount"`
+	NetAmount               int64   `json:"net_amount"`
+	AverageTicketPrice      int64   `json:"average_ticket_price"`
+	VerifiedCount           int64   `json:"verified_count"`
+	ViewCount               int64   `json:"view_count"`
+	VisitorCount            int64   `json:"visitor_count"`
+	PaidOrderCount          int64   `json:"paid_order_count"`
+	ConversionRate          float64 `json:"conversion_rate"`
+	AvailableWithdrawAmount int64   `json:"available_withdraw_amount"`
+	PendingWithdrawAmount   int64   `json:"pending_withdraw_amount"`
+	WithdrawnAmount         int64   `json:"withdrawn_amount"`
 }
 
 type ActivityDailyStatisticsItem struct {
-	Date        string `json:"date"`
-	Amount      int64  `json:"amount"`
-	TicketCount int64  `json:"ticket_count"`
-	OrderCount  int64  `json:"order_count"`
+	Date         string `json:"date"`
+	Amount       int64  `json:"amount"`
+	TicketCount  int64  `json:"ticket_count"`
+	OrderCount   int64  `json:"order_count"`
+	ViewCount    int64  `json:"view_count"`
+	VisitorCount int64  `json:"visitor_count"`
 }
 
 type ViewerItem struct {

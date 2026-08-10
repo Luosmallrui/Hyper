@@ -36,6 +36,10 @@ const (
 
 	VerifierStatusInactive int8 = 0
 	VerifierStatusActive   int8 = 1
+
+	OrganizerWithdrawAllocationStatusPending  int8 = 0
+	OrganizerWithdrawAllocationStatusSettled  int8 = 1
+	OrganizerWithdrawAllocationStatusReleased int8 = 2
 )
 
 type Organizer struct {
@@ -98,6 +102,32 @@ func (Activity) TableName() string {
 	return "activities"
 }
 
+// ActivityDailyStat stores lightweight per-day PV/UV totals. Detailed unique
+// visitor keys live in ActivityDailyVisitor so arbitrary date-range UV can be
+// calculated without retaining every page-view event.
+type ActivityDailyStat struct {
+	ID           int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ActivityID   int64     `gorm:"column:activity_id;not null;uniqueIndex:uk_activity_daily_stat,priority:1;index" json:"activity_id"`
+	StatDate     time.Time `gorm:"column:stat_date;type:date;not null;uniqueIndex:uk_activity_daily_stat,priority:2;index" json:"stat_date"`
+	ViewCount    int64     `gorm:"column:view_count;not null;default:0" json:"view_count"`
+	VisitorCount int64     `gorm:"column:visitor_count;not null;default:0" json:"visitor_count"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (ActivityDailyStat) TableName() string { return "activity_daily_stats" }
+
+type ActivityDailyVisitor struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ActivityID int64     `gorm:"column:activity_id;not null;uniqueIndex:uk_activity_daily_visitor,priority:1;index" json:"activity_id"`
+	StatDate   time.Time `gorm:"column:stat_date;type:date;not null;uniqueIndex:uk_activity_daily_visitor,priority:2;index" json:"stat_date"`
+	VisitorKey string    `gorm:"column:visitor_key;size:80;not null;uniqueIndex:uk_activity_daily_visitor,priority:3" json:"-"`
+	UserID     int64     `gorm:"column:user_id;not null;default:0;index" json:"user_id"`
+	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (ActivityDailyVisitor) TableName() string { return "activity_daily_visitors" }
+
 type TicketSpec struct {
 	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	ActivityID    int64     `gorm:"column:activity_id;not null;index" json:"activity_id"`
@@ -153,6 +183,7 @@ type TicketOrder struct {
 	PointsAmount   int64      `gorm:"column:points_amount;not null;default:0" json:"points_amount"`
 	PointsDiscount int64      `gorm:"column:points_discount;not null;default:0" json:"points_discount"` // 分
 	PayMethod      string     `gorm:"column:pay_method;size:20" json:"pay_method"`
+	SalesChannel   string     `gorm:"column:sales_channel;size:20;not null;default:wechat;index" json:"sales_channel"`
 	PayTime        *time.Time `gorm:"column:pay_time" json:"pay_time"`
 	BuyerName      string     `gorm:"column:buyer_name;size:50" json:"buyer_name"`
 	BuyerIDCard    string     `gorm:"column:buyer_id_card;size:20" json:"buyer_id_card"`
@@ -169,6 +200,24 @@ type TicketOrder struct {
 func (TicketOrder) TableName() string {
 	return "ticket_orders"
 }
+
+// OrganizerWithdrawAllocation makes a withdrawal traceable to the exact
+// order revenue it reserves. Status follows the parent withdrawal: pending,
+// settled after approval, or released after rejection.
+type OrganizerWithdrawAllocation struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	WithdrawID  int64     `gorm:"column:withdraw_id;not null;uniqueIndex:uk_withdraw_order,priority:1;index" json:"withdraw_id"`
+	OrganizerID int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	OrderID     int64     `gorm:"column:order_id;not null;uniqueIndex:uk_withdraw_order,priority:2;index" json:"order_id"`
+	OrderNo     string    `gorm:"column:order_no;size:30;not null;index" json:"order_no"`
+	ActivityID  int64     `gorm:"column:activity_id;not null;index" json:"activity_id"`
+	Amount      int64     `gorm:"column:amount;not null" json:"amount"`
+	Status      int8      `gorm:"column:status;not null;default:0;index" json:"status"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (OrganizerWithdrawAllocation) TableName() string { return "organizer_withdraw_allocations" }
 
 type TicketOrderViewer struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`

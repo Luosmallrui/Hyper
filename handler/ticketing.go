@@ -4,6 +4,7 @@ import (
 	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/middleware"
+	"Hyper/models"
 	"Hyper/pkg/response"
 	"Hyper/pkg/snowflake"
 	"Hyper/service"
@@ -844,6 +845,10 @@ func (h *Ticketing) GetActivity(c *gin.Context) error {
 		}
 		return err
 	}
+	if resp.Status == models.ActivityStatusOnline {
+		// Analytics must never make a public activity detail request fail.
+		_ = h.TicketingService.RecordActivityView(c.Request.Context(), currentUserID(c), id, c.GetHeader("X-Visitor-Id"))
+	}
 	response.Success(c, resp)
 	return nil
 }
@@ -1041,6 +1046,7 @@ func (h *Ticketing) CreateTicketOrder(c *gin.Context) error {
 		"points_amount":   resp.PointsAmount,
 		"points_discount": resp.PointsDiscount,
 		"actual_price":    resp.ActualPrice,
+		"sales_channel":   resp.SalesChannel,
 	})
 	return nil
 }
@@ -1261,12 +1267,17 @@ func (h *Ticketing) ListOrganizerOrders(c *gin.Context) error {
 		}
 		activityID = value
 	}
+	if _, err := service.NormalizeSalesChannel(c.Query("sales_channel"), false); err != nil {
+		return err
+	}
 	resp, err := h.TicketingService.ListOrganizerOrders(
 		c.Request.Context(),
 		currentUserID(c),
 		activityID,
 		status,
 		c.Query("keyword"),
+		c.Query("sales_channel"),
+		c.Query("withdraw_status"),
 		c.Query("start_date"),
 		c.Query("end_date"),
 		page(c),

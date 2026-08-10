@@ -1098,6 +1098,15 @@ func (s *AdminService) AuditWithdraw(ctx context.Context, id int64, req types.Wi
 		if err := tx.Model(&withdraw).Updates(map[string]any{"status": req.Status, "remark": req.Remark, "updated_at": time.Now()}).Error; err != nil {
 			return err
 		}
+		allocationStatus := models.OrganizerWithdrawAllocationStatusReleased
+		if req.Status == 1 {
+			allocationStatus = models.OrganizerWithdrawAllocationStatusSettled
+		}
+		if err := tx.Model(&models.OrganizerWithdrawAllocation{}).
+			Where("withdraw_id = ? AND status = ?", withdraw.ID, models.OrganizerWithdrawAllocationStatusPending).
+			Updates(map[string]any{"status": allocationStatus, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
 		if req.Status == 1 {
 			return recordPlatformWithdraw(tx, withdraw)
 		}

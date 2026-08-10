@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -74,6 +75,7 @@ type ITicketingService interface {
 	DeleteOrganizerStaff(ctx context.Context, userID, staffID int64) error
 	ListOrganizerOperationLogs(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[models.OrganizerOperationLog], error)
 	GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error)
+	RecordActivityView(ctx context.Context, userID, activityID int64, visitorID string) error
 	SubscribeActivity(ctx context.Context, userID, activityID int64) error
 	UnsubscribeActivity(ctx context.Context, userID, activityID int64) error
 	ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error)
@@ -97,7 +99,7 @@ type ITicketingService interface {
 	ListRefundReasons(ctx context.Context) ([]models.RefundReason, error)
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
 	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
-	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
+	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, salesChannel, withdrawStatus, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
 	GetOrganizerOrderSummary(ctx context.Context, userID int64, startDate, endDate string) (*types.OrganizerOrderSummary, error)
 	GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
@@ -379,6 +381,9 @@ func (s *TicketingService) CreateOrganizerWithdraw(ctx context.Context, userID i
 		if err := tx.Create(&withdraw).Error; err != nil {
 			return err
 		}
+		if err := s.allocateOrganizerWithdrawOrders(ctx, tx, org.ID, withdraw); err != nil {
+			return err
+		}
 		withdrawID = withdraw.ID
 		return nil
 	})
@@ -386,6 +391,101 @@ func (s *TicketingService) CreateOrganizerWithdraw(ctx context.Context, userID i
 		return 0, err
 	}
 	return withdrawID, nil
+}
+
+// allocateOrganizerWithdrawOrders reserves order revenue in FIFO payment order
+// for a newly created withdrawal. Existing withdrawals from before this table
+// was introduced are treated as an opaque FIFO reserve, so they cannot be
+// accidentally allocated again.
+func (s *TicketingService) allocateOrganizerWithdrawOrders(ctx context.Context, tx *gorm.DB, organizerID int64, withdraw models.OrganizerWithdraw) error {
+	type orderRow struct {
+		ID          int64
+		OrderNo     string
+		ActivityID  int64
+		ActualPrice int64
+	}
+	var orders []orderRow
+	if err := tx.WithContext(ctx).Table("ticket_orders o").
+		Select("o.id, o.order_no, o.activity_id, o.actual_price").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND o.status IN ? AND o.actual_price > 0", organizerID, []int8{
+			models.TicketOrderStatusUsable,
+			models.TicketOrderStatusUsed,
+			models.TicketOrderStatusRefundReject,
+		}).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("o.pay_time ASC, o.id ASC").Find(&orders).Error; err != nil {
+		return err
+	}
+
+	var allocationRows []struct {
+		OrderID int64
+		Amount  int64
+	}
+	if err := tx.WithContext(ctx).Model(&models.OrganizerWithdrawAllocation{}).
+		Select("order_id, COALESCE(SUM(amount), 0) AS amount").
+		Where("organizer_id = ? AND status IN ?", organizerID, []int8{
+			models.OrganizerWithdrawAllocationStatusPending,
+			models.OrganizerWithdrawAllocationStatusSettled,
+		}).
+		Group("order_id").Scan(&allocationRows).Error; err != nil {
+		return err
+	}
+	allocated := make(map[int64]int64, len(allocationRows))
+	for _, row := range allocationRows {
+		allocated[row.OrderID] = row.Amount
+	}
+
+	var legacyReserved int64
+	if err := tx.WithContext(ctx).Table("organizer_withdraws w").
+		Select("COALESCE(SUM(w.amount), 0)").
+		Where("w.organizer_id = ? AND w.status IN ? AND w.id <> ?", organizerID, []int8{0, 1}, withdraw.ID).
+		Where("NOT EXISTS (SELECT 1 FROM organizer_withdraw_allocations owa WHERE owa.withdraw_id = w.id)").
+		Scan(&legacyReserved).Error; err != nil {
+		return err
+	}
+
+	remaining := withdraw.Amount
+	allocations := make([]models.OrganizerWithdrawAllocation, 0)
+	for _, order := range orders {
+		available := order.ActualPrice - allocated[order.ID]
+		if available <= 0 {
+			continue
+		}
+		if legacyReserved > 0 {
+			consumed := minInt64(available, legacyReserved)
+			available -= consumed
+			legacyReserved -= consumed
+		}
+		if available <= 0 {
+			continue
+		}
+		amount := minInt64(available, remaining)
+		allocations = append(allocations, models.OrganizerWithdrawAllocation{
+			WithdrawID:  withdraw.ID,
+			OrganizerID: organizerID,
+			OrderID:     order.ID,
+			OrderNo:     order.OrderNo,
+			ActivityID:  order.ActivityID,
+			Amount:      amount,
+			Status:      models.OrganizerWithdrawAllocationStatusPending,
+		})
+		remaining -= amount
+		if remaining == 0 {
+			break
+		}
+	}
+	if remaining > 0 {
+		return errors.New("可分配订单资金不足，请刷新可提现金额后重试")
+	}
+	return tx.WithContext(ctx).Create(&allocations).Error
+}
+
+func minInt64(left, right int64) int64 {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func (s *TicketingService) ListOrganizerCollections(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.ActivityCollectionItem], error) {
@@ -1823,6 +1923,66 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	return resp, nil
 }
 
+// RecordActivityView records a successful public activity-detail load. Logged
+// in users are naturally deduplicated; guests are deduplicated by a hashed
+// client-generated visitor ID and never persist the raw identifier.
+func (s *TicketingService) RecordActivityView(ctx context.Context, userID, activityID int64, visitorID string) error {
+	if activityID <= 0 {
+		return nil
+	}
+	now := time.Now()
+	statDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	visitorKey := activityVisitorKey(userID, visitorID)
+
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		stat := models.ActivityDailyStat{ActivityID: activityID, StatDate: statDate, ViewCount: 1}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "activity_id"}, {Name: "stat_date"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"view_count": gorm.Expr("view_count + ?", 1),
+				"updated_at": now,
+			}),
+		}).Create(&stat).Error; err != nil {
+			return err
+		}
+		if visitorKey == "" {
+			return nil
+		}
+
+		visitor := models.ActivityDailyVisitor{
+			ActivityID: activityID,
+			StatDate:   statDate,
+			VisitorKey: visitorKey,
+			UserID:     userID,
+		}
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&visitor)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		return tx.Model(&models.ActivityDailyStat{}).
+			Where("activity_id = ? AND stat_date = ?", activityID, statDate).
+			Updates(map[string]any{
+				"visitor_count": gorm.Expr("visitor_count + ?", 1),
+				"updated_at":    now,
+			}).Error
+	})
+}
+
+func activityVisitorKey(userID int64, visitorID string) string {
+	if userID > 0 {
+		return fmt.Sprintf("u:%d", userID)
+	}
+	visitorID = strings.TrimSpace(visitorID)
+	if visitorID == "" || len(visitorID) > 256 {
+		return ""
+	}
+	hash := sha256.Sum256([]byte(visitorID))
+	return "g:" + hex.EncodeToString(hash[:])
+}
+
 func (s *TicketingService) SubscribeActivity(ctx context.Context, userID, activityID int64) error {
 	var count int64
 	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ?", activityID).Count(&count).Error; err != nil {
@@ -1978,7 +2138,7 @@ func (s *TicketingService) GetActivityStatistics(ctx context.Context, userID, ac
 	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
 		Where("activity_id = ? AND status IN ?", activityID, paidStatuses).
 		Select("COALESCE(SUM(quantity),0), COALESCE(SUM(actual_price),0), COUNT(DISTINCT user_id), COUNT(*)").
-		Row().Scan(&resp.TicketCount, &resp.GrossAmount, &resp.BuyerCount, new(int64)); err != nil {
+		Row().Scan(&resp.TicketCount, &resp.GrossAmount, &resp.BuyerCount, &resp.PaidOrderCount); err != nil {
 		return nil, err
 	}
 	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
@@ -1997,6 +2157,22 @@ func (s *TicketingService) GetActivityStatistics(ctx context.Context, userID, ac
 		resp.AverageTicketPrice = resp.GrossAmount / resp.TicketCount
 		resp.VerifyRate = float64(resp.VerifiedCount) / float64(resp.TicketCount)
 	}
+	traffic, err := s.loadActivityTrafficStats(ctx, []int64{activityID}, time.Time{}, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	resp.ViewCount = traffic[activityID].ViewCount
+	resp.VisitorCount = traffic[activityID].VisitorCount
+	if resp.VisitorCount > 0 {
+		resp.ConversionRate = float64(resp.PaidOrderCount) / float64(resp.VisitorCount)
+	}
+	withdraws, err := s.loadActivityWithdrawAmounts(ctx, []int64{activityID})
+	if err != nil {
+		return nil, err
+	}
+	resp.PendingWithdrawAmount = withdraws[activityID].PendingAmount
+	resp.WithdrawnAmount = withdraws[activityID].SettledAmount
+	resp.AvailableWithdrawAmount = maxInt64(resp.NetAmount-resp.PendingWithdrawAmount-resp.WithdrawnAmount, 0)
 	return resp, nil
 }
 
@@ -2020,7 +2196,153 @@ func (s *TicketingService) GetActivityDailyStatistics(ctx context.Context, userI
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	return &types.PageResponse[types.ActivityDailyStatisticsItem]{List: rows, Total: int64(len(rows))}, nil
+
+	byDate := make(map[string]*types.ActivityDailyStatisticsItem, len(rows))
+	for i := range rows {
+		byDate[rows[i].Date] = &rows[i]
+	}
+	var trafficRows []struct {
+		StatDate     time.Time
+		ViewCount    int64
+		VisitorCount int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.ActivityDailyStat{}).
+		Select("stat_date, view_count, visitor_count").
+		Where("activity_id = ? AND stat_date >= ?", activityID, start).
+		Order("stat_date ASC").Scan(&trafficRows).Error; err != nil {
+		return nil, err
+	}
+	for _, traffic := range trafficRows {
+		date := traffic.StatDate.Format("2006-01-02")
+		item, ok := byDate[date]
+		if !ok {
+			item = &types.ActivityDailyStatisticsItem{Date: date}
+			byDate[date] = item
+		}
+		item.ViewCount = traffic.ViewCount
+		item.VisitorCount = traffic.VisitorCount
+	}
+	merged := make([]types.ActivityDailyStatisticsItem, 0, len(byDate))
+	for _, item := range byDate {
+		merged = append(merged, *item)
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Date < merged[j].Date })
+	return &types.PageResponse[types.ActivityDailyStatisticsItem]{List: merged, Total: int64(len(merged))}, nil
+}
+
+type activityTrafficAmounts struct {
+	ViewCount    int64
+	VisitorCount int64
+}
+
+func (s *TicketingService) loadActivityTrafficStats(ctx context.Context, activityIDs []int64, start, end time.Time) (map[int64]activityTrafficAmounts, error) {
+	result := make(map[int64]activityTrafficAmounts, len(activityIDs))
+	if len(activityIDs) == 0 {
+		return result, nil
+	}
+	statQuery := s.DB.WithContext(ctx).Model(&models.ActivityDailyStat{}).
+		Select("activity_id, COALESCE(SUM(view_count), 0) AS view_count").
+		Where("activity_id IN ?", activityIDs)
+	visitorQuery := s.DB.WithContext(ctx).Model(&models.ActivityDailyVisitor{}).
+		Select("activity_id, COUNT(DISTINCT visitor_key) AS visitor_count").
+		Where("activity_id IN ?", activityIDs)
+	if !start.IsZero() {
+		statQuery = statQuery.Where("stat_date >= ?", start)
+		visitorQuery = visitorQuery.Where("stat_date >= ?", start)
+	}
+	if !end.IsZero() {
+		statQuery = statQuery.Where("stat_date < ?", end)
+		visitorQuery = visitorQuery.Where("stat_date < ?", end)
+	}
+	var views []struct {
+		ActivityID int64
+		ViewCount  int64
+	}
+	if err := statQuery.Group("activity_id").Scan(&views).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range views {
+		amounts := result[row.ActivityID]
+		amounts.ViewCount = row.ViewCount
+		result[row.ActivityID] = amounts
+	}
+	var visitors []struct {
+		ActivityID   int64
+		VisitorCount int64
+	}
+	if err := visitorQuery.Group("activity_id").Scan(&visitors).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range visitors {
+		amounts := result[row.ActivityID]
+		amounts.VisitorCount = row.VisitorCount
+		result[row.ActivityID] = amounts
+	}
+	return result, nil
+}
+
+func (s *TicketingService) loadOrganizerTrafficTotals(ctx context.Context, organizerID int64, start, end time.Time) (activityTrafficAmounts, error) {
+	result := activityTrafficAmounts{}
+	statQuery := s.DB.WithContext(ctx).Table("activity_daily_stats ads").
+		Joins("JOIN activities a ON a.id = ads.activity_id").
+		Where("a.organizer_id = ?", organizerID)
+	visitorQuery := s.DB.WithContext(ctx).Table("activity_daily_visitors adv").
+		Joins("JOIN activities a ON a.id = adv.activity_id").
+		Where("a.organizer_id = ?", organizerID)
+	if !start.IsZero() {
+		statQuery = statQuery.Where("ads.stat_date >= ?", start)
+		visitorQuery = visitorQuery.Where("adv.stat_date >= ?", start)
+	}
+	if !end.IsZero() {
+		statQuery = statQuery.Where("ads.stat_date < ?", end)
+		visitorQuery = visitorQuery.Where("adv.stat_date < ?", end)
+	}
+	if err := statQuery.Select("COALESCE(SUM(ads.view_count), 0)").Scan(&result.ViewCount).Error; err != nil {
+		return result, err
+	}
+	if err := visitorQuery.Select("COUNT(DISTINCT adv.visitor_key)").Scan(&result.VisitorCount).Error; err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+type activityWithdrawAmounts struct {
+	PendingAmount int64
+	SettledAmount int64
+}
+
+func (s *TicketingService) loadActivityWithdrawAmounts(ctx context.Context, activityIDs []int64) (map[int64]activityWithdrawAmounts, error) {
+	result := make(map[int64]activityWithdrawAmounts, len(activityIDs))
+	if len(activityIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ActivityID    int64
+		PendingAmount int64
+		SettledAmount int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdrawAllocation{}).
+		Select(`activity_id,
+			COALESCE(SUM(CASE WHEN status = 0 THEN amount ELSE 0 END), 0) AS pending_amount,
+			COALESCE(SUM(CASE WHEN status = 1 THEN amount ELSE 0 END), 0) AS settled_amount`).
+		Where("activity_id IN ? AND status IN ?", activityIDs, []int8{
+			models.OrganizerWithdrawAllocationStatusPending,
+			models.OrganizerWithdrawAllocationStatusSettled,
+		}).
+		Group("activity_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ActivityID] = activityWithdrawAmounts{PendingAmount: row.PendingAmount, SettledAmount: row.SettledAmount}
+	}
+	return result, nil
+}
+
+func maxInt64(value, min int64) int64 {
+	if value < min {
+		return min
+	}
+	return value
 }
 
 func (s *TicketingService) GetTicketSpecs(ctx context.Context, activityID int64) ([]models.TicketSpec, error) {
@@ -2068,6 +2390,10 @@ func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID 
 }
 
 func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error) {
+	salesChannel, err := NormalizeSalesChannel(req.SalesChannel, true)
+	if err != nil {
+		return nil, err
+	}
 	orderNo := "T" + time.Now().Format("20060102150405") + randomHex(4)
 	expireTime := time.Now().Add(15 * time.Minute)
 	result := &types.CreateTicketOrderResponse{OrderNo: orderNo}
@@ -2184,6 +2510,7 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 			PointsAmount:   pointsAmount,
 			PointsDiscount: pointsDiscount,
 			PayMethod:      payMethod,
+			SalesChannel:   salesChannel,
 			PayTime:        payTime,
 			BuyerName:      buyerName,
 			BuyerIDCard:    buyerIDCard,
@@ -2208,6 +2535,7 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		result.PointsAmount = pointsAmount
 		result.PointsDiscount = pointsDiscount
 		result.ActualPrice = actualPrice
+		result.SalesChannel = salesChannel
 		result.Status = orderStatus
 		result.QRCode = qrContent
 		result.QRCodeURL = qrURL
@@ -2745,7 +3073,7 @@ func (s *TicketingService) ListUserRefunds(ctx context.Context, userID int64, st
 	return &types.PageResponse[types.UserRefundListItem]{List: list, Total: total}, nil
 }
 
-func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error) {
+func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, salesChannel, withdrawStatus, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -2761,6 +3089,17 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 	}
 	if status != nil {
 		query = query.Where("o.status = ?", *status)
+	}
+	salesChannel, err = NormalizeSalesChannel(salesChannel, false)
+	if err != nil {
+		return nil, err
+	}
+	if salesChannel != "" {
+		query = query.Where("o.sales_channel = ?", salesChannel)
+	}
+	query, err = applyOrganizerOrderWithdrawStatusFilter(query, strings.TrimSpace(withdrawStatus))
+	if err != nil {
+		return nil, err
 	}
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
@@ -2797,6 +3136,7 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 		return nil, err
 	}
 	var rows []struct {
+		ID             int64
 		OrderNo        string
 		Status         int8
 		TotalPrice     int64
@@ -2815,11 +3155,13 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 		TicketSpecID   int64
 		TicketSpecName string
 		PayMethod      string
+		SalesChannel   string
 		PayTime        *time.Time
 		CreatedAt      time.Time
 		ExpireTime     time.Time
 	}
 	if err := query.Select(`
+			o.id,
 			o.order_no,
 			o.status,
 			o.total_price,
@@ -2838,6 +3180,7 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 			o.ticket_spec_id,
 			ts.name AS ticket_spec_name,
 			o.pay_method,
+			o.sales_channel,
 			o.pay_time,
 			o.created_at,
 			o.expire_time
@@ -2850,15 +3193,22 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 	}
 
 	orderNos := make([]string, 0, len(rows))
+	orderIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
 		orderNos = append(orderNos, row.OrderNo)
+		orderIDs = append(orderIDs, row.ID)
 	}
 	viewersByOrderNo, err := s.orderViewersByOrderNo(ctx, orderNos)
 	if err != nil {
 		return nil, err
 	}
+	withdrawAmounts, err := s.loadOrderWithdrawAmounts(ctx, orderIDs)
+	if err != nil {
+		return nil, err
+	}
 	list := make([]types.OrganizerOrderListItem, 0, len(rows))
 	for _, row := range rows {
+		withdraw := withdrawAmounts[row.ID]
 		list = append(list, types.OrganizerOrderListItem{
 			OrderNo:        row.OrderNo,
 			Status:         row.Status,
@@ -2879,12 +3229,90 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 			TicketSpecID:   row.TicketSpecID,
 			TicketSpecName: row.TicketSpecName,
 			PayMethod:      row.PayMethod,
+			SalesChannel:   row.SalesChannel,
 			PayTime:        row.PayTime,
 			CreatedAt:      row.CreatedAt,
 			ExpireTime:     row.ExpireTime,
+			WithdrawStatus: withdrawStatusForOrder(row.Status, withdraw),
+			WithdrawAmount: withdraw.PendingAmount + withdraw.SettledAmount,
 		})
 	}
 	return &types.PageResponse[types.OrganizerOrderListItem]{List: list, Total: total}, nil
+}
+
+type orderWithdrawAmounts struct {
+	PendingAmount int64
+	SettledAmount int64
+}
+
+func (s *TicketingService) loadOrderWithdrawAmounts(ctx context.Context, orderIDs []int64) (map[int64]orderWithdrawAmounts, error) {
+	result := make(map[int64]orderWithdrawAmounts, len(orderIDs))
+	if len(orderIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		OrderID       int64
+		PendingAmount int64
+		SettledAmount int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.OrganizerWithdrawAllocation{}).
+		Select(`order_id,
+			COALESCE(SUM(CASE WHEN status = 0 THEN amount ELSE 0 END), 0) AS pending_amount,
+			COALESCE(SUM(CASE WHEN status = 1 THEN amount ELSE 0 END), 0) AS settled_amount`).
+		Where("order_id IN ? AND status IN ?", orderIDs, []int8{
+			models.OrganizerWithdrawAllocationStatusPending,
+			models.OrganizerWithdrawAllocationStatusSettled,
+		}).
+		Group("order_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.OrderID] = orderWithdrawAmounts{PendingAmount: row.PendingAmount, SettledAmount: row.SettledAmount}
+	}
+	return result, nil
+}
+
+func withdrawStatusForOrder(orderStatus int8, amounts orderWithdrawAmounts) string {
+	if amounts.PendingAmount > 0 {
+		return "pending_withdraw"
+	}
+	if amounts.SettledAmount > 0 {
+		return "withdrawn"
+	}
+	switch orderStatus {
+	case models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefundReject:
+		return "available"
+	default:
+		return "unavailable"
+	}
+}
+
+func applyOrganizerOrderWithdrawStatusFilter(query *gorm.DB, status string) (*gorm.DB, error) {
+	switch status {
+	case "":
+		return query, nil
+	case "pending_withdraw":
+		return query.Where(`EXISTS (
+			SELECT 1 FROM organizer_withdraw_allocations owa
+			WHERE owa.order_id = o.id AND owa.status = ?
+		)`, models.OrganizerWithdrawAllocationStatusPending), nil
+	case "withdrawn":
+		return query.Where(`EXISTS (
+			SELECT 1 FROM organizer_withdraw_allocations owa
+			WHERE owa.order_id = o.id AND owa.status = ?
+		)`, models.OrganizerWithdrawAllocationStatusSettled), nil
+	case "available":
+		return query.Where("o.status IN ?", []int8{
+			models.TicketOrderStatusUsable,
+			models.TicketOrderStatusUsed,
+			models.TicketOrderStatusRefundReject,
+		}).Where(`NOT EXISTS (
+			SELECT 1 FROM organizer_withdraw_allocations owa
+			WHERE owa.order_id = o.id AND owa.status IN (?, ?)
+		)`, models.OrganizerWithdrawAllocationStatusPending, models.OrganizerWithdrawAllocationStatusSettled), nil
+	default:
+		return nil, errors.New("withdraw_status 仅支持 available、pending_withdraw、withdrawn")
+	}
 }
 
 // GetOrganizerOrderSummary aggregates every successful order owned by the
@@ -2939,6 +3367,22 @@ func (s *TicketingService) GetOrganizerOrderSummary(ctx context.Context, userID 
 	if resp.OrderCount > 0 {
 		resp.AverageOrderAmount = resp.TotalAmount / resp.OrderCount
 	}
+	traffic, err := s.loadOrganizerTrafficTotals(ctx, org.ID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	resp.ViewCount = traffic.ViewCount
+	resp.VisitorCount = traffic.VisitorCount
+	paidOrderCounts, err := s.loadActivityPaidOrderCounts(ctx, org.ID, nil, start, end)
+	if err != nil {
+		return nil, err
+	}
+	for _, count := range paidOrderCounts {
+		resp.PaidOrderCount += count
+	}
+	if resp.VisitorCount > 0 {
+		resp.ConversionRate = float64(resp.PaidOrderCount) / float64(resp.VisitorCount)
+	}
 
 	if err := base().
 		Select("o.activity_id, a.name AS activity_name, COUNT(o.id) AS order_count, COALESCE(SUM(o.quantity), 0) AS ticket_count, COALESCE(SUM(o.actual_price), 0) AS total_amount").
@@ -2947,7 +3391,67 @@ func (s *TicketingService) GetOrganizerOrderSummary(ctx context.Context, userID 
 		Scan(&resp.ActivityRanks).Error; err != nil {
 		return nil, err
 	}
+	rankActivityIDs := make([]int64, 0, len(resp.ActivityRanks))
+	for i := range resp.ActivityRanks {
+		rankActivityIDs = append(rankActivityIDs, resp.ActivityRanks[i].ActivityID)
+	}
+	activityTraffic, err := s.loadActivityTrafficStats(ctx, rankActivityIDs, start, end)
+	if err != nil {
+		return nil, err
+	}
+	activityWithdraws, err := s.loadActivityWithdrawAmounts(ctx, rankActivityIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range resp.ActivityRanks {
+		rank := &resp.ActivityRanks[i]
+		traffic := activityTraffic[rank.ActivityID]
+		withdraw := activityWithdraws[rank.ActivityID]
+		rank.ViewCount = traffic.ViewCount
+		rank.VisitorCount = traffic.VisitorCount
+		rank.PaidOrderCount = paidOrderCounts[rank.ActivityID]
+		if rank.VisitorCount > 0 {
+			rank.ConversionRate = float64(rank.PaidOrderCount) / float64(rank.VisitorCount)
+		}
+		rank.PendingWithdrawAmount = withdraw.PendingAmount
+		rank.WithdrawnAmount = withdraw.SettledAmount
+		rank.AvailableWithdrawAmount = maxInt64(rank.TotalAmount-rank.PendingWithdrawAmount-rank.WithdrawnAmount, 0)
+	}
 	return resp, nil
+}
+
+func (s *TicketingService) loadActivityPaidOrderCounts(ctx context.Context, organizerID int64, activityIDs []int64, start, end time.Time) (map[int64]int64, error) {
+	result := make(map[int64]int64, len(activityIDs))
+	query := s.DB.WithContext(ctx).Table("ticket_orders o").
+		Select("o.activity_id, COUNT(o.id) AS order_count").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("a.organizer_id = ? AND o.status IN ?", organizerID, []int8{
+			models.TicketOrderStatusUsable,
+			models.TicketOrderStatusUsed,
+			models.TicketOrderStatusRefunding,
+			models.TicketOrderStatusRefundSuccess,
+			models.TicketOrderStatusRefundReject,
+		})
+	if len(activityIDs) > 0 {
+		query = query.Where("o.activity_id IN ?", activityIDs)
+	}
+	if !start.IsZero() {
+		query = query.Where("o.pay_time >= ?", start)
+	}
+	if !end.IsZero() {
+		query = query.Where("o.pay_time < ?", end)
+	}
+	var rows []struct {
+		ActivityID int64
+		OrderCount int64
+	}
+	if err := query.Group("o.activity_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ActivityID] = row.OrderCount
+	}
+	return result, nil
 }
 
 func (s *TicketingService) GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error) {
@@ -2968,6 +3472,13 @@ func (s *TicketingService) GetOrganizerOrderDetail(ctx context.Context, userID i
 		return nil, err
 	}
 	resp := &types.OrganizerOrderDetailResponse{TicketOrderDetailResponse: *detail, UserID: order.UserID}
+	withdrawAmounts, err := s.loadOrderWithdrawAmounts(ctx, []int64{order.ID})
+	if err != nil {
+		return nil, err
+	}
+	withdraw := withdrawAmounts[order.ID]
+	resp.WithdrawStatus = withdrawStatusForOrder(order.Status, withdraw)
+	resp.WithdrawAmount = withdraw.PendingAmount + withdraw.SettledAmount
 	var user models.Users
 	if err := s.DB.WithContext(ctx).Where("id = ?", order.UserID).First(&user).Error; err == nil {
 		resp.UserName = user.Nickname
@@ -3994,6 +4505,7 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		BuyerName:      order.BuyerName,
 		BuyerIDCard:    order.BuyerIDCard,
 		PayMethod:      order.PayMethod,
+		SalesChannel:   order.SalesChannel,
 		PayTime:        order.PayTime,
 		CreatedAt:      order.CreatedAt,
 		QRCode:         order.QRCode,

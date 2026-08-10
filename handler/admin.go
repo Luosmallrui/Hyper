@@ -1239,8 +1239,11 @@ func (a *Admin) GetOrderList(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(400, err.Error())
 	}
+	if _, err := service.NormalizeSalesChannel(c.Query("sales_channel"), false); err != nil {
+		return response.NewError(400, err.Error())
+	}
 
-	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, refundStatus, keyword)
+	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, refundStatus, keyword, c.Query("sales_channel"))
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}

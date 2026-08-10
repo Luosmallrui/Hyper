@@ -182,6 +182,7 @@ type AdminTicketOrderItem struct {
 	TicketSpecID   int64  `json:"ticket_spec_id"`
 	TicketSpecName string `json:"ticket_spec_name"`
 	PayMethod      string `json:"pay_method"`
+	SalesChannel   string `json:"sales_channel"`
 	PayTime        string `json:"pay_time"`
 	ExpireTime     string `json:"expire_time"`
 	CreatedAt      string `json:"created_at"`
