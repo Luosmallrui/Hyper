@@ -312,6 +312,22 @@ type OrganizerFinanceSummary struct {
 	TodayTicketCount int64 `json:"today_ticket_count"`
 }
 
+type OrganizerOrderSummary struct {
+	TotalAmount        int64                        `json:"total_amount"`
+	OrderCount         int64                        `json:"order_count"`
+	TicketCount        int64                        `json:"ticket_count"`
+	AverageOrderAmount int64                        `json:"average_order_amount"`
+	ActivityRanks      []OrganizerOrderActivityRank `json:"activity_ranks"`
+}
+
+type OrganizerOrderActivityRank struct {
+	ActivityID   int64  `json:"activity_id"`
+	ActivityName string `json:"activity_name"`
+	OrderCount   int64  `json:"order_count"`
+	TicketCount  int64  `json:"ticket_count"`
+	TotalAmount  int64  `json:"total_amount"`
+}
+
 type OrganizerFinanceFlowItem struct {
 	ID          string    `json:"id"`
 	Type        string    `json:"type"`

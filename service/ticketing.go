@@ -98,6 +98,7 @@ type ITicketingService interface {
 	ApplyRefund(ctx context.Context, userID int64, req types.ApplyRefundRequest) (string, error)
 	ListUserRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.UserRefundListItem], error)
 	ListOrganizerOrders(ctx context.Context, userID int64, activityID int64, status *int8, keyword, startDate, endDate string, page, size int) (*types.PageResponse[types.OrganizerOrderListItem], error)
+	GetOrganizerOrderSummary(ctx context.Context, userID int64, startDate, endDate string) (*types.OrganizerOrderSummary, error)
 	GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error)
 	ListOrganizerRefunds(ctx context.Context, userID int64, status *int8, page, size int) (*types.PageResponse[types.OrganizerRefundListItem], error)
 	GetOrganizerRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.OrganizerRefundDetailResponse, error)
@@ -2886,6 +2887,69 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 	return &types.PageResponse[types.OrganizerOrderListItem]{List: list, Total: total}, nil
 }
 
+// GetOrganizerOrderSummary aggregates every successful order owned by the
+// current organizer. It deliberately does not reuse the paginated order list,
+// so dashboard totals stay correct when the organizer has more than one page.
+func (s *TicketingService) GetOrganizerOrderSummary(ctx context.Context, userID int64, startDate, endDate string) (*types.OrganizerOrderSummary, error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+	var start, end time.Time
+	if startDate != "" {
+		start, err = parseDateStart(startDate)
+		if err != nil {
+			return nil, fmt.Errorf("开始日期格式错误")
+		}
+	}
+	if endDate != "" {
+		end, err = parseDateEnd(endDate)
+		if err != nil {
+			return nil, fmt.Errorf("结束日期格式错误")
+		}
+	}
+
+	// "成交" only includes orders that remain paid and usable/used. Refund
+	// states are excluded, so this value describes current completed sales.
+	base := func() *gorm.DB {
+		query := s.DB.WithContext(ctx).Table("ticket_orders o").
+			Joins("JOIN activities a ON a.id = o.activity_id").
+			Where("a.organizer_id = ? AND o.status IN ?", org.ID, []int8{
+				models.TicketOrderStatusUsable,
+				models.TicketOrderStatusUsed,
+			})
+		if !start.IsZero() {
+			query = query.Where("o.pay_time >= ?", start)
+		}
+		if !end.IsZero() {
+			query = query.Where("o.pay_time < ?", end)
+		}
+		return query
+	}
+
+	resp := &types.OrganizerOrderSummary{ActivityRanks: make([]types.OrganizerOrderActivityRank, 0)}
+	if err := base().
+		Select("COALESCE(SUM(o.actual_price), 0) AS total_amount, COUNT(o.id) AS order_count, COALESCE(SUM(o.quantity), 0) AS ticket_count").
+		Scan(resp).Error; err != nil {
+		return nil, err
+	}
+	if resp.OrderCount > 0 {
+		resp.AverageOrderAmount = resp.TotalAmount / resp.OrderCount
+	}
+
+	if err := base().
+		Select("o.activity_id, a.name AS activity_name, COUNT(o.id) AS order_count, COALESCE(SUM(o.quantity), 0) AS ticket_count, COALESCE(SUM(o.actual_price), 0) AS total_amount").
+		Group("o.activity_id, a.name").
+		Order("total_amount DESC, order_count DESC, o.activity_id DESC").
+		Scan(&resp.ActivityRanks).Error; err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (s *TicketingService) GetOrganizerOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
@@ -4234,7 +4298,7 @@ func (s *TicketingService) fillOrganizerLevelInfo(ctx context.Context, organizer
 	resp.ServiceFeeRate = feeRate
 	resp.CompletedActivityCount = completed
 	resp.NextLevelRequiredCount = next
-	return s.DB.WithContext(ctx).Model(&models.Organizer{}).Where("id = ?").Updates(map[string]any{
+	return s.DB.WithContext(ctx).Model(&models.Organizer{}).Where("id = ?", organizerID).Updates(map[string]any{
 		"level":            resp.Level,
 		"service_fee_rate": feeRate,
 		"updated_at":       time.Now(),
