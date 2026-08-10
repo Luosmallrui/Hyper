@@ -6,51 +6,9 @@
 
 ## 1. 地图 markers 优惠标签筛选
 
-接口：
+> 本节固定 `1/2/4` 标签位方案已被可配置标签体系替代，最新前端契约见 [content_tag_management_api_20260807.md](content_tag_management_api_20260807.md)。
 
-```http
-GET /api/v1/map/markers?source=all&tag_ids=1,4
-```
-
-`tags` 与 `tag_ids` 均可使用，标签值约定：
-
-| 值 | 名称 |
-|---|---|
-| `1` | 积分立减 |
-| `2` | 买单立减 |
-| `4` | 新人优惠 |
-
-多个值按“同时满足”过滤。例如 `tag_ids=1,4` 只返回同时支持积分立减和新人优惠的活动。未传标签参数时不做标签过滤。
-
-地图 marker 新增/恢复真实字段：
-
-```json
-{
-  "id": "activity-15",
-  "tag_ids": [1, 4],
-  "discount_tags": ["积分立减", "新人优惠"]
-}
-```
-
-活动创建或编辑时可通过既有接口写入标签：
-
-```http
-POST /api/v1/activity/create
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
-
-```json
-{
-  "activity_id": 15,
-  "step": 1,
-  "tag_ids": [1, 4]
-}
-```
-
-- `tag_ids` 不传：不修改已有标签。
-- `tag_ids: []`：清空标签。
-- 传入非 `1`、`2`、`4` 的值会返回参数错误。
+标签已升级为后台可配置模型，标签定义、管理端绑定、用户侧筛选和迁移 SQL 均以 [content_tag_management_api_20260807.md](content_tag_management_api_20260807.md) 为唯一准则。本历史文档中的固定标签值、活动创建标签字段和 `activities.discount_tags` SQL 均不再适用。
 
 ## 2. 旧商家详情与活动详情的 owner user_id
 
@@ -85,8 +43,8 @@ GET /api/v1/activity/:id
 {
   "id": 15,
   "user_id": 35,
-  "tag_ids": [1],
-  "discount_tags": ["积分立减"],
+	"tag_ids": [101],
+	"tags": [{ "id": 101, "name": "积分立减" }],
   "organizer": {
     "id": 7,
     "user_id": 35
@@ -145,22 +103,4 @@ GET    /api/v1/note/my/collects?page=1&pagesize=20
 
 ## 部署 SQL
 
-生产库已有 `activities` 表时，先检查字段，再执行一次迁移：
-
-```sql
-SHOW COLUMNS FROM activities LIKE 'discount_tags';
-
-ALTER TABLE activities
-  ADD COLUMN discount_tags INT NOT NULL DEFAULT 0
-  COMMENT '优惠标签位: 1积分立减 2买单立减 4新人优惠'
-  AFTER type;
-```
-
-可按实际需要为已有活动补充测试标签：
-
-```sql
--- 同时支持积分立减和新人优惠：1 | 4 = 5
-UPDATE activities SET discount_tags = 5 WHERE id = 15;
-```
-
-旧活动默认值为 `0`，不会命中任何带 `tag_ids` 的筛选条件；这符合“未配置优惠标签即不展示对应优惠”的口径。
+标签关联表的部署 SQL 及数据迁移步骤见 [content_tag_management_api_20260807.md](content_tag_management_api_20260807.md#7-数据库迁移)。

@@ -41,6 +41,23 @@ CREATE TABLE IF NOT EXISTS `user_follow`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='用户关注关系表';
 
+-- 内容关注与用户关注分离：activity / venue / party。
+CREATE TABLE IF NOT EXISTS `content_follows`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`     bigint unsigned NOT NULL COMMENT '关注用户ID',
+    `target_type` varchar(20)     NOT NULL COMMENT 'activity/venue/party',
+    `target_id`   bigint unsigned NOT NULL COMMENT '活动ID、场地主办方ID或旧派对ID',
+    `created_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`  datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_content_follow` (`user_id`, `target_type`, `target_id`) USING BTREE,
+    KEY `idx_content_follow_target` (`target_type`, `target_id`) USING BTREE,
+    KEY `idx_content_follow_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='活动场地派对关注关系表';
+
 CREATE TABLE IF NOT EXISTS `user_stats`
 (
     `id`               bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -220,7 +237,6 @@ CREATE TABLE IF NOT EXISTS `activities`
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '活动ID',
     `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
     `type`              varchar(20)     NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地',
-	`discount_tags`     int             NOT NULL DEFAULT 0 COMMENT '优惠标签位: 1积分立减 2买单立减 4新人优惠',
     `name`              varchar(80)     NOT NULL COMMENT '活动名称',
     `share_title`       varchar(20)     NOT NULL DEFAULT '' COMMENT '分享标题',
     `start_time`        datetime        NULL COMMENT '开始时间',
@@ -252,7 +268,6 @@ CREATE TABLE IF NOT EXISTS `activities`
 -- 如已有 activities 表，执行以下 ALTER 添加活动类型字段:
 -- ALTER TABLE `activities` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地' AFTER `organizer_id`;
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_type` (`type`);
--- ALTER TABLE `activities` ADD COLUMN `discount_tags` int NOT NULL DEFAULT 0 COMMENT '优惠标签位: 1积分立减 2买单立减 4新人优惠' AFTER `type`;
 
 CREATE TABLE IF NOT EXISTS `ticket_specs`
 (
@@ -584,6 +599,19 @@ CREATE TABLE IF NOT EXISTS `admin_categories`
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_admin_category_type` (`type`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='后台分类配置表';
+
+-- type=coupon_tag 的 admin_categories 为平台配置的优惠标签定义。
+CREATE TABLE IF NOT EXISTS `content_tag_relations`
+(
+    `id`          bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '关联ID',
+    `tag_id`      bigint unsigned NOT NULL COMMENT 'admin_categories.ID，且类型为coupon_tag',
+    `target_type` varchar(20)     NOT NULL COMMENT 'activity/venue/party',
+    `target_id`   bigint unsigned NOT NULL COMMENT '活动ID、主办方场地ID或旧派对ID',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_content_tag_target` (`tag_id`, `target_type`, `target_id`) USING BTREE,
+    KEY `idx_content_tag_target` (`target_type`, `target_id`) USING BTREE,
+    KEY `idx_content_tag_tag` (`tag_id`) USING BTREE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='内容优惠标签关联表';
 
 CREATE TABLE IF NOT EXISTS `activity_collections`
 (

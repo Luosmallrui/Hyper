@@ -70,6 +70,7 @@ type IAdminService interface {
 	ListCategories(ctx context.Context, page, pageSize int, categoryType string) (*types.AdminPageResponse[models.AdminCategory], error)
 	SaveCategory(ctx context.Context, id int64, req types.AdminCategoryRequest) (int64, error)
 	DeleteCategory(ctx context.Context, id int64) error
+	SaveContentTags(ctx context.Context, targetType string, targetID int64, tagIDs []int64) error
 	ListUserRecords(ctx context.Context, userID int64, recordType string, page, pageSize int) (*types.AdminPageResponse[map[string]any], error)
 	ListViewers(ctx context.Context, page, pageSize int, keyword string) (*types.AdminPageResponse[map[string]any], error)
 	ListActivityCollections(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[types.ActivityCollectionItem], error)
@@ -243,6 +244,12 @@ func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64
 		detail.UserAvatar = user.Avatar
 		detail.UserMobile = user.Mobile
 	}
+	tagMap, err := dao.LoadContentTags(ctx, s.DB, models.ContentTagTargetVenue, []int64{organizerID}, true)
+	if err != nil {
+		return nil, err
+	}
+	detail.TagIDs = types.ContentTagIDs(tagMap[organizerID])
+	detail.Tags = types.BuildContentTagItems(tagMap[organizerID])
 	return detail, nil
 }
 
@@ -444,6 +451,12 @@ func (s *AdminService) GetPartyDetail(ctx context.Context, partyID int64) (*type
 		detail.UserAvatar = user.Avatar
 		detail.UserMobile = user.Mobile
 	}
+	tagMap, err := dao.LoadContentTags(ctx, s.DB, models.ContentTagTargetParty, []int64{partyID}, true)
+	if err != nil {
+		return nil, err
+	}
+	detail.TagIDs = types.ContentTagIDs(tagMap[partyID])
+	detail.Tags = types.BuildContentTagItems(tagMap[partyID])
 
 	return detail, nil
 }
@@ -605,7 +618,55 @@ func (s *AdminService) GetActivityDetail(ctx context.Context, activityID int64) 
 	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activity.ID).Order("id ASC").Find(&detail.TicketSpecs).Error; err != nil {
 		return nil, err
 	}
+	targetType, targetID := models.ContentTagTargetActivity, activityID
+	if activity.Type == models.ActivityTypeVenue {
+		targetType, targetID = models.ContentTagTargetVenue, activity.OrganizerID
+	}
+	tagMap, err := dao.LoadContentTags(ctx, s.DB, targetType, []int64{targetID}, true)
+	if err != nil {
+		return nil, err
+	}
+	detail.TagIDs = types.ContentTagIDs(tagMap[targetID])
+	detail.Tags = types.BuildContentTagItems(tagMap[targetID])
 	return detail, nil
+}
+
+func (s *AdminService) SaveContentTags(ctx context.Context, targetType string, targetID int64, tagIDs []int64) error {
+	if targetID <= 0 {
+		return errors.New("标签绑定目标无效")
+	}
+	var count int64
+	switch targetType {
+	case models.ContentTagTargetActivity:
+		var activity models.Activity
+		if err := s.DB.WithContext(ctx).Where("id = ?", targetID).First(&activity).Error; err != nil {
+			return err
+		}
+		if activity.Type == models.ActivityTypeVenue {
+			targetType = models.ContentTagTargetVenue
+			targetID = activity.OrganizerID
+			count = 1
+		} else {
+			count = 1
+		}
+	case models.ContentTagTargetVenue:
+		if err := s.DB.WithContext(ctx).Table("organizers o").
+			Where("o.id = ?", targetID).
+			Where("EXISTS (SELECT 1 FROM activities a WHERE a.organizer_id = o.id AND a.type = ?)", models.ActivityTypeVenue).
+			Count(&count).Error; err != nil {
+			return err
+		}
+	case models.ContentTagTargetParty:
+		if err := s.DB.WithContext(ctx).Model(&models.Merchant{}).Where("id = ?", targetID).Count(&count).Error; err != nil {
+			return err
+		}
+	default:
+		return errors.New("标签绑定目标类型无效")
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return dao.ReplaceContentTags(ctx, s.DB, targetType, targetID, tagIDs)
 }
 
 func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req types.AdminAuditActivityRequest) error {

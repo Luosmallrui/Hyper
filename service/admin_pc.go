@@ -290,7 +290,7 @@ func adminAuditActionName(action string) string {
 		"admin.bank_account.approve": "审核通过收款账户", "admin.bank_account.reject": "驳回收款账户", "admin.points.adjust": "人工调整积分", "admin.permission.denied": "权限拒绝",
 		"admin.comment.moderate": "审核动态评论",
 		"admin.profile.update":   "更新个人资料", "admin.activity_collection.create": "新增活动合集", "admin.activity_collection.update": "更新活动合集", "admin.activity_collection.delete": "删除活动合集",
-		"admin.party.update": "更新派对或场地状态", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
+		"admin.party.update": "更新派对或场地状态", "admin.party.tags.update": "更新派对标签", "admin.venue.tags.update": "更新场地标签", "admin.activity.tags.update": "更新活动标签", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
 		"admin.message.create": "发布平台消息", "admin.banner.create": "新增轮播图", "admin.banner.update": "更新轮播图", "admin.banner.delete": "删除轮播图",
 	}
 	if name, ok := names[action]; ok {
@@ -300,7 +300,7 @@ func adminAuditActionName(action string) string {
 }
 
 func adminAuditResourceName(resourceType, resourceID string) string {
-	base := map[string]string{"settings": "系统配置", "category": "分类", "role": "角色", "admin": "管理员", "withdraw": "提现申请", "refund": "退款申请", "organizer": "入驻申请", "activity": "活动", "points": "积分账户", "permission": "权限校验"}[resourceType]
+	base := map[string]string{"settings": "系统配置", "category": "分类", "role": "角色", "admin": "管理员", "withdraw": "提现申请", "refund": "退款申请", "organizer": "入驻申请", "venue": "场地", "party": "派对", "activity": "活动", "points": "积分账户", "permission": "权限校验"}[resourceType]
 	if base == "" {
 		base = resourceType
 	}
@@ -399,7 +399,7 @@ func RequiredAdminPermission(method, path string) string {
 		return "admin.system"
 	case strings.HasPrefix(path, "/v1/admin/users"), strings.HasPrefix(path, "/v1/admin/viewers"):
 		return "admin.users"
-	case strings.HasPrefix(path, "/v1/admin/organizers"):
+	case strings.HasPrefix(path, "/v1/admin/organizers"), strings.HasPrefix(path, "/v1/admin/venues"):
 		return "admin.organizers"
 	case strings.HasPrefix(path, "/v1/admin/activities"), strings.HasPrefix(path, "/v1/admin/parties"), strings.HasPrefix(path, "/v1/admin/activity-collections"):
 		return "admin.activities"
@@ -547,6 +547,19 @@ func (s *AdminService) SaveCategory(ctx context.Context, id int64, req types.Adm
 		}
 		req.Value = value
 	}
+	if req.Type == models.ContentTagTypeCoupon {
+		var count int64
+		query := s.DB.WithContext(ctx).Model(&models.AdminCategory{}).Where("type = ? AND name = ?", req.Type, strings.TrimSpace(req.Name))
+		if id > 0 {
+			query = query.Where("id <> ?", id)
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count > 0 {
+			return 0, errors.New("优惠标签名称已存在")
+		}
+	}
 	row := models.AdminCategory{Type: req.Type, Name: req.Name, Image: req.Image, Value: req.Value, Sort: req.Sort, Status: status}
 	if id > 0 {
 		return id, s.DB.WithContext(ctx).Model(&models.AdminCategory{}).Where("id = ?", id).Updates(row).Error
@@ -558,7 +571,18 @@ func (s *AdminService) SaveCategory(ctx context.Context, id int64, req types.Adm
 }
 
 func (s *AdminService) DeleteCategory(ctx context.Context, id int64) error {
-	return s.DB.WithContext(ctx).Delete(&models.AdminCategory{}, id).Error
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var category models.AdminCategory
+		if err := tx.Where("id = ?", id).First(&category).Error; err != nil {
+			return err
+		}
+		if category.Type == models.ContentTagTypeCoupon {
+			if err := tx.Where("tag_id = ?", id).Delete(&models.ContentTagRelation{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&category).Error
+	})
 }
 
 func (s *AdminService) ListUserRecords(ctx context.Context, userID int64, recordType string, page, pageSize int) (*types.AdminPageResponse[map[string]any], error) {

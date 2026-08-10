@@ -104,20 +104,25 @@ type MerchantListItem struct {
 	Lat      float64 `json:"lat"`      // 纬度
 	Lng      float64 `json:"lng"`      // 经度
 
-	UserName     string    `json:"username"`
-	UserAvatar   string    `json:"user_avatar"`
-	CoverImage   string    `json:"cover_image"`   //封面图片
-	CreatedAt    time.Time `json:"created_at"`    //创建时间
-	AvgPrice     int64     `json:"avg_price"`     //人均价格
-	CurrentCount int64     `json:"current_count"` // 参与人数
-	PostCount    int64     `json:"post_count"`
-	Icon         string    `json:"icon"`
-	IsSubscriber bool      `json:"is_subscribe"`
-	IsFollow     bool      `json:"is_follow"`
-	CategoryID   int       `json:"category_id"`
-	DistrictID   int       `json:"district_id"`
-	AreaID       int       `json:"area_id"`
-	TagIDs       []int     `json:"tag_ids"`
+	UserName         string           `json:"username"`
+	UserAvatar       string           `json:"user_avatar"`
+	CoverImage       string           `json:"cover_image"`   //封面图片
+	CreatedAt        time.Time        `json:"created_at"`    //创建时间
+	AvgPrice         int64            `json:"avg_price"`     //人均价格
+	CurrentCount     int64            `json:"current_count"` // 参与人数
+	PostCount        int64            `json:"post_count"`
+	Icon             string           `json:"icon"`
+	IsSubscriber     bool             `json:"is_subscribe"`
+	IsFollow         bool             `json:"is_follow"`
+	FollowCount      int64            `json:"follow_count"`
+	FollowTargetType string           `json:"follow_target_type"`
+	FollowTargetID   int64            `json:"follow_target_id"`
+	CategoryID       int              `json:"category_id"`
+	DistrictID       int              `json:"district_id"`
+	AreaID           int              `json:"area_id"`
+	TagIDs           []int64          `json:"tag_ids"`
+	DiscountTags     []string         `json:"discount_tags"`
+	Tags             []ContentTagItem `json:"tags"`
 }
 
 type Category struct {

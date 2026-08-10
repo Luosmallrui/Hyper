@@ -1,5 +1,7 @@
 # 新场地与订阅聚合接口文档
 
+> 关注语义已升级：`is_follow` 和 `follow_count` 现在表示场地对象，而不是场地主办方用户。最新前端对接以 [content_follow_api_20260810.md](content_follow_api_20260810.md) 为准。
+
 本文档只说明新场地 C 端展示、场地关注/订阅、我的订阅聚合列表接口。
 
 默认请求头：
@@ -18,7 +20,7 @@ Authorization: Bearer <access_token>
 - `organizer_profiles`：介绍、图册、地址、营业时间、定位等资料。
 - `organizer_stores`：门店/场地位置。
 - `notes.store_id`：场地相关动态。
-- `user_follow`：关注场地主办方用户。
+- `content_follows`：关注场地对象。
 - `venue_subscriptions`：订阅场地。
 
 我的订阅聚合列表只返回：
@@ -86,9 +88,9 @@ Query:
 | id | 场地 ID，即 `organizers.id` |
 | user_id | 场地主办方用户 ID |
 | average_spend | 人均消费，单位分 |
-| is_follow | 当前用户是否关注该场地主办方 |
+| is_follow | 当前用户是否关注该场地对象 |
 | is_subscribe | 当前用户是否订阅该场地 |
-| follow_count | 场地主办方粉丝数 |
+| follow_count | 场地对象粉丝数 |
 | subscribe_count | 场地订阅数 |
 | post_count | 场地相关公开动态数 |
 
@@ -186,7 +188,7 @@ Query:
 
 ## 5. 关注/取消关注场地
 
-关注的是场地所属主办方用户，落表 `user_follow`。
+关注的是场地对象，落表 `content_follows`。完整对象关注参数和响应字段见 [content_follow_api_20260810.md](content_follow_api_20260810.md)。
 
 ### 关注
 
