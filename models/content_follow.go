@@ -3,9 +3,10 @@ package models
 import "time"
 
 const (
-	ContentFollowTargetActivity = "activity"
-	ContentFollowTargetVenue    = "venue"
-	ContentFollowTargetParty    = "party"
+	ContentFollowTargetActivity  = "activity"
+	ContentFollowTargetVenue     = "venue"
+	ContentFollowTargetParty     = "party"
+	ContentFollowTargetOrganizer = "organizer"
 )
 
 // ContentFollow is an object-level follow relation. It is intentionally

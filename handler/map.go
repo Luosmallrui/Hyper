@@ -222,6 +222,7 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 	var activities []models.Activity
 	query := m.DB.WithContext(c.Request.Context()).
 		Where("status = ?", models.ActivityStatusOnline).
+		Where("is_hidden = 0").
 		Where("latitude <> 0 AND longitude <> 0")
 	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
 		query = query.Where("type = ?", activityType)

@@ -31,6 +31,7 @@ type IAdminService interface {
 	UpdateOrganizerEnabled(ctx context.Context, organizerID int64, enabled int8) error
 	GetActivityDetail(ctx context.Context, activityID int64) (*types.AdminActivityDetail, error)
 	AuditActivity(ctx context.Context, activityID int64, req types.AdminAuditActivityRequest) error
+	SetActivityVisibility(ctx context.Context, activityID int64, visible bool, reason string) (*models.Activity, error)
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
 	GetAllTickets(ctx context.Context, page, pageSize int, keyword string) (*types.AdminTicketListResponse, error)
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
@@ -498,6 +499,9 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 	} else {
 		query = query.Where("status <> ?", models.ActivityStatusDraft)
 	}
+	if filter.IsHidden != nil {
+		query = query.Where("is_hidden = ?", *filter.IsHidden)
+	}
 	if filter.Keyword != "" {
 		like := "%" + filter.Keyword + "%"
 		query = query.Where("name LIKE ? OR address LIKE ?", like, like)
@@ -590,6 +594,9 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 			QualificationDoc: activity.QualificationDoc,
 			Status:           activity.Status,
 			RejectReason:     activity.RejectReason,
+			IsHidden:         activity.IsHidden,
+			HiddenAt:         formatAdminPtrTime(activity.HiddenAt),
+			HiddenReason:     activity.HiddenReason,
 			TicketSpecCount:  ticketSpecCountMap[activity.ID],
 			CreatedAt:        activity.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:        activity.UpdatedAt.Format("2006-01-02 15:04:05"),
@@ -702,6 +709,36 @@ func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req 
 		return errors.New("活动不存在")
 	}
 	return nil
+}
+
+// SetActivityVisibility implements the management-side delete behavior. It
+// deliberately keeps the activity row and all related business records so
+// orders, refunds, settlements and verification history remain traceable.
+func (s *AdminService) SetActivityVisibility(ctx context.Context, activityID int64, visible bool, reason string) (*models.Activity, error) {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	updates := map[string]any{
+		"is_hidden":     0,
+		"hidden_at":     nil,
+		"hidden_reason": "",
+		"updated_at":    now,
+	}
+	if !visible {
+		updates["is_hidden"] = 1
+		updates["hidden_at"] = now
+		updates["hidden_reason"] = strings.TrimSpace(reason)
+	}
+	if err := s.DB.WithContext(ctx).Model(&activity).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+		return nil, err
+	}
+	return &activity, nil
 }
 
 func (s *AdminService) GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error) {

@@ -67,12 +67,15 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/parties", context.Wrap(a.GetPartyList))
 		authorized.GET("/parties/:id", context.Wrap(a.GetPartyDetail))
 		authorized.PUT("/parties/:id/status", context.Wrap(a.UpdatePartyStatus))
+		authorized.DELETE("/parties/:id", context.Wrap(a.HideParty))
 		authorized.PUT("/parties/:id/tags", context.Wrap(a.UpdatePartyTags))
 
 		// 活动审核管理
 		authorized.GET("/activities", context.Wrap(a.GetActivityList))
 		authorized.GET("/activities/:id", context.Wrap(a.GetActivityDetail))
 		authorized.PUT("/activities/:id/audit", context.Wrap(a.AuditActivity))
+		authorized.DELETE("/activities/:id", context.Wrap(a.HideActivity))
+		authorized.PATCH("/activities/:id/visibility", context.Wrap(a.UpdateActivityVisibility))
 		authorized.PUT("/activities/:id/tags", context.Wrap(a.UpdateActivityTags))
 		authorized.GET("/activity-collections", context.Wrap(a.ListActivityCollections))
 		authorized.POST("/activity-collections", context.Wrap(a.CreateActivityCollection))
@@ -1103,6 +1106,22 @@ func (a *Admin) UpdatePartyStatus(c *gin.Context) error {
 	return nil
 }
 
+// HideParty keeps legacy party/venue records and removes them from public
+// discovery by setting the existing status field to offline.
+// DELETE /api/v1/admin/parties/:id
+func (a *Admin) HideParty(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的ID")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.party.hide", ResourceType: "party", ResourceID: strconv.FormatInt(id, 10)})
+	if err := a.AdminService.UpdatePartyStatus(c.Request.Context(), id, "offline"); err != nil {
+		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"id": id, "status": "offline"})
+	return nil
+}
+
 // GetActivityList 获取活动审核列表
 // GET /api/v1/admin/activities?page=1&pageSize=20&status=1&keyword=xxx&organizer_id=1
 func (a *Admin) GetActivityList(c *gin.Context) error {
@@ -1129,8 +1148,19 @@ func (a *Admin) GetActivityList(c *gin.Context) error {
 		organizerID = v
 	}
 
+	var isHidden *int8
+	if raw := c.Query("is_hidden"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 8)
+		if err != nil || (v != 0 && v != 1) {
+			return response.NewError(400, "is_hidden 仅支持 0 或 1")
+		}
+		value := int8(v)
+		isHidden = &value
+	}
+
 	filter := types.AdminActivityFilter{
 		Status:        status,
+		IsHidden:      isHidden,
 		Keyword:       keyword,
 		OrganizerID:   organizerID,
 		PublishedFrom: adminQueryTime(c, "published_from"),
@@ -1181,6 +1211,65 @@ func (a *Admin) AuditActivity(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, "审核完成")
+	return nil
+}
+
+// HideActivity uses soft hiding as the default management-side delete action.
+// DELETE /api/v1/admin/activities/:id?reason=违规或下架原因
+func (a *Admin) HideActivity(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的活动ID")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: "admin.activity.hide", ResourceType: "activity", ResourceID: strconv.FormatInt(id, 10), Remark: strings.TrimSpace(c.Query("reason")),
+	})
+	activity, err := a.AdminService.SetActivityVisibility(c.Request.Context(), id, false, c.Query("reason"))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "活动不存在")
+		}
+		return response.NewError(500, err.Error())
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: "admin.activity.hide", ResourceType: "activity", ResourceID: strconv.FormatInt(id, 10), ResourceName: activity.Name,
+		Remark: activity.HiddenReason,
+	})
+	response.Success(c, gin.H{"id": id, "is_hidden": true, "hidden_at": activity.HiddenAt, "hidden_reason": activity.HiddenReason})
+	return nil
+}
+
+// UpdateActivityVisibility restores or hides an activity without deleting its
+// orders or other historical data.
+// PATCH /api/v1/admin/activities/:id/visibility
+func (a *Admin) UpdateActivityVisibility(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的活动ID")
+	}
+	var req types.AdminActivityVisibilityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	action := "admin.activity.hide"
+	if *req.Visible {
+		action = "admin.activity.restore"
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: action, ResourceType: "activity", ResourceID: strconv.FormatInt(id, 10), Remark: strings.TrimSpace(req.Reason),
+	})
+	activity, err := a.AdminService.SetActivityVisibility(c.Request.Context(), id, *req.Visible, req.Reason)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "活动不存在")
+		}
+		return response.NewError(500, err.Error())
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: action, ResourceType: "activity", ResourceID: strconv.FormatInt(id, 10), ResourceName: activity.Name,
+		Remark: activity.HiddenReason,
+	})
+	response.Success(c, gin.H{"id": id, "is_hidden": activity.IsHidden == 1, "hidden_at": activity.HiddenAt, "hidden_reason": activity.HiddenReason})
 	return nil
 }
 
