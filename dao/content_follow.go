@@ -50,13 +50,18 @@ func ResolveContentFollowOwner(ctx context.Context, db *gorm.DB, targetType stri
 		err = db.WithContext(ctx).Table("activities a").
 			Select("o.user_id").
 			Joins("JOIN organizers o ON o.id = a.organizer_id").
-			Where("a.id = ? AND a.type <> ? AND a.status = ?", targetID, models.ActivityTypeVenue, models.ActivityStatusOnline).
+			Where("a.id = ? AND a.type <> ? AND a.status = ? AND a.is_hidden = 0", targetID, models.ActivityTypeVenue, models.ActivityStatusOnline).
 			Scan(&ownerID).Error
 	case models.ContentFollowTargetVenue:
 		err = db.WithContext(ctx).Table("organizers o").
 			Select("o.user_id").
 			Where("o.id = ? AND o.status = ? AND o.enabled = 1", targetID, models.OrganizerStatusApproved).
-			Where("EXISTS (SELECT 1 FROM activities a WHERE a.organizer_id = o.id AND a.type = ? AND a.status = ?)", models.ActivityTypeVenue, models.ActivityStatusOnline).
+			Where("EXISTS (SELECT 1 FROM activities a WHERE a.organizer_id = o.id AND a.type = ? AND a.status = ? AND a.is_hidden = 0)", models.ActivityTypeVenue, models.ActivityStatusOnline).
+			Scan(&ownerID).Error
+	case models.ContentFollowTargetOrganizer:
+		err = db.WithContext(ctx).Table("organizers o").
+			Select("o.user_id").
+			Where("o.id = ? AND o.status = ? AND o.enabled = 1", targetID, models.OrganizerStatusApproved).
 			Scan(&ownerID).Error
 	case models.ContentFollowTargetParty:
 		err = db.WithContext(ctx).Table("parties").
@@ -64,7 +69,7 @@ func ResolveContentFollowOwner(ctx context.Context, db *gorm.DB, targetType stri
 			Where("id = ? AND status = ?", targetID, "active").
 			Scan(&ownerID).Error
 	default:
-		return 0, fmt.Errorf("target_type 仅支持 activity、venue、party")
+		return 0, fmt.Errorf("target_type 仅支持 activity、venue、organizer、party")
 	}
 	if err != nil {
 		return 0, err
@@ -117,7 +122,7 @@ func LoadContentFollowStats(ctx context.Context, db *gorm.DB, targetType string,
 
 func isContentFollowTarget(targetType string) bool {
 	switch targetType {
-	case models.ContentFollowTargetActivity, models.ContentFollowTargetVenue, models.ContentFollowTargetParty:
+	case models.ContentFollowTargetActivity, models.ContentFollowTargetVenue, models.ContentFollowTargetOrganizer, models.ContentFollowTargetParty:
 		return true
 	default:
 		return false

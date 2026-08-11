@@ -46,6 +46,10 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		venues.POST("/:id/subscribe", auth, h.wrap(h.SubscribeVenue))
 		venues.DELETE("/:id/subscribe", auth, h.wrap(h.UnsubscribeVenue))
 	}
+	organizers := v1.Group("/organizers")
+	{
+		organizers.GET("/:id", optionalAuth, h.wrap(h.GetPublicOrganizerHome))
+	}
 
 	organizer := v1.Group("/organizer", auth)
 	{
@@ -427,6 +431,37 @@ func (h *Ticketing) GetVenueDetail(c *gin.Context) error {
 		return err
 	}
 	resp, err := h.TicketingService.GetVenueDetail(c.Request.Context(), currentUserID(c), id)
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) GetPublicOrganizerHome(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil || id <= 0 {
+		return response.NewError(http.StatusBadRequest, "商家ID无效")
+	}
+	activityPage, err := ticketingQueryInt(c, "activity_page", 1)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "activity_page 参数无效")
+	}
+	activitySize, err := ticketingQueryInt(c, "activity_size", types.DefaultPageSize)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "activity_size 参数无效")
+	}
+	venuePage, err := ticketingQueryInt(c, "venue_page", 1)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "venue_page 参数无效")
+	}
+	venueSize, err := ticketingQueryInt(c, "venue_size", types.DefaultPageSize)
+	if err != nil {
+		return response.NewError(http.StatusBadRequest, "venue_size 参数无效")
+	}
+	resp, err := h.TicketingService.GetPublicOrganizerHome(
+		c.Request.Context(), currentUserID(c), id, activityPage, activitySize, venuePage, venueSize,
+	)
 	if err != nil {
 		return err
 	}
@@ -845,7 +880,7 @@ func (h *Ticketing) GetActivity(c *gin.Context) error {
 		}
 		return err
 	}
-	if resp.Status == models.ActivityStatusOnline {
+	if resp.Status == models.ActivityStatusOnline && resp.IsHidden == 0 {
 		// Analytics must never make a public activity detail request fail.
 		_ = h.TicketingService.RecordActivityView(c.Request.Context(), currentUserID(c), id, c.GetHeader("X-Visitor-Id"))
 	}
@@ -1581,6 +1616,18 @@ func size(c *gin.Context) int {
 
 func parseID(value string) (int64, error) {
 	return strconv.ParseInt(value, 10, 64)
+}
+
+func ticketingQueryInt(c *gin.Context, key string, fallback int) (int, error) {
+	raw := c.Query(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s 参数无效", key)
+	}
+	return value, nil
 }
 
 func buildUploadKey(fileType string, header *multipart.FileHeader) (string, error) {

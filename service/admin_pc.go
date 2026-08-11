@@ -286,11 +286,11 @@ func adminAuditActionName(action string) string {
 		"admin.account.create": "新增管理员", "admin.account.update": "更新管理员", "admin.account.delete": "删除管理员",
 		"admin.account.disable": "停用管理员", "admin.withdraw.approve": "审核通过提现申请", "admin.withdraw.reject": "驳回提现申请",
 		"admin.refund.approve": "审核通过退款申请", "admin.refund.reject": "驳回退款申请", "admin.organizer.approve": "审核通过入驻申请",
-		"admin.organizer.reject": "驳回入驻申请", "admin.activity.approve": "审核通过活动", "admin.activity.reject": "驳回活动",
+		"admin.organizer.reject": "驳回入驻申请", "admin.activity.approve": "审核通过活动", "admin.activity.reject": "驳回活动", "admin.activity.hide": "下架隐藏活动", "admin.activity.restore": "恢复活动展示",
 		"admin.bank_account.approve": "审核通过收款账户", "admin.bank_account.reject": "驳回收款账户", "admin.points.adjust": "人工调整积分", "admin.permission.denied": "权限拒绝",
 		"admin.comment.moderate": "审核动态评论",
 		"admin.profile.update":   "更新个人资料", "admin.activity_collection.create": "新增活动合集", "admin.activity_collection.update": "更新活动合集", "admin.activity_collection.delete": "删除活动合集",
-		"admin.party.update": "更新派对或场地状态", "admin.party.tags.update": "更新派对标签", "admin.venue.tags.update": "更新场地标签", "admin.activity.tags.update": "更新活动标签", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
+		"admin.party.update": "更新派对或场地状态", "admin.party.hide": "下架隐藏派对或场地", "admin.party.tags.update": "更新派对标签", "admin.venue.tags.update": "更新场地标签", "admin.activity.tags.update": "更新活动标签", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
 		"admin.message.create": "发布平台消息", "admin.banner.create": "新增轮播图", "admin.banner.update": "更新轮播图", "admin.banner.delete": "删除轮播图",
 	}
 	if name, ok := names[action]; ok {

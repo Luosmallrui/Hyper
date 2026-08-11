@@ -55,6 +55,7 @@ type ITicketingService interface {
 	SubscribeVenue(ctx context.Context, userID, venueID int64) error
 	UnsubscribeVenue(ctx context.Context, userID, venueID int64) error
 	ListSubscriptions(ctx context.Context, userID int64, subType string, page, size int) (*types.PageResponse[types.SubscriptionListItem], error)
+	GetPublicOrganizerHome(ctx context.Context, userID, organizerID int64, activityPage, activitySize, venuePage, venueSize int) (*types.PublicOrganizerHomeResponse, error)
 	GetOrganizerProfile(ctx context.Context, userID int64) (*types.OrganizerProfileResponse, error)
 	UpdateOrganizerProfile(ctx context.Context, userID int64, req types.OrganizerProfileRequest) error
 	LookupOrganizerUser(ctx context.Context, userID int64, phone string) (*types.OrganizerUserLookupResponse, error)
@@ -884,6 +885,154 @@ func (s *TicketingService) GetVenueDetail(ctx context.Context, userID, venueID i
 	return resp, nil
 }
 
+// GetPublicOrganizerHome returns the public storefront of an approved organizer.
+// Activities and venues keep separate pagination because the client displays
+// them as independent sections or tabs.
+func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, organizerID int64, activityPage, activitySize, venuePage, venueSize int) (*types.PublicOrganizerHomeResponse, error) {
+	activityPage, activitySize = normalizePage(activityPage, activitySize)
+	venuePage, venueSize = normalizePage(venuePage, venueSize)
+
+	var row struct {
+		ID            int64
+		UserID        int64
+		Name          string
+		Logo          string
+		OwnerNickname string
+		OwnerAvatar   string
+		CoverImage    string
+		Gallery       string
+		Description   string
+		BusinessHours string
+		ServicePhone  string
+		Province      string
+		City          string
+		District      string
+		Address       string
+		Latitude      float64
+		Longitude     float64
+		AverageSpend  int64
+	}
+	if err := s.DB.WithContext(ctx).Table("organizers o").
+		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district,
+			COALESCE(u.nickname, '') AS owner_nickname,
+			COALESCE(u.avatar, '') AS owner_avatar,
+			COALESCE(p.cover_image, '') AS cover_image,
+			COALESCE(p.gallery, '') AS gallery,
+			COALESCE(p.description, '') AS description,
+			COALESCE(p.business_hours, '') AS business_hours,
+			COALESCE(p.service_phone, '') AS service_phone,
+			COALESCE(p.address, '') AS address,
+			COALESCE(p.latitude, 0) AS latitude,
+			COALESCE(p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend`).
+		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+		Joins("LEFT JOIN users u ON u.id = o.user_id").
+		Where("o.id = ? AND o.status = ? AND o.enabled = 1", organizerID, models.OrganizerStatusApproved).
+		First(&row).Error; err != nil {
+		return nil, err
+	}
+
+	followCounts, followed, err := dao.LoadContentFollowStats(ctx, s.DB, models.ContentFollowTargetOrganizer, []int64{row.ID}, userID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.PublicOrganizerHomeResponse{
+		ID:               row.ID,
+		UserID:           row.UserID,
+		Name:             row.Name,
+		Logo:             row.Logo,
+		OwnerNickname:    row.OwnerNickname,
+		OwnerAvatar:      row.OwnerAvatar,
+		CoverImage:       row.CoverImage,
+		Gallery:          []string{},
+		Description:      row.Description,
+		BusinessHours:    row.BusinessHours,
+		ServicePhone:     row.ServicePhone,
+		Province:         row.Province,
+		City:             row.City,
+		District:         row.District,
+		Address:          row.Address,
+		Latitude:         row.Latitude,
+		Longitude:        row.Longitude,
+		AverageSpend:     row.AverageSpend,
+		FollowCount:      followCounts[row.ID],
+		IsFollow:         followed[row.ID],
+		FollowTargetType: models.ContentFollowTargetOrganizer,
+		FollowTargetID:   row.ID,
+		Activities:       types.PageResponse[types.ActivityListItem]{List: []types.ActivityListItem{}},
+		Venues:           types.PageResponse[types.VenueListItem]{List: []types.VenueListItem{}},
+	}
+	if row.Gallery != "" {
+		_ = json.Unmarshal([]byte(row.Gallery), &resp.Gallery)
+	}
+
+	activities, err := s.listActivities(
+		s.DB.WithContext(ctx).Model(&models.Activity{}).
+			Where("organizer_id = ? AND status = ? AND is_hidden = 0 AND type <> ?", row.ID, models.ActivityStatusOnline, models.ActivityTypeVenue),
+		activityPage, activitySize, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fillActivitySubscriptionStatus(ctx, userID, activities.List); err != nil {
+		return nil, err
+	}
+	resp.Activities = *activities
+	resp.ActivityCount = activities.Total
+
+	venueQuery := s.DB.WithContext(ctx).Table("organizers o").
+		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district, o.created_at,
+			COALESCE(p.cover_image, '') AS cover_image,
+			COALESCE(p.description, '') AS description,
+			COALESCE(p.business_hours, '') AS business_hours,
+			COALESCE(p.service_phone, '') AS service_phone,
+			COALESCE(p.address, '') AS address,
+			COALESCE(p.latitude, 0) AS latitude,
+			COALESCE(p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend`).
+		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+		Where("o.id = ?", row.ID).
+		Where(visibleVenueOrganizerSQL(), models.OrganizerStatusApproved, models.ActivityTypeVenue, models.ActivityStatusOnline)
+	var venueTotal int64
+	if err := venueQuery.Count(&venueTotal).Error; err != nil {
+		return nil, err
+	}
+	venues := []types.VenueListItem{}
+	if err := venueQuery.Order("o.created_at DESC").Offset((venuePage - 1) * venueSize).Limit(venueSize).Scan(&venues).Error; err != nil {
+		return nil, err
+	}
+	if err := s.fillVenueStats(ctx, userID, venues); err != nil {
+		return nil, err
+	}
+	resp.Venues = types.PageResponse[types.VenueListItem]{List: venues, Total: venueTotal}
+	resp.VenueCount = venueTotal
+	return resp, nil
+}
+
+func (s *TicketingService) fillActivitySubscriptionStatus(ctx context.Context, userID int64, activities []types.ActivityListItem) error {
+	if userID <= 0 || len(activities) == 0 {
+		return nil
+	}
+	activityIDs := make([]int64, 0, len(activities))
+	for _, activity := range activities {
+		activityIDs = append(activityIDs, activity.ID)
+	}
+	var subscribedIDs []int64
+	if err := s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
+		Where("user_id = ? AND activity_id IN ?", userID, activityIDs).
+		Pluck("activity_id", &subscribedIDs).Error; err != nil {
+		return err
+	}
+	subscribed := make(map[int64]bool, len(subscribedIDs))
+	for _, activityID := range subscribedIDs {
+		subscribed[activityID] = true
+	}
+	for i := range activities {
+		activities[i].IsSubscribe = subscribed[activities[i].ID]
+	}
+	return nil
+}
+
 func (s *TicketingService) ListVenueNotes(ctx context.Context, userID, venueID int64, cursor int64, pageSize int) (*types.VenueNotesResponse, error) {
 	if err := s.ensureVenueVisible(ctx, venueID); err != nil {
 		return nil, err
@@ -1000,7 +1149,7 @@ func (s *TicketingService) ListSubscriptions(ctx context.Context, userID int64, 
 			Select(`a.id, a.name, a.poster_list, a.description, a.start_time, a.end_time, a.status,
 				a.address, a.latitude, a.longitude, sub.created_at AS subscribed_at`).
 			Joins("JOIN activities a ON a.id = sub.activity_id").
-			Where("sub.user_id = ?", userID).
+			Where("sub.user_id = ? AND a.status = ? AND a.is_hidden = 0 AND a.type <> ?", userID, models.ActivityStatusOnline, models.ActivityTypeVenue).
 			Scan(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -1100,7 +1249,7 @@ func firstNonEmpty(values ...string) string {
 func visibleVenueOrganizerSQL() string {
 	return `o.status = ? AND o.enabled = 1 AND EXISTS (
 		SELECT 1 FROM activities va
-		WHERE va.organizer_id = o.id AND va.type = ? AND va.status = ?
+		WHERE va.organizer_id = o.id AND va.type = ? AND va.status = ? AND va.is_hidden = 0
 	)`
 }
 
@@ -1835,8 +1984,10 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 	if err != nil {
 		return 0, err
 	}
+	activityType := models.ActivityTypeParty
 	if req.Type != nil {
-		if _, err := normalizeActivityType(*req.Type); err != nil {
+		activityType, err = normalizeActivityType(*req.Type)
+		if err != nil {
 			return 0, err
 		}
 	}
@@ -1858,17 +2009,40 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			return 0, err
 		}
 	}
+	if req.Type == nil {
+		activityType = defaultActivityType(act.Type)
+	}
+	wasVenue := defaultActivityType(act.Type) == models.ActivityTypeVenue
+	if req.BusinessHours != nil && activityType != models.ActivityTypeVenue {
+		return 0, errors.New("仅场地可填写每日经营时间")
+	}
 	if req.Step == 4 {
 		if err := s.SaveTicketSpecs(ctx, userID, act.ID, req.TicketSpecs); err != nil {
 			return 0, err
 		}
 	}
-	updates, err := activityUpdates(req)
+	updates, err := activityUpdates(req, activityType)
 	if err != nil {
 		return 0, err
 	}
+	if activityType == models.ActivityTypeVenue && !wasVenue {
+		startTime, endTime := venueValidityWindow(time.Now())
+		updates["start_time"] = startTime
+		updates["end_time"] = endTime
+	}
 	if len(updates) > 0 {
 		if err := s.DB.WithContext(ctx).Model(&act).Updates(updates).Error; err != nil {
+			return 0, err
+		}
+	}
+	if req.BusinessHours != nil {
+		if err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "organizer_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"business_hours": *req.BusinessHours,
+				"updated_at":     time.Now(),
+			}),
+		}).Create(&models.OrganizerProfile{OrganizerID: org.ID, BusinessHours: *req.BusinessHours}).Error; err != nil {
 			return 0, err
 		}
 	}
@@ -1880,12 +2054,15 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	if err := s.DB.WithContext(ctx).First(&act, activityID).Error; err != nil {
 		return nil, err
 	}
-	var specs []models.TicketSpec
-	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
-		return nil, err
-	}
 	var org models.Organizer
 	if err := s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error; err != nil {
+		return nil, err
+	}
+	if act.IsHidden == 1 && userID != org.UserID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var specs []models.TicketSpec
+	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
 		return nil, err
 	}
 	targetType, targetID := models.ContentTagTargetActivity, act.ID
@@ -1985,7 +2162,9 @@ func activityVisitorKey(userID int64, visitorID string) string {
 
 func (s *TicketingService) SubscribeActivity(ctx context.Context, userID, activityID int64) error {
 	var count int64
-	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("id = ?", activityID).Count(&count).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).
+		Where("id = ? AND type <> ? AND status = ? AND is_hidden = 0", activityID, models.ActivityTypeVenue, models.ActivityStatusOnline).
+		Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
@@ -2005,7 +2184,7 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 	page, size = normalizePage(page, size)
 	query := s.DB.WithContext(ctx).Table("activity_subscriptions AS sub").
 		Joins("JOIN activities a ON a.id = sub.activity_id").
-		Where("sub.user_id = ?", userID)
+		Where("sub.user_id = ? AND a.type <> ? AND a.status = ? AND a.is_hidden = 0", userID, models.ActivityTypeVenue, models.ActivityStatusOnline)
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -2093,7 +2272,7 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 }
 
 func (s *TicketingService) SearchActivities(ctx context.Context, userID int64, keyword string) ([]types.ActivityListItem, error) {
-	query := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ?", models.ActivityStatusOnline)
+	query := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ? AND is_hidden = 0", models.ActivityStatusOnline)
 	if keyword != "" {
 		query = query.Where("name LIKE ?", "%"+keyword+"%")
 	}
@@ -2407,7 +2586,7 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		if err := tx.First(&act, req.ActivityID).Error; err != nil {
 			return err
 		}
-		if act.Status != models.ActivityStatusOnline {
+		if !isActivityPublic(act) {
 			return errors.New("活动未上架")
 		}
 		var spec models.TicketSpec
@@ -2543,6 +2722,10 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		return nil
 	})
 	return result, err
+}
+
+func isActivityPublic(activity models.Activity) bool {
+	return activity.Status == models.ActivityStatusOnline && activity.IsHidden == 0
 }
 
 const (
@@ -4908,7 +5091,7 @@ func limitWeChatField(value string, max int) string {
 	return string(runes[:max])
 }
 
-func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
+func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[string]any, error) {
 	updates := map[string]any{}
 	if req.Type != nil {
 		activityType, err := normalizeActivityType(*req.Type)
@@ -4941,21 +5124,29 @@ func activityUpdates(req types.ActivityCreateRequest) (map[string]any, error) {
 	putString(updates, "poster_list", req.PosterList)
 	putString(updates, "poster_wechat", req.PosterWechat)
 	putString(updates, "qualification_doc", req.QualificationDoc)
-	if req.StartTime != nil {
-		t, err := parseDatetime(*req.StartTime)
-		if err != nil {
-			return nil, fmt.Errorf("开始时间格式错误")
+	if activityType == models.ActivityTypeParty {
+		if req.StartTime != nil {
+			t, err := parseDatetime(*req.StartTime)
+			if err != nil {
+				return nil, fmt.Errorf("开始时间格式错误")
+			}
+			updates["start_time"] = t
 		}
-		updates["start_time"] = t
-	}
-	if req.EndTime != nil {
-		t, err := parseDatetime(*req.EndTime)
-		if err != nil {
-			return nil, fmt.Errorf("结束时间格式错误")
+		if req.EndTime != nil {
+			t, err := parseDatetime(*req.EndTime)
+			if err != nil {
+				return nil, fmt.Errorf("结束时间格式错误")
+			}
+			updates["end_time"] = t
 		}
-		updates["end_time"] = t
 	}
 	return updates, nil
+}
+
+// venueValidityWindow only preserves compatibility with the activities table.
+// Venue availability is governed by organizer business_hours, not this range.
+func venueValidityWindow(now time.Time) (time.Time, time.Time) {
+	return now, now.AddDate(20, 0, 0)
 }
 
 func normalizeActivityType(raw string) (string, error) {

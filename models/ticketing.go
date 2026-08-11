@@ -71,31 +71,34 @@ func (Organizer) TableName() string {
 }
 
 type Activity struct {
-	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrganizerID      int64     `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
-	Type             string    `gorm:"column:type;size:20;not null;default:party;index" json:"type"`
-	Name             string    `gorm:"column:name;size:80;not null" json:"name"`
-	ShareTitle       string    `gorm:"column:share_title;size:20" json:"share_title"`
-	StartTime        time.Time `gorm:"column:start_time" json:"start_time"`
-	EndTime          time.Time `gorm:"column:end_time" json:"end_time"`
-	RealNameMode     int8      `gorm:"column:real_name_mode;default:0" json:"real_name_mode"`
-	MinorCheck       int8      `gorm:"column:minor_check;default:0" json:"minor_check"`
-	Description      string    `gorm:"column:description;type:text" json:"description"`
-	Province         string    `gorm:"column:province;size:50" json:"province"`
-	City             string    `gorm:"column:city;size:50" json:"city"`
-	District         string    `gorm:"column:district;size:50" json:"district"`
-	Address          string    `gorm:"column:address;size:200" json:"address"`
-	Latitude         float64   `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
-	Longitude        float64   `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
-	PosterDetail     string    `gorm:"column:poster_detail;size:255" json:"poster_detail"`
-	PosterLong       string    `gorm:"column:poster_long;size:255" json:"poster_long"`
-	PosterList       string    `gorm:"column:poster_list;size:255" json:"poster_list"`
-	PosterWechat     string    `gorm:"column:poster_wechat;size:255" json:"poster_wechat"`
-	QualificationDoc string    `gorm:"column:qualification_doc;size:255" json:"qualification_doc"`
-	Status           int8      `gorm:"column:status;not null;default:0;index" json:"status"`
-	RejectReason     string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
-	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID               int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	OrganizerID      int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
+	Type             string     `gorm:"column:type;size:20;not null;default:party;index" json:"type"`
+	Name             string     `gorm:"column:name;size:80;not null" json:"name"`
+	ShareTitle       string     `gorm:"column:share_title;size:20" json:"share_title"`
+	StartTime        time.Time  `gorm:"column:start_time" json:"start_time"`
+	EndTime          time.Time  `gorm:"column:end_time" json:"end_time"`
+	RealNameMode     int8       `gorm:"column:real_name_mode;default:0" json:"real_name_mode"`
+	MinorCheck       int8       `gorm:"column:minor_check;default:0" json:"minor_check"`
+	Description      string     `gorm:"column:description;type:text" json:"description"`
+	Province         string     `gorm:"column:province;size:50" json:"province"`
+	City             string     `gorm:"column:city;size:50" json:"city"`
+	District         string     `gorm:"column:district;size:50" json:"district"`
+	Address          string     `gorm:"column:address;size:200" json:"address"`
+	Latitude         float64    `gorm:"column:latitude;type:decimal(10,6)" json:"latitude"`
+	Longitude        float64    `gorm:"column:longitude;type:decimal(10,6)" json:"longitude"`
+	PosterDetail     string     `gorm:"column:poster_detail;size:255" json:"poster_detail"`
+	PosterLong       string     `gorm:"column:poster_long;size:255" json:"poster_long"`
+	PosterList       string     `gorm:"column:poster_list;size:255" json:"poster_list"`
+	PosterWechat     string     `gorm:"column:poster_wechat;size:255" json:"poster_wechat"`
+	QualificationDoc string     `gorm:"column:qualification_doc;size:255" json:"qualification_doc"`
+	Status           int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	RejectReason     string     `gorm:"column:reject_reason;size:500" json:"reject_reason"`
+	IsHidden         int8       `gorm:"column:is_hidden;not null;default:0;index" json:"is_hidden"`
+	HiddenAt         *time.Time `gorm:"column:hidden_at" json:"hidden_at,omitempty"`
+	HiddenReason     string     `gorm:"column:hidden_reason;size:500" json:"hidden_reason"`
+	CreatedAt        time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (Activity) TableName() string {

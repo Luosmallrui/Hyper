@@ -253,6 +253,37 @@ type OrganizerProfileResponse struct {
 	AverageSpend  int64    `json:"average_spend"`
 }
 
+// PublicOrganizerHomeResponse is the C-end public storefront for an approved
+// organizer. The two content sections paginate independently for tab views.
+type PublicOrganizerHomeResponse struct {
+	ID               int64                          `json:"id"`
+	UserID           int64                          `json:"user_id"`
+	Name             string                         `json:"name"`
+	Logo             string                         `json:"logo"`
+	OwnerNickname    string                         `json:"owner_nickname"`
+	OwnerAvatar      string                         `json:"owner_avatar"`
+	CoverImage       string                         `json:"cover_image"`
+	Gallery          []string                       `json:"gallery"`
+	Description      string                         `json:"description"`
+	BusinessHours    string                         `json:"business_hours"`
+	ServicePhone     string                         `json:"service_phone"`
+	Province         string                         `json:"province"`
+	City             string                         `json:"city"`
+	District         string                         `json:"district"`
+	Address          string                         `json:"address"`
+	Latitude         float64                        `json:"latitude"`
+	Longitude        float64                        `json:"longitude"`
+	AverageSpend     int64                          `json:"average_spend"`
+	FollowCount      int64                          `json:"follow_count"`
+	IsFollow         bool                           `json:"is_follow"`
+	FollowTargetType string                         `json:"follow_target_type"`
+	FollowTargetID   int64                          `json:"follow_target_id"`
+	ActivityCount    int64                          `json:"activity_count"`
+	VenueCount       int64                          `json:"venue_count"`
+	Activities       PageResponse[ActivityListItem] `json:"activities"`
+	Venues           PageResponse[VenueListItem]    `json:"venues"`
+}
+
 type OrganizerUserLookupResponse struct {
 	UserID   int64  `json:"user_id"`
 	Phone    string `json:"phone"`
@@ -409,6 +440,7 @@ type ActivityCreateRequest struct {
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
 	EndTime          *string              `json:"end_time"`
+	BusinessHours    *string              `json:"business_hours"`
 	RealNameMode     *int8                `json:"real_name_mode"`
 	MinorCheck       *int8                `json:"minor_check"`
 	Description      *string              `json:"description"`

@@ -128,6 +128,9 @@ type AdminActivityItem struct {
 	QualificationDoc string  `json:"qualification_doc"`
 	Status           int8    `json:"status"`
 	RejectReason     string  `json:"reject_reason"`
+	IsHidden         int8    `json:"is_hidden"`
+	HiddenAt         string  `json:"hidden_at"`
+	HiddenReason     string  `json:"hidden_reason"`
 	TicketSpecCount  int     `json:"ticket_spec_count"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
@@ -243,6 +246,7 @@ type AdminOrganizerItem struct {
 
 type AdminActivityFilter struct {
 	Status        *int8
+	IsHidden      *int8
 	Keyword       string
 	OrganizerID   int64
 	PublishedFrom *time.Time
@@ -271,6 +275,14 @@ type AdminAuditOrganizerRequest struct {
 type AdminAuditActivityRequest struct {
 	Status       int8   `json:"status" binding:"required,oneof=3 4"`
 	RejectReason string `json:"reject_reason"`
+}
+
+// AdminActivityVisibilityRequest controls whether an approved activity is
+// publicly visible. Hidden activities remain available to operations and
+// historical order, refund and verification queries.
+type AdminActivityVisibilityRequest struct {
+	Visible *bool  `json:"visible" binding:"required"`
+	Reason  string `json:"reason"`
 }
 
 // AdminWechatSubscribeRequest 管理员绑定微信订阅通知

@@ -2,8 +2,10 @@ package service
 
 import (
 	"Hyper/models"
+	"Hyper/types"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestActivityVisitorKey(t *testing.T) {
@@ -67,6 +69,65 @@ func TestNormalizeSalesChannel(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("NormalizeSalesChannel() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestActivityUpdatesUsesTypeSpecificTimeFields(t *testing.T) {
+	venueType := models.ActivityTypeVenue
+	invalidTime := "not-a-datetime"
+	updates, err := activityUpdates(types.ActivityCreateRequest{
+		Type:      &venueType,
+		StartTime: &invalidTime,
+		EndTime:   &invalidTime,
+	}, models.ActivityTypeVenue)
+	if err != nil {
+		t.Fatalf("venue must ignore activity time fields, got error: %v", err)
+	}
+	if _, ok := updates["start_time"]; ok {
+		t.Fatal("venue update must not write start_time")
+	}
+	if _, ok := updates["end_time"]; ok {
+		t.Fatal("venue update must not write end_time")
+	}
+
+	partyType := models.ActivityTypeParty
+	_, err = activityUpdates(types.ActivityCreateRequest{
+		Type:      &partyType,
+		StartTime: &invalidTime,
+	}, models.ActivityTypeParty)
+	if err == nil {
+		t.Fatal("party must validate start_time")
+	}
+}
+
+func TestVenueValidityWindow(t *testing.T) {
+	now := time.Date(2026, time.August, 11, 10, 0, 0, 0, time.Local)
+	start, end := venueValidityWindow(now)
+	if !start.Equal(now) {
+		t.Fatalf("venue start = %v, want %v", start, now)
+	}
+	wantEnd := now.AddDate(20, 0, 0)
+	if !end.Equal(wantEnd) {
+		t.Fatalf("venue end = %v, want %v", end, wantEnd)
+	}
+}
+
+func TestIsActivityPublic(t *testing.T) {
+	tests := []struct {
+		name     string
+		activity models.Activity
+		want     bool
+	}{
+		{name: "online and visible", activity: models.Activity{Status: models.ActivityStatusOnline}, want: true},
+		{name: "online but hidden", activity: models.Activity{Status: models.ActivityStatusOnline, IsHidden: 1}, want: false},
+		{name: "pending", activity: models.Activity{Status: models.ActivityStatusPending}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isActivityPublic(test.activity); got != test.want {
+				t.Fatalf("isActivityPublic() = %v, want %v", got, test.want)
 			}
 		})
 	}
