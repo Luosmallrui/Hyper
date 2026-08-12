@@ -564,7 +564,8 @@ INSERT IGNORE INTO `platform_settings` (`setting_key`, `setting_value`, `remark`
 ('customer_service_phone', '', '客服电话'),
 ('customer_service_wechat', '', '客服微信'),
 ('customer_service_email', '', '客服邮箱'),
-('customer_service_hours', '', '客服服务时间');
+('customer_service_hours', '', '客服服务时间'),
+('customer_service_user_id', '0', '客服聊天用户 ID');
 
 CREATE TABLE IF NOT EXISTS `admin_roles`
 (

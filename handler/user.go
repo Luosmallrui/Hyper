@@ -9,12 +9,15 @@ import (
 	"Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
+	base "context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -39,9 +42,41 @@ func (u *User) RegisterRouter(r gin.IRouter) {
 	g.POST("/info", authorize, context.Wrap(u.UpdateUserInfo))
 	g.POST("/avatar", authorize, context.Wrap(u.UploadAvatar))
 	g.GET("/info", optionalAuth, context.Wrap(u.GetUserInfo))
+	g.GET("/customer-service", authorize, context.Wrap(u.GetCustomerServiceContact))
 	g.GET("/note", optionalAuth, context.Wrap(u.GetUserNote))
 	g.GET("/my-notes", authorize, context.Wrap(u.GetMyNotes))
 
+}
+
+// GetCustomerServiceContact exposes the configured platform customer-service
+// account to signed-in clients. Message delivery remains the normal single
+// chat flow; this endpoint avoids a fragile hard-coded peer ID in the client.
+func (u *User) GetCustomerServiceContact(c *gin.Context) error {
+	if u.DB == nil {
+		return response.NewError(http.StatusInternalServerError, "客服配置服务不可用")
+	}
+	var setting models.PlatformSetting
+	if err := u.DB.WithContext(c.Request.Context()).Where("setting_key = ?", "customer_service_user_id").First(&setting).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "客服账号暂未配置")
+		}
+		return response.NewError(http.StatusInternalServerError, "读取客服配置失败")
+	}
+	userID, err := strconv.Atoi(strings.TrimSpace(setting.Value))
+	if err != nil || userID <= 0 {
+		return response.NewError(http.StatusNotFound, "客服账号暂未配置")
+	}
+	var account models.Users
+	if err := u.DB.WithContext(c.Request.Context()).Where("id = ? AND status = ?", userID, 1).First(&account).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "客服账号不存在或已停用")
+		}
+		return response.NewError(http.StatusInternalServerError, "读取客服账号失败")
+	}
+	response.Success(c, types.CustomerServiceContact{
+		UserID: userID, Nickname: account.Nickname, AvatarURL: account.Avatar, Signature: account.Motto,
+	})
+	return nil
 }
 
 func (u *User) GetUserNote(c *gin.Context) error {
@@ -160,6 +195,9 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 		IsFollowing: isFollowing,
 		IsVerifier:  verifierInfo != nil,
 	}
+	if isSelf {
+		rep.Organizer = u.currentOrganizerIdentity(ctx, loginUID)
+	}
 	if verifierInfo != nil {
 		rep.VerifierID = verifierInfo.ID
 		rep.Verifier = verifierInfo
@@ -169,6 +207,30 @@ func (u *User) GetUserInfo(c *gin.Context) error {
 
 	response.Success(c, rep)
 	return nil
+}
+
+func (u *User) currentOrganizerIdentity(ctx base.Context, userID int64) *types.OrganizerIdentity {
+	if userID <= 0 || u.DB == nil {
+		return nil
+	}
+	var org models.Organizer
+	err := u.DB.WithContext(ctx).
+		Where("user_id = ? AND status = ? AND enabled = 1", userID, models.OrganizerStatusApproved).
+		First(&org).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = u.DB.WithContext(ctx).
+			Table("organizer_staff AS os").
+			Select("o.*").
+			Joins("JOIN organizers o ON o.id = os.organizer_id").
+			Where("os.user_id = ? AND os.status = 1 AND o.status = ? AND o.enabled = 1", userID, models.OrganizerStatusApproved).
+			Order("os.id DESC").
+			Limit(1).
+			Scan(&org).Error
+	}
+	if err != nil || org.ID == 0 {
+		return nil
+	}
+	return &types.OrganizerIdentity{ID: org.ID, Type: org.Type, Name: org.Name, Logo: org.Logo}
 }
 
 func (u *User) UpdateUserInfo(c *gin.Context) error {

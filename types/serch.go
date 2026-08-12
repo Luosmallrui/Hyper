@@ -52,7 +52,10 @@ type SearchNoteItem struct {
 }
 
 type SearchPartyItem struct {
+	// ID is the venue's organizer ID for type=venue, which can be passed to
+	// GET /api/v1/venues/:id. It remains the legacy party ID for old callers.
 	ID           int64     `json:"id"`
+	ActivityID   int64     `json:"activity_id,omitempty"`
 	Title        string    `json:"title"`
 	Type         string    `json:"type"`          // 商家、俱乐部、活动
 	LocationName string    `json:"location_name"` // 地址名

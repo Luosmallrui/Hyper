@@ -8,6 +8,7 @@ import (
 	"Hyper/pkg/response"
 	"Hyper/service"
 	"Hyper/types"
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -66,6 +67,14 @@ func (m *Message) ListMessages(c *gin.Context) error {
 
 	list, err := m.MessageService.ListMessages(c.Request.Context(), uint64(userId), peerId, sessionType, cursor, since, limit)
 	if err != nil {
+		if sessionType == types.GroupChatSessionTypeGroup {
+			switch {
+			case errors.Is(err, service.ErrGroupNotFound):
+				return response.NewError(404, "群不存在或已解散")
+			case errors.Is(err, service.ErrNotGroupMember):
+				return response.NewError(403, "你不在群内或已退群")
+			}
+		}
 		return response.NewError(500, "拉取消息失败")
 	}
 	selfInfo := m.UserService.BatchGetUserInfo(c.Request.Context(), []uint64{uint64(userId)})

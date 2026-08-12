@@ -128,3 +128,26 @@ Authorization: Bearer <admin_access_token>
 2. 已下架记录显示“恢复展示”按钮，调用 `PATCH /api/v1/admin/activities/:id/visibility` 并提交 `{ "visible": true }`。
 3. 下架前如需填写原因，作为 query 参数 `reason` 传入删除接口，或使用 visibility 接口提交 `reason`。
 4. 对审核未通过、待审核、草稿的数据，“恢复展示”不等于审核通过；仍必须先完成审核并使 `status=3`。
+
+## 已购订单的历史展示
+
+下架不会影响已经购买的订单。以下接口仍会返回活动封面，并在嵌套 `activity` 中增加下架字段：
+
+```http
+GET /api/v1/order/list?page=1&size=50
+GET /api/v1/order/:order_no
+```
+
+```json
+{
+  "activity": {
+    "id": 10,
+    "name": "周末电音派对",
+    "poster_list": "https://cdn.example.com/poster.png",
+    "is_hidden": true,
+    "hidden_reason": "内容整改"
+  }
+}
+```
+
+前端在 `activity.is_hidden=true` 时保留 `poster_list` 并叠加“已下架”标记；不要将活动封面替换为空图。已支付、已核销、退款中、已退款或退款驳回的购票用户读取 `GET /api/v1/activity/:id` 时也可查看该活动历史详情，但不能再次购票、订阅或关注。

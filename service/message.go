@@ -29,6 +29,11 @@ type MessageService struct {
 	NoteDAO        *dao.NoteDAO
 }
 
+var (
+	ErrGroupNotFound  = errors.New("群不存在或已解散")
+	ErrNotGroupMember = errors.New("你不在群内或已退群")
+)
+
 var _ IMessageService = (*MessageService)(nil)
 
 type IMessageService interface {
@@ -100,6 +105,18 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		return result, nil
 	case types.GroupChatSessionTypeGroup:
 		// 群聊：peerId 在这里就是 groupId
+		// 群消息不是公开资源。读取历史与发消息一样，必须校验群仍有效且
+		// 当前用户是未退群成员，不能只凭猜到的 group_id 查询消息。
+		if s.GroupDAO == nil || s.GroupMemberDAO == nil {
+			return nil, errors.New("群聊服务未初始化")
+		}
+		if _, err := s.GroupDAO.GetGroup(ctx, int(peerId)); err != nil {
+			return nil, ErrGroupNotFound
+		}
+		if !s.GroupMemberDAO.IsMember(ctx, int(peerId), int(userId), false) {
+			return nil, ErrNotGroupMember
+		}
+
 		// conn-server 写库时就是按 GetGroupSessionHash(groupId) 填的 SessionHash
 		sessionHash := GetGroupSessionHash(int64(peerId))
 
@@ -224,7 +241,6 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		}
 	}
 
-	fmt.Println("ok")
 	// 4) 频道（给 ws / 路由用）
 	msg.Channel = types.ChannelChat
 
@@ -246,7 +262,6 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		return err
 	}
 
-	fmt.Println(body)
 	mqMsg := &rmq_client.Message{
 		Topic: types.ImTopicChat,
 		Body:  body,

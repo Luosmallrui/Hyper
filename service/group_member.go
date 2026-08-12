@@ -8,6 +8,7 @@ import (
 	"Hyper/types"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -18,8 +19,9 @@ var _ IGroupMemberService = (*GroupMemberService)(nil)
 
 type IGroupMemberService interface {
 	InviteMembers(ctx context.Context, groupId int, InvitedUsersIds []int, userId int) (*types.InviteMemberResponse, error)
+	FindInviteCandidate(ctx context.Context, groupID, operatorID int, mobile string) (*types.GroupInviteCandidateResponse, error)
 	KickMember(ctx context.Context, GroupId int, KickedUserIds int, userId int) error
-	ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error)
+	ListMembers(ctx context.Context, groupId int, userId int) (*types.GroupMemberListResponse, error)
 	QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error)
 	MuteMember(ctx context.Context, groupId int, operatorId int, targetUserId int, mute bool) error
 	SetMuteAll(ctx context.Context, groupId int, operatorId int, mute bool) (*types.MuteAllResponse, error)
@@ -59,6 +61,19 @@ func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, Inv
 	if err != nil {
 		return nil, errors.New("群不存在")
 	}
+	// The public invite API accepts selected user IDs. Ensure every requested
+	// account is a normal registered user, even when a caller bypasses the
+	// mobile lookup UI and calls this endpoint directly.
+	validUserIDs := make(map[int]struct{}, len(InvitedUsersIds))
+	var users []models.Users
+	if err := s.DB.WithContext(ctx).
+		Where("id IN ? AND status = ?", InvitedUsersIds, 1).
+		Find(&users).Error; err != nil {
+		return nil, errors.New("查询邀请用户失败: " + err.Error())
+	}
+	for _, user := range users {
+		validUserIDs[user.Id] = struct{}{}
+	}
 
 	var existingMembers []models.GroupMember
 	s.DB.WithContext(ctx).
@@ -74,13 +89,27 @@ func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, Inv
 		FailedUserIds: []int{},
 	}
 	actualSuccessIds := make([]int, 0)
+	processedUserIDs := make(map[int]struct{}, len(InvitedUsersIds))
 
 	// 3. 开启事务
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, invUid := range InvitedUsersIds {
-			if invUid == userId {
+			if _, seen := processedUserIDs[invUid]; seen {
+				resp.FailedCount++
+				resp.FailedUserIds = append(resp.FailedUserIds, invUid)
 				continue
-			} // 不能邀请自己
+			}
+			processedUserIDs[invUid] = struct{}{}
+			if invUid <= 0 || invUid == userId {
+				resp.FailedCount++
+				resp.FailedUserIds = append(resp.FailedUserIds, invUid)
+				continue
+			}
+			if _, ok := validUserIDs[invUid]; !ok {
+				resp.FailedCount++
+				resp.FailedUserIds = append(resp.FailedUserIds, invUid)
+				continue
+			}
 			// 是否成功加入（新加/恢复）用一个标记
 			joined := false
 			if gm, ok := memberMap[invUid]; ok {
@@ -152,6 +181,79 @@ func (s *GroupMemberService) InviteMembers(ctx context.Context, groupId int, Inv
 	}
 
 	return resp, nil
+}
+
+// FindInviteCandidate resolves an exact mobile number for a group owner or
+// admin. It returns only a masked number and requires group management rights
+// before performing the lookup, so it cannot be used as a public phone search.
+func (s *GroupMemberService) FindInviteCandidate(ctx context.Context, groupID, operatorID int, mobile string) (*types.GroupInviteCandidateResponse, error) {
+	group, err := s.GroupRepo.GetGroup(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	var operator models.GroupMember
+	if err := s.DB.WithContext(ctx).
+		Where("group_id = ? AND user_id = ? AND is_quit = 0 AND role IN ?", groupID, operatorID, []int{
+			models.GroupMemberLeaderOwner,
+			models.GroupMemberLeaderAdmin,
+		}).
+		First(&operator).Error; err != nil {
+		return nil, errors.New("操作者不在群内或无权限邀请")
+	}
+
+	var user models.Users
+	if err := s.DB.WithContext(ctx).
+		Where("mobile = ? AND status = ?", mobile, 1).
+		First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &types.GroupInviteCandidateResponse{Found: false}, nil
+		}
+		return nil, errors.New("查询用户失败: " + err.Error())
+	}
+
+	candidate := &types.GroupInviteCandidate{
+		UserID:       user.Id,
+		MobileMasked: maskGroupMemberMobile(user.Mobile),
+		Nickname:     user.Nickname,
+		Avatar:       user.Avatar,
+		Motto:        user.Motto,
+		CanInvite:    true,
+	}
+
+	var membership models.GroupMember
+	err = s.DB.WithContext(ctx).
+		Where("group_id = ? AND user_id = ?", groupID, user.Id).
+		First(&membership).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		candidate.MembershipStatus = "not_member"
+	case err != nil:
+		return nil, errors.New("查询群成员状态失败: " + err.Error())
+	case membership.IsQuit == 1:
+		candidate.MembershipStatus = "left"
+	default:
+		candidate.MembershipStatus = "active"
+		candidate.CanInvite = false
+		candidate.InviteDisabledReason = "用户已在群内"
+	}
+
+	if candidate.CanInvite && s.GroupMemberDAO.CountMemberTotal(ctx, groupID) >= int64(group.MaxMembers) {
+		candidate.CanInvite = false
+		candidate.InviteDisabledReason = "群人数已达上限"
+	}
+
+	return &types.GroupInviteCandidateResponse{
+		Found:     true,
+		Candidate: candidate,
+	}, nil
+}
+
+func maskGroupMemberMobile(mobile string) string {
+	if len(mobile) != 11 {
+		return ""
+	}
+	return mobile[:3] + "****" + mobile[7:]
 }
 
 // 踢出成员
@@ -232,36 +334,158 @@ func (s *GroupMemberService) KickMember(ctx context.Context, GroupId int, Kicked
 	return nil
 }
 
-func (s *GroupMemberService) ListMembers(ctx context.Context, groupId int, userId int) ([]types.GroupMemberItemDTO, error) {
-	if err := s.ensureGroupActive(ctx, groupId); err != nil {
+func (s *GroupMemberService) ListMembers(ctx context.Context, groupID int, userID int) (*types.GroupMemberListResponse, error) {
+	group, err := s.GroupRepo.GetGroup(ctx, groupID)
+	if err != nil {
 		return nil, response.NewError(404, "群不存在或已解散")
 	}
+	if s.GroupMemberDAO == nil {
+		return nil, errors.New("群成员服务未初始化")
+	}
 	// 1) 权限：必须是群成员
-	if !s.GroupMemberDAO.IsMember(ctx, groupId, userId, true) {
+	// 权限判断不能依赖 Redis 缓存，避免缓存过期或残留导致误判。
+	if !s.GroupMemberDAO.IsMember(ctx, groupID, userID, false) {
 		return nil, response.NewError(403, "你不在群内或已退出")
 	}
 
 	// 2) DAO 拿到 models.MemberItem 列表
-	items := s.GroupMemberDAO.GetMembers(ctx, groupId)
+	items, err := s.GroupMemberDAO.GetMembers(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("查询群成员失败: %w", err)
+	}
 
-	// 3) 映射成 DTO
+	// 3) 映射成员信息，同时按当前登录成员的角色预计算操作权限。
 	dtos := make([]types.GroupMemberItemDTO, 0, len(items))
+	avatarList := make([]string, 0, len(items))
+	viewerRole := 0
+	viewerUserCard := ""
+	viewerDisplayName := ""
+	viewerMuted := false
 	for _, it := range items {
 		if it == nil {
 			continue
 		}
+		displayName := groupMemberDisplayName(it.UserCard, it.Nickname, it.UserId)
+		isCurrentUser := it.UserId == userID
+		if isCurrentUser {
+			viewerRole = it.Role
+			viewerUserCard = it.UserCard
+			viewerDisplayName = displayName
+			viewerMuted = it.IsMute == 1
+		}
+		if it.Avatar != "" && len(avatarList) < 9 {
+			avatarList = append(avatarList, it.Avatar)
+		}
 		dtos = append(dtos, types.GroupMemberItemDTO{
-			Role:     it.Role,
-			UserCard: it.UserCard,
-			UserId:   it.UserId,
-			IsMute:   it.IsMute,
-			Avatar:   it.Avatar,
-			Nickname: it.Nickname,
-			Gender:   it.Gender,
-			Motto:    it.Motto,
+			UserId:         it.UserId,
+			Avatar:         it.Avatar,
+			Nickname:       it.Nickname,
+			DisplayName:    displayName,
+			Gender:         it.Gender,
+			Motto:          it.Motto,
+			Role:           it.Role,
+			RoleName:       groupMemberRoleName(it.Role),
+			IsMute:         it.IsMute,
+			IsMuted:        it.IsMute == 1,
+			CanSendMessage: groupMemberCanSend(it.Role, it.IsMute == 1, group.IsMuteAll == 1),
+			UserCard:       it.UserCard,
+			JoinTime:       formatGroupMemberTime(it.JoinTime),
+			IsCurrentUser:  isCurrentUser,
 		})
 	}
-	return dtos, nil
+	if viewerRole == 0 {
+		return nil, response.NewError(403, "你不在群内或已退出")
+	}
+	permissions := groupMemberPermissions(viewerRole)
+	for i := range dtos {
+		dtos[i].CanKick = canManageGroupMember(viewerRole, dtos[i].Role, dtos[i].UserId == userID)
+		dtos[i].CanMute = canManageGroupMember(viewerRole, dtos[i].Role, dtos[i].UserId == userID)
+		dtos[i].CanSetAdmin = viewerRole == models.GroupMemberLeaderOwner && dtos[i].UserId != userID && dtos[i].Role != models.GroupMemberLeaderOwner
+		dtos[i].CanTransfer = viewerRole == models.GroupMemberLeaderOwner && dtos[i].UserId != userID
+	}
+
+	return &types.GroupMemberListResponse{
+		Group: types.GroupMemberGroupInfo{
+			ID:               group.Id,
+			Name:             group.Name,
+			Avatar:           group.Avatar,
+			Description:      group.Description,
+			OwnerID:          group.OwnerId,
+			MemberCount:      len(dtos),
+			MaxMembers:       group.MaxMembers,
+			IsMuteAll:        group.IsMuteAll == 1,
+			CreatedAt:        formatGroupMemberTime(group.CreatedAt),
+			MemberAvatarList: avatarList,
+		},
+		CurrentUser: types.GroupCurrentMemberInfo{
+			UserID:         userID,
+			Role:           viewerRole,
+			RoleName:       groupMemberRoleName(viewerRole),
+			UserCard:       viewerUserCard,
+			DisplayName:    viewerDisplayName,
+			IsOwner:        viewerRole == models.GroupMemberLeaderOwner,
+			IsAdmin:        viewerRole == models.GroupMemberLeaderAdmin,
+			IsMuted:        viewerMuted,
+			CanSendMessage: groupMemberCanSend(viewerRole, viewerMuted, group.IsMuteAll == 1),
+			Permissions:    permissions,
+		},
+		Members: dtos,
+	}, nil
+}
+
+func groupMemberRoleName(role int) string {
+	switch role {
+	case models.GroupMemberLeaderOwner:
+		return "群主"
+	case models.GroupMemberLeaderAdmin:
+		return "管理员"
+	default:
+		return "群成员"
+	}
+}
+
+func groupMemberPermissions(role int) types.GroupMemberPermissions {
+	isManager := role == models.GroupMemberLeaderOwner || role == models.GroupMemberLeaderAdmin
+	isOwner := role == models.GroupMemberLeaderOwner
+	return types.GroupMemberPermissions{
+		CanInvite:          isManager,
+		CanManageMembers:   isManager,
+		CanMuteMembers:     isManager,
+		CanMuteAll:         isManager,
+		CanSetAdmin:        isOwner,
+		CanTransferOwner:   isOwner,
+		CanUpdateGroupInfo: isOwner,
+		CanDismissGroup:    isOwner,
+		CanQuit:            true,
+	}
+}
+
+func groupMemberDisplayName(userCard, nickname string, userID int) string {
+	if userCard != "" {
+		return userCard
+	}
+	if nickname != "" {
+		return nickname
+	}
+	return fmt.Sprintf("用户%d", userID)
+}
+
+func canManageGroupMember(viewerRole, memberRole int, isCurrentUser bool) bool {
+	return !isCurrentUser && viewerRole <= models.GroupMemberLeaderAdmin && viewerRole < memberRole
+}
+
+func groupMemberCanSend(role int, isMuted, isMuteAll bool) bool {
+	if role == models.GroupMemberLeaderOwner || role == models.GroupMemberLeaderAdmin {
+		return true
+	}
+	return !isMuted && !isMuteAll
+}
+
+func formatGroupMemberTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format("2006-01-02 15:04:05")
 }
 func (s *GroupMemberService) QuitGroup(ctx context.Context, groupId int, userId int) (*types.QuitGroupResponse, error) {
 	if err := s.ensureGroupActive(ctx, groupId); err != nil {

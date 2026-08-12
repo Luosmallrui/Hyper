@@ -221,39 +221,43 @@ func (m *Map) getPartyMarkers(c *gin.Context, limit int, tagIDs []int64) ([]type
 func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
 	var activities []models.Activity
 	query := m.DB.WithContext(c.Request.Context()).
-		Where("status = ?", models.ActivityStatusOnline).
-		Where("is_hidden = 0").
-		Where("latitude <> 0 AND longitude <> 0")
+		Table("activities AS a").
+		Select("a.*").
+		Joins("JOIN organizers o ON o.id = a.organizer_id").
+		Where("a.status = ? AND a.is_hidden = 0 AND a.latitude <> 0 AND a.longitude <> 0", models.ActivityStatusOnline).
+		Where("o.status = ? AND o.enabled = 1", models.OrganizerStatusApproved).
+		Where("(a.type = ? OR a.end_time >= ?)", models.ActivityTypeVenue, time.Now()).
+		Where("(a.type <> ? OR a.id = (SELECT MAX(av.id) FROM activities av WHERE av.organizer_id = a.organizer_id AND av.type = ? AND av.status = ? AND av.is_hidden = 0))", models.ActivityTypeVenue, models.ActivityTypeVenue, models.ActivityStatusOnline)
 	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
-		query = query.Where("type = ?", activityType)
+		query = query.Where("a.type = ?", activityType)
 	}
 	if len(tagIDs) > 0 {
-		activityMatch, activityArgs := dao.ContentTagMatchSQL(models.ContentTagTargetActivity, "activities.id", tagIDs)
-		venueMatch, venueArgs := dao.ContentTagMatchSQL(models.ContentTagTargetVenue, "activities.organizer_id", tagIDs)
+		activityMatch, activityArgs := dao.ContentTagMatchSQL(models.ContentTagTargetActivity, "a.id", tagIDs)
+		venueMatch, venueArgs := dao.ContentTagMatchSQL(models.ContentTagTargetVenue, "a.organizer_id", tagIDs)
 		args := make([]any, 0, len(activityArgs)+len(venueArgs)+2)
 		args = append(args, models.ActivityTypeVenue)
 		args = append(args, venueArgs...)
 		args = append(args, models.ActivityTypeVenue)
 		args = append(args, activityArgs...)
-		query = query.Where("((activities.type = ? AND "+venueMatch+") OR (activities.type <> ? AND "+activityMatch+"))", args...)
+		query = query.Where("((a.type = ? AND "+venueMatch+") OR (a.type <> ? AND "+activityMatch+"))", args...)
 	}
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR description LIKE ?", like, like, like, like, like, like)
+		query = query.Where("a.name LIKE ? OR a.address LIKE ? OR a.province LIKE ? OR a.city LIKE ? OR a.district LIKE ? OR a.description LIKE ? OR o.name LIKE ?", like, like, like, like, like, like, like)
 	}
 	if district := strings.TrimSpace(c.Query("district")); district != "" {
-		query = query.Where("district = ?", district)
+		query = query.Where("a.district = ?", district)
 	}
 	if districtName := m.resolveDistrictName(c, c.Query("district_id")); districtName != "" {
-		query = query.Where("district = ?", districtName)
+		query = query.Where("a.district = ?", districtName)
 	}
 	if area := strings.TrimSpace(c.Query("area")); area != "" {
-		query = query.Where("address LIKE ?", "%"+area+"%")
+		query = query.Where("a.address LIKE ?", "%"+area+"%")
 	}
 	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
-		query = query.Where("address LIKE ?", "%"+businessArea+"%")
+		query = query.Where("a.address LIKE ?", "%"+businessArea+"%")
 	}
-	if err := query.Order("created_at DESC").Limit(limit).Find(&activities).Error; err != nil {
+	if err := query.Order("a.created_at DESC").Limit(limit).Scan(&activities).Error; err != nil {
 		return nil, err
 	}
 
@@ -280,7 +284,6 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 	}
 
 	organizerMap := make(map[int64]models.Organizer)
-	userIDs := make([]int, 0, len(organizerIDs))
 	if len(organizerIDs) > 0 {
 		var organizers []models.Organizer
 		if err := m.DB.WithContext(c.Request.Context()).Where("id IN ?", organizerIDs).Find(&organizers).Error; err != nil {
@@ -288,18 +291,6 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 		}
 		for _, organizer := range organizers {
 			organizerMap[organizer.ID] = organizer
-			userIDs = append(userIDs, int(organizer.UserID))
-		}
-	}
-
-	userMap := make(map[int]models.Users)
-	if len(userIDs) > 0 {
-		var users []models.Users
-		if err := m.DB.WithContext(c.Request.Context()).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
-			return nil, err
-		}
-		for _, user := range users {
-			userMap[user.Id] = user
 		}
 	}
 
@@ -353,12 +344,24 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			followTargetType = models.ContentFollowTargetVenue
 			followTargetID = activity.OrganizerID
 		}
+		markerID := fmt.Sprintf("activity-%d", activity.ID)
+		markerSource := "activity"
+		markerSourceID := activity.ID
+		detailType := "activity"
+		detailURL := fmt.Sprintf("/api/v1/activity/%d", activity.ID)
+		if activityType == models.ActivityTypeVenue {
+			markerID = fmt.Sprintf("venue-%d", activity.OrganizerID)
+			markerSource = "venue"
+			markerSourceID = activity.OrganizerID
+			detailType = "venue"
+			detailURL = fmt.Sprintf("/api/v1/venues/%d", activity.OrganizerID)
+		}
 		marker := types.MapMarker{
-			ID:               fmt.Sprintf("activity-%d", activity.ID),
-			Source:           "activity",
-			SourceID:         activity.ID,
-			DetailType:       "activity",
-			DetailURL:        fmt.Sprintf("/api/v1/activity/%d", activity.ID),
+			ID:               markerID,
+			Source:           markerSource,
+			SourceID:         markerSourceID,
+			DetailType:       detailType,
+			DetailURL:        detailURL,
 			Title:            activity.Name,
 			Type:             activityType,
 			Location:         activity.Address,
@@ -389,22 +392,15 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			continue
 		}
 		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
+			if activityType == models.ActivityTypeVenue && organizer.Name != "" {
+				marker.Title = organizer.Name
+			}
 			marker.UserID = organizer.UserID
 			marker.User = organizer.Name
 			marker.UserName = organizer.Name
 			marker.UserAvatar = organizer.Logo
 			marker.UserAvatarCamel = organizer.Logo
 			marker.IsSubscriber = subscribedMap[activity.ID]
-			if user, ok := userMap[int(organizer.UserID)]; ok {
-				if user.Nickname != "" {
-					marker.User = user.Nickname
-					marker.UserName = user.Nickname
-				}
-				if user.Avatar != "" {
-					marker.UserAvatar = user.Avatar
-					marker.UserAvatarCamel = user.Avatar
-				}
-			}
 		}
 		markers = append(markers, marker)
 	}

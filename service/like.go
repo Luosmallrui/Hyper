@@ -36,6 +36,7 @@ type ILikeService interface {
 	IsLiked(ctx context.Context, userID uint64, noteID uint64) (bool, error)
 	GetLikeCount(ctx context.Context, noteID uint64) (int64, error)
 	GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error)
+	GetUserLikes(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error)
 	BatchGetNoteStats(ctx context.Context, noteIDs []uint64) (map[uint64]*types.NoteStats, error)
 	BatchCheckLikeStatus(ctx context.Context, userID uint64, noteIDs []uint64) (map[uint64]bool, error)
 	LikeNote(ctx context.Context, userID, noteID uint64) error
@@ -129,6 +130,50 @@ func (s *LikeService) GetLikeCount(ctx context.Context, noteID uint64) (int64, e
 
 func (s *LikeService) GetUserTotalLikes(ctx context.Context, userID uint64) (int64, error) {
 	return s.StatsDAO.GetUserTotalLikes(ctx, userID)
+}
+
+// GetUserLikes lists public notes liked by the current user. A deleted or
+// private note is deliberately omitted while the response order remains the
+// like order returned by the DAO.
+func (s *LikeService) GetUserLikes(ctx context.Context, userID uint64, limit, offset int) ([]*types.Note, int64, error) {
+	ids, total, err := s.LikeDAO.ListNoteIDsByUser(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(ids) == 0 {
+		return []*types.Note{}, total, nil
+	}
+	notes, err := s.NoteDAO.FindByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	noteMap := make(map[uint64]*models.Note, len(notes))
+	for _, note := range notes {
+		noteMap[note.ID] = note
+	}
+	result := make([]*types.Note, 0, len(ids))
+	for _, id := range ids {
+		note, ok := noteMap[id]
+		if !ok {
+			continue
+		}
+		item := &types.Note{
+			ID:          int64(note.ID),
+			UserID:      int64(note.UserID),
+			Title:       note.Title,
+			Content:     note.Content,
+			Type:        int(note.Type),
+			Status:      int(note.Status),
+			VisibleConf: int(note.VisibleConf),
+			CreatedAt:   note.CreatedAt,
+			UpdatedAt:   note.UpdatedAt,
+		}
+		_ = json.Unmarshal([]byte(note.TopicIDs), &item.TopicIDs)
+		_ = json.Unmarshal([]byte(note.Location), &item.Location)
+		_ = json.Unmarshal([]byte(note.MediaData), &item.MediaData)
+		result = append(result, item)
+	}
+	return result, total, nil
 }
 
 func (s *LikeService) LikeNote(ctx context.Context, userID, noteID uint64) error {

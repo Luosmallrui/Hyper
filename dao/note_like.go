@@ -64,6 +64,19 @@ func (d *NoteLikeDAO) IsLiked(ctx context.Context, noteID uint64, userID uint64)
 	return exist, nil
 }
 
+// ListNoteIDsByUser returns active likes in the order in which the user most
+// recently liked them. It intentionally mirrors the collection-list DAO.
+func (d *NoteLikeDAO) ListNoteIDsByUser(ctx context.Context, userID uint64, limit, offset int) ([]uint64, int64, error) {
+	var total int64
+	base := d.Db.WithContext(ctx).Model(&models.NoteLike{}).Where("user_id = ? AND status = 1", int(userID))
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var ids []uint64
+	err := base.Select("note_id").Order("updated_at DESC, created_at DESC").Limit(limit).Offset(offset).Scan(&ids).Error
+	return ids, total, err
+}
+
 func (d *NoteLikeDAO) CheckExists(ctx context.Context, userID, noteID uint64) (bool, error) {
 	var count int64
 	err := d.Db.WithContext(ctx).

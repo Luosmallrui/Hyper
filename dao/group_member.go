@@ -99,29 +99,24 @@ func (g *GroupMember) GetMemberRemark(ctx context.Context, groupId int, userId i
 	return remarks
 }
 
-// GetMembers 获取群组成员列表
-func (g *GroupMember) GetMembers(ctx context.Context, groupId int) []*models.MemberItem {
-	fields := []string{
-		"group_member.id",
-		"group_member.role",
-		"group_member.user_card",
-		"group_member.user_id",
-		"group_member.is_mute",
-		"users.avatar",
-		"users.nickname",
-		"users.gender",
-		"users.motto",
+// GetMembers 获取群组成员列表。查询错误必须向上返回，不能用空列表伪装成功。
+func (g *GroupMember) GetMembers(ctx context.Context, groupID int) ([]*models.MemberItem, error) {
+	items := make([]*models.MemberItem, 0)
+	err := g.Repo.Db.WithContext(ctx).
+		Table("group_member AS gm").
+		Select(`gm.id, gm.role, gm.user_card, gm.user_id, gm.is_mute, gm.join_time,
+			COALESCE(u.avatar, '') AS avatar,
+			COALESCE(u.nickname, '') AS nickname,
+			COALESCE(u.gender, 3) AS gender,
+			COALESCE(u.motto, '') AS motto`).
+		Joins("LEFT JOIN users AS u ON u.id = gm.user_id").
+		Where("gm.group_id = ? AND gm.is_quit = 0", groupID).
+		Order("gm.role ASC, gm.join_time ASC, gm.id ASC").
+		Scan(&items).Error
+	if err != nil {
+		return nil, err
 	}
-
-	tx := g.Repo.Db.WithContext(ctx).Table("group_member")
-	tx.Joins("left join users on users.id = group_member.user_id")
-	tx.Where("group_member.group_id = ? and group_member.is_quit = 0", groupId)
-	tx.Order("group_member.role asc") // 群主(1)在前
-
-	var items []*models.MemberItem
-	tx.Unscoped().Select(fields).Scan(&items)
-
-	return items
+	return items, nil
 }
 
 type CountGroupMember struct {
