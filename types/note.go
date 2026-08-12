@@ -125,6 +125,17 @@ type GetMyCollectionsResponse struct {
 	Total int     `json:"total"`
 }
 
+// GetMyLikesRequest queries notes liked by the current user.
+type GetMyLikesRequest struct {
+	Page     int `form:"page" binding:"omitempty,min=1"`
+	PageSize int `form:"pagesize" binding:"omitempty,min=1,max=100"`
+}
+
+type GetMyLikesResponse struct {
+	Notes []*Note `json:"notes"`
+	Total int     `json:"total"`
+}
+
 type Leaf struct {
 	Page     int `form:"page"`      // 页码（从1开始）
 	PageSize int `form:"pageSize" ` // 每页数量

@@ -291,6 +291,7 @@ func adminAuditActionName(action string) string {
 		"admin.comment.moderate": "审核动态评论",
 		"admin.profile.update":   "更新个人资料", "admin.activity_collection.create": "新增活动合集", "admin.activity_collection.update": "更新活动合集", "admin.activity_collection.delete": "删除活动合集",
 		"admin.party.update": "更新派对或场地状态", "admin.party.hide": "下架隐藏派对或场地", "admin.party.tags.update": "更新派对标签", "admin.venue.tags.update": "更新场地标签", "admin.activity.tags.update": "更新活动标签", "admin.user.update": "更新用户状态", "admin.verifier.update": "更新核销员状态",
+		"admin.customer_service.reply": "回复客服会话", "admin.customer_service.read": "标记客服会话已读",
 		"admin.message.create": "发布平台消息", "admin.banner.create": "新增轮播图", "admin.banner.update": "更新轮播图", "admin.banner.delete": "删除轮播图",
 	}
 	if name, ok := names[action]; ok {
@@ -300,7 +301,7 @@ func adminAuditActionName(action string) string {
 }
 
 func adminAuditResourceName(resourceType, resourceID string) string {
-	base := map[string]string{"settings": "系统配置", "category": "分类", "role": "角色", "admin": "管理员", "withdraw": "提现申请", "refund": "退款申请", "organizer": "入驻申请", "venue": "场地", "party": "派对", "activity": "活动", "points": "积分账户", "permission": "权限校验"}[resourceType]
+	base := map[string]string{"settings": "系统配置", "category": "分类", "role": "角色", "admin": "管理员", "withdraw": "提现申请", "refund": "退款申请", "organizer": "入驻申请", "venue": "场地", "party": "派对", "activity": "活动", "points": "积分账户", "permission": "权限校验", "customer_service_session": "客服会话"}[resourceType]
 	if base == "" {
 		base = resourceType
 	}
@@ -347,7 +348,7 @@ func (s *AdminService) CheckPermission(ctx context.Context, adminID int64, metho
 var adminPermissionWhitelist = map[string]struct{}{
 	"admin.dashboard": {}, "admin.system": {}, "admin.users": {}, "admin.merchants": {},
 	"admin.organizers": {}, "admin.activities": {}, "admin.tickets": {}, "admin.orders": {},
-	"admin.verifications": {}, "admin.content": {}, "admin.finance": {},
+	"admin.verifications": {}, "admin.content": {}, "admin.finance": {}, "admin.customer_service": {},
 }
 
 func normalizeAdminPermissions(raw string) ([]string, error) {
@@ -415,6 +416,8 @@ func RequiredAdminPermission(method, path string) string {
 		return "admin.finance"
 	case strings.HasPrefix(path, "/v1/admin/organizer-level-rules"):
 		return "admin.merchants"
+	case strings.HasPrefix(path, "/v1/admin/customer-service"):
+		return "admin.customer_service"
 	default:
 		return "*"
 	}

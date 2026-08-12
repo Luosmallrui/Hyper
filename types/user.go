@@ -25,6 +25,16 @@ type UploadAvatarRes struct {
 	Url string `json:"url"`
 }
 
+// CustomerServiceContact is the configured platform account used by the
+// existing one-to-one IM APIs. The numeric user_id is intentionally returned
+// because message/send and message/list use it as peer_id/target_id.
+type CustomerServiceContact struct {
+	UserID    int    `json:"user_id"`
+	Nickname  string `json:"nickname"`
+	AvatarURL string `json:"avatar_url"`
+	Signature string `json:"signature"`
+}
+
 type UserProfile struct {
 	UserID     uint64 `json:"user_id"`
 	UserHashID string `json:"user_hash_id,omitempty"`

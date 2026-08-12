@@ -388,6 +388,7 @@ type AdminSystemConfig struct {
 	CustomerServiceWechat string `json:"customer_service_wechat"`
 	CustomerServiceEmail  string `json:"customer_service_email"`
 	CustomerServiceHours  string `json:"customer_service_hours"`
+	CustomerServiceUserID int64  `json:"customer_service_user_id"`
 	WithdrawArrivalCycle  string `json:"withdraw_arrival_cycle"`
 }
 

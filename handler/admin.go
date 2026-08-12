@@ -135,6 +135,10 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/messages/:id/records", context.Wrap(a.ListMessageDeliveries))
 
 		// 内容管理
+		authorized.GET("/customer-service/sessions", context.Wrap(a.ListCustomerServiceSessions))
+		authorized.GET("/customer-service/sessions/:user_id/messages", context.Wrap(a.ListCustomerServiceMessages))
+		authorized.POST("/customer-service/sessions/:user_id/messages", context.Wrap(a.SendCustomerServiceMessage))
+		authorized.POST("/customer-service/sessions/:user_id/read", context.Wrap(a.MarkCustomerServiceSessionRead))
 		authorized.GET("/banners", context.Wrap(a.ListBanners))
 		authorized.POST("/banners", context.Wrap(a.CreateBanner))
 		authorized.PUT("/banners/sort", context.Wrap(a.SortBanners))
@@ -250,6 +254,8 @@ func adminAuditMetaForRequest(c *gin.Context) adminAuditMeta {
 		meta = adminAuditMeta{Action: "admin.user." + requestAction(c.Request.Method), ResourceType: "user"}
 	case strings.HasPrefix(path, "/v1/admin/verifiers"):
 		meta = adminAuditMeta{Action: "admin.verifier." + requestAction(c.Request.Method), ResourceType: "verifier"}
+	case strings.HasPrefix(path, "/v1/admin/customer-service"):
+		meta = adminAuditMeta{Action: "admin.customer_service." + requestAction(c.Request.Method), ResourceType: "customer_service_session"}
 	case strings.HasPrefix(path, "/v1/admin/points/adjust"):
 		meta = adminAuditMeta{Action: "admin.points.adjust", ResourceType: "points"}
 	case strings.HasPrefix(path, "/v1/admin/points"):
@@ -954,6 +960,82 @@ func (a *Admin) ListMessageDeliveries(c *gin.Context) error {
 	}
 	response.Success(c, resp)
 	return nil
+}
+
+func (a *Admin) ListCustomerServiceSessions(c *gin.Context) error {
+	resp, err := a.AdminService.ListCustomerServiceSessions(c.Request.Context(), adminPage(c), adminPageSize(c), c.Query("keyword"))
+	if err != nil {
+		return adminCustomerServiceError(err)
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) ListCustomerServiceMessages(c *gin.Context) error {
+	userID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
+	if err != nil || userID == 0 {
+		return response.NewError(http.StatusBadRequest, "user_id 非法")
+	}
+	cursor, _ := strconv.ParseInt(c.Query("cursor"), 10, 64)
+	since, _ := strconv.ParseInt(c.Query("since"), 10, 64)
+	resp, err := a.AdminService.ListCustomerServiceMessages(c.Request.Context(), userID, cursor, since, adminPageSize(c))
+	if err != nil {
+		return adminCustomerServiceError(err)
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (a *Admin) SendCustomerServiceMessage(c *gin.Context) error {
+	userID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
+	if err != nil || userID == 0 {
+		return response.NewError(http.StatusBadRequest, "user_id 非法")
+	}
+	var req types.AdminCustomerServiceSendMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
+	}
+	message, err := a.AdminService.SendCustomerServiceMessage(c.Request.Context(), userID, req)
+	if err != nil {
+		return adminCustomerServiceError(err)
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: "admin.customer_service.reply", ResourceType: "customer_service_session", ResourceID: strconv.FormatUint(userID, 10),
+		ResourceName: "客服会话 " + strconv.FormatUint(userID, 10), Remark: "以平台客服身份回复用户",
+	})
+	response.Success(c, message)
+	return nil
+}
+
+func (a *Admin) MarkCustomerServiceSessionRead(c *gin.Context) error {
+	userID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
+	if err != nil || userID == 0 {
+		return response.NewError(http.StatusBadRequest, "user_id 非法")
+	}
+	var req types.AdminCustomerServiceReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数格式错误")
+	}
+	if err := a.AdminService.MarkCustomerServiceSessionRead(c.Request.Context(), userID, req.ReadTime); err != nil {
+		return adminCustomerServiceError(err)
+	}
+	setAdminAuditMeta(c, adminAuditMeta{
+		Action: "admin.customer_service.read", ResourceType: "customer_service_session", ResourceID: strconv.FormatUint(userID, 10),
+		ResourceName: "客服会话 " + strconv.FormatUint(userID, 10), Remark: "标记客服会话已读",
+	})
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+func adminCustomerServiceError(err error) error {
+	switch {
+	case errors.Is(err, service.ErrCustomerServiceNotConfigured):
+		return response.NewError(http.StatusConflict, "客服工作台未配置客服账号")
+	case errors.Is(err, service.ErrCustomerServiceSessionNotFound):
+		return response.NewError(http.StatusNotFound, "客服会话不存在，请等待用户先发起咨询")
+	default:
+		return err
+	}
 }
 
 // GetOrganizerList 获取入驻申请列表

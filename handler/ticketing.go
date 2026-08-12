@@ -34,6 +34,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	optionalAuth := middleware.OptionalAuth([]byte(h.Config.Jwt.Secret))
 	v1 := r.Group("/v1")
 	v1.GET("/points/rules", auth, h.wrap(h.GetPointsRule))
+	v1.GET("/content-tags", optionalAuth, h.wrap(h.ListContentTags))
 	v1.GET("/subscriptions", auth, h.wrap(h.ListSubscriptions))
 
 	venues := v1.Group("/venues")
@@ -172,6 +173,15 @@ func (h *Ticketing) GetPointsRule(c *gin.Context) error {
 		return err
 	}
 	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListContentTags(c *gin.Context) error {
+	list, err := h.TicketingService.ListContentTags(c.Request.Context())
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"list": list})
 	return nil
 }
 

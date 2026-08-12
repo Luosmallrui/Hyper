@@ -436,6 +436,7 @@ type ActivityCreateRequest struct {
 	ActivityID       int64                `json:"activity_id"`
 	Step             int                  `json:"step" binding:"required,min=1,max=5"`
 	Type             *string              `json:"type"`
+	TagIDs           []int64              `json:"tag_ids"`
 	Name             *string              `json:"name"`
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
@@ -563,11 +564,13 @@ type TicketOrderDetailResponse struct {
 	RefundNo         string `json:"refund_no,omitempty"`
 	Quantity         int    `json:"quantity"`
 	Activity         struct {
-		ID         int64     `json:"id"`
-		Name       string    `json:"name"`
-		StartTime  time.Time `json:"start_time"`
-		EndTime    time.Time `json:"end_time"`
-		PosterList string    `json:"poster_list"`
+		ID           int64     `json:"id"`
+		Name         string    `json:"name"`
+		StartTime    time.Time `json:"start_time"`
+		EndTime      time.Time `json:"end_time"`
+		PosterList   string    `json:"poster_list"`
+		IsHidden     bool      `json:"is_hidden"`
+		HiddenReason string    `json:"hidden_reason,omitempty"`
 	} `json:"activity"`
 	TicketSpec struct {
 		Name string `json:"name"`
@@ -606,11 +609,13 @@ type TicketOrderListItem struct {
 	ActualPrice      int64  `json:"actual_price"`
 	Quantity         int    `json:"quantity"`
 	Activity         struct {
-		ID         int64     `json:"id"`
-		Name       string    `json:"name"`
-		StartTime  time.Time `json:"start_time"`
-		EndTime    time.Time `json:"end_time"`
-		PosterList string    `json:"poster_list"`
+		ID           int64     `json:"id"`
+		Name         string    `json:"name"`
+		StartTime    time.Time `json:"start_time"`
+		EndTime      time.Time `json:"end_time"`
+		PosterList   string    `json:"poster_list"`
+		IsHidden     bool      `json:"is_hidden"`
+		HiddenReason string    `json:"hidden_reason,omitempty"`
 	} `json:"activity"`
 	TicketSpec struct {
 		ID   int64  `json:"id"`

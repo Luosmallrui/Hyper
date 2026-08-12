@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,16 +101,21 @@ type IAdminService interface {
 	ListMessages(ctx context.Context, page, pageSize int, target, messageType string) (*types.AdminPageResponse[map[string]any], error)
 	ListMessageDeliveries(ctx context.Context, messageID int64, page, pageSize int, filter types.AdminMessageDeliveryFilter) (*types.AdminPageResponse[map[string]any], error)
 	CreateMessage(ctx context.Context, adminID int64, req types.PlatformMessageRequest) (int64, error)
+	ListCustomerServiceSessions(ctx context.Context, page, pageSize int, keyword string) (*types.AdminCustomerServiceSessionListResponse, error)
+	ListCustomerServiceMessages(ctx context.Context, customerID uint64, cursor, since int64, limit int) (*types.AdminCustomerServiceMessageListResponse, error)
+	SendCustomerServiceMessage(ctx context.Context, customerID uint64, req types.AdminCustomerServiceSendMessageRequest) (*types.Message, error)
+	MarkCustomerServiceSessionRead(ctx context.Context, customerID uint64, readTime int64) error
 	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
 	UpdatePointsRule(ctx context.Context, req types.UpdatePointsRuleRequest) error
 }
 
 type AdminService struct {
-	AdminDAO      *dao.Admin
-	DB            *gorm.DB
-	Secret        []byte
-	WeChatService IWeChatService
-	MqProducer    rmq_client.Producer
+	AdminDAO       *dao.Admin
+	DB             *gorm.DB
+	Secret         []byte
+	WeChatService  IWeChatService
+	MqProducer     rmq_client.Producer
+	MessageService IMessageService
 }
 
 var _ IAdminService = (*AdminService)(nil)
@@ -1272,7 +1278,7 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings []types.Admi
 }
 
 func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemConfig, error) {
-	keys := []string{"system_name", "icp_record_no", "customer_service_phone", "customer_service_wechat", "customer_service_email", "customer_service_hours", "withdraw_arrival_cycle"}
+	keys := []string{"system_name", "icp_record_no", "customer_service_phone", "customer_service_wechat", "customer_service_email", "customer_service_hours", "customer_service_user_id", "withdraw_arrival_cycle"}
 	var rows []models.PlatformSetting
 	if err := s.DB.WithContext(ctx).Where("setting_key IN ?", keys).Find(&rows).Error; err != nil {
 		return nil, err
@@ -1281,10 +1287,11 @@ func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemC
 	for _, row := range rows {
 		values[row.Key] = row.Value
 	}
+	customerServiceUserID, _ := strconv.ParseInt(values["customer_service_user_id"], 10, 64)
 	return &types.AdminSystemConfig{
 		SystemName: values["system_name"], ICPRecordNo: values["icp_record_no"], CustomerServicePhone: values["customer_service_phone"],
 		CustomerServiceWechat: values["customer_service_wechat"], CustomerServiceEmail: values["customer_service_email"], CustomerServiceHours: values["customer_service_hours"],
-		WithdrawArrivalCycle: values["withdraw_arrival_cycle"],
+		CustomerServiceUserID: customerServiceUserID, WithdrawArrivalCycle: values["withdraw_arrival_cycle"],
 	}, nil
 }
 
@@ -1307,6 +1314,11 @@ func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.Admi
 		{Key: "customer_service_phone", Value: config.CustomerServicePhone, Remark: "客服电话"}, {Key: "customer_service_wechat", Value: config.CustomerServiceWechat, Remark: "客服微信"},
 		{Key: "customer_service_email", Value: config.CustomerServiceEmail, Remark: "客服邮箱"}, {Key: "customer_service_hours", Value: config.CustomerServiceHours, Remark: "客服服务时间"},
 		{Key: "withdraw_arrival_cycle", Value: config.WithdrawArrivalCycle, Remark: "商家提现到账周期展示文案"},
+	}
+	// Keep an existing service account when older PC clients do not yet submit
+	// this optional field. A positive value explicitly replaces the account.
+	if config.CustomerServiceUserID > 0 {
+		settings = append(settings, types.AdminSettingItem{Key: "customer_service_user_id", Value: strconv.FormatInt(config.CustomerServiceUserID, 10), Remark: "客服聊天用户 ID"})
 	}
 	return s.UpdateSettings(ctx, settings)
 }

@@ -327,11 +327,12 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	admin := dao.NewAdmin(db)
 	v := provideJwtSecret(cfg)
 	adminService := &service.AdminService{
-		AdminDAO:      admin,
-		DB:            db,
-		Secret:        v,
-		WeChatService: weChatService,
-		MqProducer:    producer,
+		AdminDAO:       admin,
+		DB:             db,
+		Secret:         v,
+		WeChatService:  weChatService,
+		MqProducer:     producer,
+		MessageService: messageService,
 	}
 	handlerAdmin := &handler.Admin{
 		Config:       cfg,

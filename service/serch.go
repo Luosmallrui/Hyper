@@ -2,6 +2,7 @@ package service
 
 import (
 	"Hyper/config"
+	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/types"
 	"context"
@@ -84,11 +85,16 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 		dbUsers      []models.Users
 		dbNotes      []models.Note
-		dbParties    []models.Merchant
+		dbVenues     []models.Activity
 		dbActivities []models.Activity
 	)
 
 	keyword := "%" + strings.TrimSpace(req.Keyword) + "%"
+	tagIDs, err := dao.ParseContentTagIDs(req.Tags)
+	if err != nil {
+		return nil, err
+	}
+	district := s.resolveDistrictName(ctx, req.District)
 
 	if (req.Type == 0 && req.NoteCursor == 0) || req.Type == 1 {
 		g.Go(func() error {
@@ -143,37 +149,42 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 	if req.Type == 0 || req.Type == 3 {
 		g.Go(func() error {
-			db := s.DB.WithContext(ctx).Model(&models.Merchant{}).Where("status = ?", "active")
+			// Legacy merchants/parties are intentionally excluded. New venues are
+			// activities(type=venue) and only an approved, enabled organizer may
+			// expose them to public search.
+			db := s.DB.WithContext(ctx).Table("activities AS a").
+				Select("a.*").
+				Joins("JOIN organizers o ON o.id = a.organizer_id").
+				Where("a.type = ? AND a.status = ? AND a.is_hidden = 0 AND o.status = ? AND o.enabled = 1", models.ActivityTypeVenue, models.ActivityStatusOnline, models.OrganizerStatusApproved).
+				Where("a.id = (SELECT MAX(av.id) FROM activities av WHERE av.organizer_id = a.organizer_id AND av.type = ? AND av.status = ? AND av.is_hidden = 0)", models.ActivityTypeVenue, models.ActivityStatusOnline)
 			if strings.TrimSpace(req.Keyword) != "" {
-				db = db.Where("(title LIKE ? OR location_name LIKE ? OR address LIKE ?)", keyword, keyword, keyword)
+				db = db.Where("(a.name LIKE ? OR a.address LIKE ? OR a.province LIKE ? OR a.city LIKE ? OR a.district LIKE ? OR o.name LIKE ?)", keyword, keyword, keyword, keyword, keyword, keyword)
 			}
-			if req.District != "" {
-				db = db.Where("district_id = ?", req.District)
+			if district != "" {
+				db = db.Where("a.district = ?", district)
 			}
 			if req.Area != "" {
-				db = db.Where("area_id = ?", req.Area)
+				db = db.Where("a.address LIKE ?", "%"+req.Area+"%")
 			}
 			if req.BusinessArea != "" {
-				db = db.Where("location_name LIKE ? OR address LIKE ?", "%"+req.BusinessArea+"%", "%"+req.BusinessArea+"%")
+				db = db.Where("a.address LIKE ?", "%"+req.BusinessArea+"%")
 			}
-			if tagBits := parseSearchTagBits(req.Tags); tagBits > 0 {
-				db = db.Where("tags & ? = ?", tagBits, tagBits)
-			}
+			db = dao.ApplyContentTagFilter(db, models.ContentTagTargetVenue, "a.organizer_id", tagIDs)
 			if req.Distance > 0 && req.Lat != 0 && req.Lng != 0 {
-				db = db.Where(searchDistanceSQL("latitude", "longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
+				db = db.Where(searchDistanceSQL("a.latitude", "a.longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
 			}
 			if req.PartyCursor > 0 {
-				db = db.Where("id < ?", req.PartyCursor)
+				db = db.Where("a.id < ?", req.PartyCursor)
 			}
 
-			err := db.Order("id DESC").Limit(req.Limit).Find(&dbParties).Error
+			err := db.Order("a.id DESC").Limit(req.Limit).Scan(&dbVenues).Error
 			if err != nil {
 				return err
 			}
 
-			if len(dbParties) > 0 {
+			if req.Type == 3 && len(dbVenues) > 0 {
 				mu.Lock()
-				resp.NextPartyCursor = dbParties[len(dbParties)-1].ID
+				resp.NextPartyCursor = dbVenues[len(dbVenues)-1].ID
 				mu.Unlock()
 			}
 			return nil
@@ -182,29 +193,35 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 	if req.Type == 0 || req.Type == 4 {
 		g.Go(func() error {
-			db := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ?", models.ActivityStatusOnline)
+			// A party remains searchable only while it is online, visible, owned
+			// by an approved organizer and has not ended.
+			db := s.DB.WithContext(ctx).Table("activities AS a").
+				Select("a.*").
+				Joins("JOIN organizers o ON o.id = a.organizer_id").
+				Where("a.type <> ? AND a.status = ? AND a.is_hidden = 0 AND a.end_time >= ? AND o.status = ? AND o.enabled = 1", models.ActivityTypeVenue, models.ActivityStatusOnline, time.Now(), models.OrganizerStatusApproved)
 			if strings.TrimSpace(req.Keyword) != "" {
-				db = db.Where("(name LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ?)", keyword, keyword, keyword, keyword, keyword)
+				db = db.Where("(a.name LIKE ? OR a.address LIKE ? OR a.province LIKE ? OR a.city LIKE ? OR a.district LIKE ? OR o.name LIKE ?)", keyword, keyword, keyword, keyword, keyword, keyword)
 			}
-			if req.District != "" {
-				db = db.Where("district = ?", s.resolveDistrictName(ctx, req.District))
+			if district != "" {
+				db = db.Where("a.district = ?", district)
 			}
 			if req.Area != "" {
-				db = db.Where("address LIKE ?", "%"+req.Area+"%")
+				db = db.Where("a.address LIKE ?", "%"+req.Area+"%")
 			}
 			if req.BusinessArea != "" {
-				db = db.Where("address LIKE ?", "%"+req.BusinessArea+"%")
+				db = db.Where("a.address LIKE ?", "%"+req.BusinessArea+"%")
 			}
+			db = dao.ApplyContentTagFilter(db, models.ContentTagTargetActivity, "a.id", tagIDs)
 			if req.Distance > 0 && req.Lat != 0 && req.Lng != 0 {
-				db = db.Where(searchDistanceSQL("latitude", "longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
+				db = db.Where(searchDistanceSQL("a.latitude", "a.longitude")+" <= ?", req.Lat, req.Lng, req.Lat, req.Distance)
 			}
 			if req.PartyCursor > 0 {
-				db = db.Where("id < ?", req.PartyCursor)
+				db = db.Where("a.id < ?", req.PartyCursor)
 			}
-			if err := db.Order("id DESC").Limit(req.Limit).Find(&dbActivities).Error; err != nil {
+			if err := db.Order("a.id DESC").Limit(req.Limit).Scan(&dbActivities).Error; err != nil {
 				return err
 			}
-			if len(dbActivities) > 0 {
+			if req.Type == 4 && len(dbActivities) > 0 {
 				mu.Lock()
 				resp.NextPartyCursor = dbActivities[len(dbActivities)-1].ID
 				mu.Unlock()
@@ -254,17 +271,19 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 		}
 	}
 	// 3. 组装活动
-	if len(dbParties) > 0 {
-		resp.Parties = make([]types.SearchPartyItem, 0, len(dbParties))
-		for _, p := range dbParties {
+	if len(dbVenues) > 0 {
+		resp.Parties = make([]types.SearchPartyItem, 0, len(dbVenues))
+		for _, p := range dbVenues {
 			resp.Parties = append(resp.Parties, types.SearchPartyItem{
-				ID:           p.ID,
-				Title:        p.Title,
-				Type:         p.Type,
-				LocationName: p.LocationName,
-				CoverImage:   p.CoverImage,
-				Price:        76,
+				ID:           p.OrganizerID,
+				ActivityID:   p.ID,
+				Title:        p.Name,
+				Type:         models.ActivityTypeVenue,
+				LocationName: p.Address,
+				CoverImage:   p.PosterList,
+				Price:        0,
 				StartTime:    p.CreatedAt,
+				Status:       p.Status,
 			})
 		}
 	}

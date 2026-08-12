@@ -13,6 +13,8 @@ func TestRequiredAdminPermission(t *testing.T) {
 		{"POST", "/v1/admin/orders/T1/refund/approve", "admin.orders"},
 		{"GET", "/v1/admin/finance/platform-flows", "admin.finance"},
 		{"GET", "/v1/admin/notes", "admin.content"},
+		{"GET", "/v1/admin/customer-service/sessions", "admin.customer_service"},
+		{"POST", "/v1/admin/customer-service/sessions/10/messages", "admin.customer_service"},
 		{"POST", "/v1/admin/admins", "*"},
 		{"PUT", "/v1/admin/roles/1", "*"},
 	}

@@ -46,6 +46,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
+	g.GET("/my/likes", authorize, context.Wrap(n.GetMyLikes))
 	g.GET("/my/collects", authorize, context.Wrap(n.GetMyCollections))
 
 	g.GET("/list", optionalAuth, context.Wrap(n.ListNote))
@@ -407,6 +408,31 @@ func (n *Note) GetMyCollections(c *gin.Context) error {
 		Notes: notes,
 		Total: int(total),
 	})
+	return nil
+}
+
+// GetMyLikes queries the current user's own like history. It must not be
+// confused with the profile's received-like statistic.
+func (n *Note) GetMyLikes(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	var req types.GetMyLikesRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		return response.NewError(http.StatusBadRequest, "参数错误: "+err.Error())
+	}
+	if req.Page == 0 {
+		req.Page = types.DefaultPage
+	}
+	if req.PageSize == 0 {
+		req.PageSize = types.DefaultPageSize
+	}
+	notes, total, err := n.LikeService.GetUserLikes(c.Request.Context(), uint64(userID), req.PageSize, (req.Page-1)*req.PageSize)
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
+	}
+	response.Success(c, types.GetMyLikesResponse{Notes: notes, Total: int(total)})
 	return nil
 }
 

@@ -90,14 +90,25 @@ type LoginRep struct {
 }
 
 type UserProfileResp struct {
-	User         UserBasicInfo `json:"user"`
-	Stats        UserStats     `json:"stats"`
-	AccessToken  string        `json:"access_token,omitempty"`
-	RefreshToken string        `json:"refresh_token,omitempty"`
-	IsFollowing  bool          `json:"is_following"`
-	IsVerifier   bool          `json:"is_verifier"`
-	VerifierID   int64         `json:"verifier_id,omitempty"`
-	Verifier     *VerifierInfo `json:"verifier,omitempty"`
+	User         UserBasicInfo      `json:"user"`
+	Stats        UserStats          `json:"stats"`
+	Organizer    *OrganizerIdentity `json:"organizer,omitempty"`
+	AccessToken  string             `json:"access_token,omitempty"`
+	RefreshToken string             `json:"refresh_token,omitempty"`
+	IsFollowing  bool               `json:"is_following"`
+	IsVerifier   bool               `json:"is_verifier"`
+	VerifierID   int64              `json:"verifier_id,omitempty"`
+	Verifier     *VerifierInfo      `json:"verifier,omitempty"`
+}
+
+// OrganizerIdentity is included for the logged-in user when that user owns or
+// is an enabled staff member of an approved organizer. Personal-profile UI
+// should continue using user; organizer UI should use this object.
+type OrganizerIdentity struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	Logo string `json:"logo"`
 }
 
 type UserToken struct {

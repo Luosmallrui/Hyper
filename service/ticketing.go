@@ -30,6 +30,7 @@ import (
 
 type ITicketingService interface {
 	GetOrganizerInfo(ctx context.Context, userID int64) (*types.OrganizerInfoResponse, error)
+	ListContentTags(ctx context.Context) ([]types.ContentTagItem, error)
 	GetPointsRule(ctx context.Context) (*types.PointsRule, error)
 	ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) (*types.OrganizerApplyResponse, error)
 	GetOrganizerAuditStatus(ctx context.Context, userID int64) (*types.OrganizerAuditStatusResponse, error)
@@ -151,15 +152,29 @@ func (s *TicketingService) GetOrganizerInfo(ctx context.Context, userID int64) (
 	return resp, nil
 }
 
+// ListContentTags returns the currently enabled marketing tags for the
+// activity/venue publishing flow. Tag configuration remains admin-owned.
+func (s *TicketingService) ListContentTags(ctx context.Context) ([]types.ContentTagItem, error) {
+	tags, err := dao.ListActiveCouponTags(ctx, s.DB)
+	if err != nil {
+		return nil, err
+	}
+	return types.BuildContentTagItems(tags), nil
+}
+
 func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req types.OrganizerApplyRequest) (*types.OrganizerApplyResponse, error) {
+	organizerType, err := normalizeOrganizerType(req.Type)
+	if err != nil {
+		return nil, err
+	}
 	var org models.Organizer
-	err := s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
+	err = s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	data := models.Organizer{
 		UserID:   userID,
-		Type:     models.OrganizerTypeMerchant,
+		Type:     organizerType,
 		Name:     req.Name,
 		Logo:     req.Logo,
 		Status:   models.OrganizerStatusAuditing,
@@ -184,6 +199,7 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 	if err := s.DB.WithContext(ctx).Model(&org).Updates(map[string]any{
 		"name":          req.Name,
 		"logo":          req.Logo,
+		"type":          organizerType,
 		"status":        models.OrganizerStatusAuditing,
 		"reject_reason": "",
 		"level":         "LV1",
@@ -2016,6 +2032,18 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 	if req.BusinessHours != nil && activityType != models.ActivityTypeVenue {
 		return 0, errors.New("仅场地可填写每日经营时间")
 	}
+	if activityType == models.ActivityTypeVenue && (req.Step == 4 || req.TicketSpecs != nil) {
+		return 0, errors.New("场地不支持票券配置")
+	}
+	if activityType == models.ActivityTypeVenue && !wasVenue {
+		var ticketSpecCount int64
+		if err := s.DB.WithContext(ctx).Model(&models.TicketSpec{}).Where("activity_id = ?", act.ID).Count(&ticketSpecCount).Error; err != nil {
+			return 0, err
+		}
+		if ticketSpecCount > 0 {
+			return 0, errors.New("已有票券的派对不能转换为场地")
+		}
+	}
 	if req.Step == 4 {
 		if err := s.SaveTicketSpecs(ctx, userID, act.ID, req.TicketSpecs); err != nil {
 			return 0, err
@@ -2046,6 +2074,15 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			return 0, err
 		}
 	}
+	if req.TagIDs != nil {
+		targetType, targetID := models.ContentTagTargetActivity, act.ID
+		if activityType == models.ActivityTypeVenue {
+			targetType, targetID = models.ContentTagTargetVenue, org.ID
+		}
+		if err := dao.ReplaceContentTags(ctx, s.DB, targetType, targetID, req.TagIDs); err != nil {
+			return 0, err
+		}
+	}
 	return act.ID, nil
 }
 
@@ -2059,11 +2096,19 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 		return nil, err
 	}
 	if act.IsHidden == 1 && userID != org.UserID {
-		return nil, gorm.ErrRecordNotFound
+		canView, err := s.hasHistoricalActivityOrder(ctx, userID, act.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !canView {
+			return nil, gorm.ErrRecordNotFound
+		}
 	}
-	var specs []models.TicketSpec
-	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
-		return nil, err
+	specs := make([]models.TicketSpec, 0)
+	if defaultActivityType(act.Type) != models.ActivityTypeVenue {
+		if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
+			return nil, err
+		}
 	}
 	targetType, targetID := models.ContentTagTargetActivity, act.ID
 	if defaultActivityType(act.Type) == models.ActivityTypeVenue {
@@ -2272,9 +2317,12 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 }
 
 func (s *TicketingService) SearchActivities(ctx context.Context, userID int64, keyword string) ([]types.ActivityListItem, error) {
-	query := s.DB.WithContext(ctx).Model(&models.Activity{}).Where("status = ? AND is_hidden = 0", models.ActivityStatusOnline)
+	query := s.DB.WithContext(ctx).Table("activities AS a").
+		Select("a.*").
+		Joins("JOIN organizers o ON o.id = a.organizer_id").
+		Where("a.type <> ? AND a.status = ? AND a.is_hidden = 0 AND a.end_time >= ? AND o.status = ? AND o.enabled = 1", models.ActivityTypeVenue, models.ActivityStatusOnline, time.Now(), models.OrganizerStatusApproved)
 	if keyword != "" {
-		query = query.Where("name LIKE ?", "%"+keyword+"%")
+		query = query.Where("a.name LIKE ? OR o.name LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	resp, err := s.listActivities(query, 1, 50, userID)
 	if err != nil {
@@ -2525,6 +2573,13 @@ func maxInt64(value, min int64) int64 {
 }
 
 func (s *TicketingService) GetTicketSpecs(ctx context.Context, activityID int64) ([]models.TicketSpec, error) {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).First(&activity, activityID).Error; err != nil {
+		return nil, err
+	}
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return []models.TicketSpec{}, nil
+	}
 	var specs []models.TicketSpec
 	err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error
 	return specs, err
@@ -2535,8 +2590,12 @@ func (s *TicketingService) SaveTicketSpecs(ctx context.Context, userID, activity
 	if err != nil {
 		return err
 	}
-	if err := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", activityID, org.ID).First(&models.Activity{}).Error; err != nil {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", activityID, org.ID).First(&activity).Error; err != nil {
 		return err
+	}
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return errors.New("场地不支持票券配置")
 	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range specs {
@@ -2910,15 +2969,16 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		return nil, err
 	}
 	page, size = normalizePage(page, size)
-	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).Where("user_id = ? AND user_deleted_at IS NULL", userID)
+	query := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("ticket_orders.user_id = ? AND ticket_orders.user_deleted_at IS NULL", userID)
 	if status != nil {
 		switch *status {
 		case models.TicketOrderStatusPending:
-			query = query.Where("status = ? AND actual_price > 0", *status)
+			query = query.Where("ticket_orders.status = ? AND ticket_orders.actual_price > 0", *status)
 		case models.TicketOrderStatusUsable:
-			query = query.Where("(status = ? OR (status = ? AND actual_price = 0))", *status, models.TicketOrderStatusPending)
+			query = query.Where("(ticket_orders.status = ? OR (ticket_orders.status = ? AND ticket_orders.actual_price = 0))", *status, models.TicketOrderStatusPending)
 		default:
-			query = query.Where("status = ?", *status)
+			query = query.Where("ticket_orders.status = ?", *status)
 		}
 	}
 	if refundStatus = strings.TrimSpace(refundStatus); refundStatus != "" {
@@ -2951,6 +3011,8 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		StartTime      time.Time
 		EndTime        time.Time
 		PosterList     string
+		ActivityHidden int8
+		HiddenReason   string
 		TicketSpecID   int64
 		TicketSpecName string
 		BuyerName      string
@@ -2974,6 +3036,8 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			activities.start_time,
 			activities.end_time,
 			activities.poster_list,
+			COALESCE(activities.is_hidden, 0) AS activity_hidden,
+			COALESCE(activities.hidden_reason, '') AS hidden_reason,
 			ticket_orders.ticket_spec_id,
 			ticket_specs.name AS ticket_spec_name,
 			ticket_orders.buyer_name,
@@ -3049,6 +3113,8 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 		item.Activity.StartTime = r.StartTime
 		item.Activity.EndTime = r.EndTime
 		item.Activity.PosterList = r.PosterList
+		item.Activity.IsHidden = r.ActivityHidden == 1
+		item.Activity.HiddenReason = r.HiddenReason
 		item.TicketSpec.ID = r.TicketSpecID
 		item.TicketSpec.Name = r.TicketSpecName
 		list = append(list, item)
@@ -4469,8 +4535,28 @@ func (s *TicketingService) findOrganizerByUser(ctx context.Context, userID int64
 		if org.Enabled != 1 {
 			return &org, errors.New("商家账号已停用")
 		}
+		return &org, nil
 	}
-	return &org, err
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return &org, err
+	}
+	// A staff account acts on behalf of the same organizer and must therefore
+	// resolve to the organizer identity, not its personal profile.
+	err = s.DB.WithContext(ctx).
+		Table("organizer_staff AS os").
+		Select("o.*").
+		Joins("JOIN organizers o ON o.id = os.organizer_id").
+		Where("os.user_id = ? AND os.status = ? AND o.status = ? AND o.enabled = ?", userID, 1, models.OrganizerStatusApproved, 1).
+		Order("os.id DESC").
+		Limit(1).
+		Scan(&org).Error
+	if err != nil {
+		return &org, err
+	}
+	if org.ID == 0 {
+		return &org, gorm.ErrRecordNotFound
+	}
+	return &org, nil
 }
 
 func (s *TicketingService) ensureActivitiesBelongToOrganizer(ctx context.Context, organizerID int64, activityIDs []int64) error {
@@ -4700,6 +4786,8 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 	resp.Activity.StartTime = act.StartTime
 	resp.Activity.EndTime = act.EndTime
 	resp.Activity.PosterList = act.PosterList
+	resp.Activity.IsHidden = act.IsHidden == 1
+	resp.Activity.HiddenReason = act.HiddenReason
 	resp.TicketSpec.Name = spec.Name
 	if viewers, err := s.orderViewers(ctx, order.ID); err == nil {
 		resp.Viewers = orderViewerItems(viewers, true)
@@ -4731,6 +4819,27 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		}{RefundNo: refund.RefundNo, Status: refund.Status, StatusText: statusText}
 	}
 	return resp, nil
+}
+
+// hasHistoricalActivityOrder grants a purchaser read-only access to a hidden
+// activity's historical detail. It never re-enables subscribing or buying.
+func (s *TicketingService) hasHistoricalActivityOrder(ctx context.Context, userID, activityID int64) (bool, error) {
+	if userID <= 0 {
+		return false, nil
+	}
+	statuses := []int8{
+		models.TicketOrderStatusUsable,
+		models.TicketOrderStatusUsed,
+		models.TicketOrderStatusRefunding,
+		models.TicketOrderStatusRefundSuccess,
+		models.TicketOrderStatusRefundReject,
+	}
+	var count int64
+	err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Where("user_id = ? AND activity_id = ? AND user_deleted_at IS NULL", userID, activityID).
+		Where("(status IN ? OR (status = ? AND actual_price = 0))", statuses, models.TicketOrderStatusPending).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (s *TicketingService) markZeroPayOrderUsable(ctx context.Context, orderID int64, pointsAmount int64) error {
@@ -5157,6 +5266,19 @@ func normalizeActivityType(raw string) (string, error) {
 		return models.ActivityTypeVenue, nil
 	default:
 		return "", errors.New("活动类型无效，仅支持 party 或 venue")
+	}
+}
+
+// normalizeOrganizerType keeps historical merchant records compatible while
+// allowing the application UI to use the clearer party/venue wording.
+func normalizeOrganizerType(raw string) (string, error) {
+	switch strings.TrimSpace(raw) {
+	case "", models.OrganizerTypeMerchant, models.ActivityTypeParty:
+		return models.OrganizerTypeMerchant, nil
+	case models.OrganizerTypeVenue:
+		return models.OrganizerTypeVenue, nil
+	default:
+		return "", errors.New("入驻类型无效，仅支持 party 或 venue")
 	}
 }
 

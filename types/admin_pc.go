@@ -86,6 +86,55 @@ type AdminOperationLogItem struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// AdminCustomerServiceSessionItem is a customer conversation owned by the
+// configured platform customer-service account. The operator is deliberately
+// not exposed here: clients always see the platform account as the sender.
+type AdminCustomerServiceSessionItem struct {
+	UserID      int64  `json:"user_id"`
+	Nickname    string `json:"nickname"`
+	Avatar      string `json:"avatar"`
+	Mobile      string `json:"mobile"`
+	UserStatus  int8   `json:"user_status"`
+	LastMsgID   uint64 `json:"last_msg_id,string"`
+	LastMsgType int    `json:"last_msg_type"`
+	LastMsg     string `json:"last_msg"`
+	LastMsgTime int64  `json:"last_msg_time"`
+	Unread      uint32 `json:"unread"`
+}
+
+type AdminCustomerServiceSessionListResponse struct {
+	ServiceUserID int64                             `json:"service_user_id"`
+	List          []AdminCustomerServiceSessionItem `json:"list"`
+	Total         int64                             `json:"total"`
+	Page          int                               `json:"page"`
+	PageSize      int                               `json:"pageSize"`
+}
+
+type AdminCustomerServiceContact struct {
+	UserID    int64  `json:"user_id"`
+	Nickname  string `json:"nickname"`
+	Avatar    string `json:"avatar"`
+	Signature string `json:"signature"`
+}
+
+type AdminCustomerServiceMessageListResponse struct {
+	Service    AdminCustomerServiceContact `json:"service"`
+	Customer   AdminCustomerServiceContact `json:"customer"`
+	List       []ListMessageReq            `json:"list"`
+	NextCursor int64                       `json:"next_cursor"`
+}
+
+type AdminCustomerServiceSendMessageRequest struct {
+	MsgType     int                    `json:"msg_type" binding:"required,oneof=1 2 3 4 5 6 7 8 9"`
+	Content     string                 `json:"content"`
+	ParentMsgID int64                  `json:"parent_msg_id,string"`
+	Ext         map[string]interface{} `json:"ext"`
+}
+
+type AdminCustomerServiceReadRequest struct {
+	ReadTime int64 `json:"read_time"`
+}
+
 type AdminProfileRequest struct {
 	Avatar   string `json:"avatar"`
 	Nickname string `json:"nickname"`
