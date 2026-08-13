@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS `activities`
     `poster_wechat`     varchar(255)    NOT NULL DEFAULT '',
     `qualification_doc` varchar(255)    NOT NULL DEFAULT '',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0草稿 1待审核 2审核中 3已上架 4未通过',
+	`audit_type`        varchar(20)     NOT NULL DEFAULT 'initial' COMMENT '审核类型: initial首次审核 re_audit修改后二审',
     `reject_reason`     varchar(500)    NOT NULL DEFAULT '',
 	`is_hidden`         tinyint         NOT NULL DEFAULT 0 COMMENT '0公开 1平台下架隐藏',
 	`hidden_at`         datetime        NULL COMMENT '平台下架时间',
@@ -265,7 +266,8 @@ CREATE TABLE IF NOT EXISTS `activities`
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_activity_organizer` (`organizer_id`) USING BTREE,
     KEY `idx_activity_type` (`type`) USING BTREE,
-    KEY `idx_activity_status` (`status`) USING BTREE,
+	KEY `idx_activity_status` (`status`) USING BTREE,
+	KEY `idx_activity_audit_type` (`status`, `audit_type`) USING BTREE,
 	KEY `idx_activity_public` (`status`, `is_hidden`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='活动表v2';
 
@@ -276,6 +278,8 @@ CREATE TABLE IF NOT EXISTS `activities`
 -- ALTER TABLE `activities` ADD COLUMN `hidden_at` datetime NULL COMMENT '平台下架时间' AFTER `is_hidden`;
 -- ALTER TABLE `activities` ADD COLUMN `hidden_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '平台下架原因' AFTER `hidden_at`;
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_public` (`status`, `is_hidden`);
+-- ALTER TABLE `activities` ADD COLUMN `audit_type` varchar(20) NOT NULL DEFAULT 'initial' COMMENT '审核类型: initial首次审核 re_audit修改后二审' AFTER `status`;
+-- ALTER TABLE `activities` ADD INDEX `idx_activity_audit_type` (`status`, `audit_type`);
 
 CREATE TABLE IF NOT EXISTS `ticket_specs`
 (

@@ -20,6 +20,9 @@ const (
 	ActivityStatusOnline   int8 = 3
 	ActivityStatusRejected int8 = 4
 
+	ActivityAuditTypeInitial = "initial"
+	ActivityAuditTypeReaudit = "re_audit"
+
 	TicketOrderStatusPending       int8 = 0
 	TicketOrderStatusUsable        int8 = 1
 	TicketOrderStatusUsed          int8 = 2
@@ -93,6 +96,7 @@ type Activity struct {
 	PosterWechat     string     `gorm:"column:poster_wechat;size:255" json:"poster_wechat"`
 	QualificationDoc string     `gorm:"column:qualification_doc;size:255" json:"qualification_doc"`
 	Status           int8       `gorm:"column:status;not null;default:0;index" json:"status"`
+	AuditType        string     `gorm:"column:audit_type;size:20;not null;default:initial;index" json:"audit_type"`
 	RejectReason     string     `gorm:"column:reject_reason;size:500" json:"reject_reason"`
 	IsHidden         int8       `gorm:"column:is_hidden;not null;default:0;index" json:"is_hidden"`
 	HiddenAt         *time.Time `gorm:"column:hidden_at" json:"hidden_at,omitempty"`
@@ -132,7 +136,9 @@ type ActivityDailyVisitor struct {
 func (ActivityDailyVisitor) TableName() string { return "activity_daily_visitors" }
 
 type TicketSpec struct {
-	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	// Ticket IDs are exposed as strings so Mini Program JavaScript does not
+	// lose precision when an auto-increment value exceeds Number.MAX_SAFE_INTEGER.
+	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id,string"`
 	ActivityID    int64     `gorm:"column:activity_id;not null;index" json:"activity_id"`
 	Name          string    `gorm:"column:name;size:30;not null" json:"name"`
 	Description   string    `gorm:"column:description;size:500" json:"description"`

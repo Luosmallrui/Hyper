@@ -1210,6 +1210,10 @@ func (a *Admin) GetActivityList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	keyword := c.Query("keyword")
+	auditType := c.Query("audit_type")
+	if auditType != "" && auditType != models.ActivityAuditTypeInitial && auditType != models.ActivityAuditTypeReaudit {
+		return response.NewError(400, "audit_type 仅支持 initial 或 re_audit")
+	}
 
 	var status *int8
 	if raw := c.Query("status"); raw != "" {
@@ -1242,6 +1246,7 @@ func (a *Admin) GetActivityList(c *gin.Context) error {
 
 	filter := types.AdminActivityFilter{
 		Status:        status,
+		AuditType:     auditType,
 		IsHidden:      isHidden,
 		Keyword:       keyword,
 		OrganizerID:   organizerID,

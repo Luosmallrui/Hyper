@@ -505,6 +505,9 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 	} else {
 		query = query.Where("status <> ?", models.ActivityStatusDraft)
 	}
+	if filter.AuditType != "" {
+		query = query.Where("audit_type = ?", filter.AuditType)
+	}
 	if filter.IsHidden != nil {
 		query = query.Where("is_hidden = ?", *filter.IsHidden)
 	}
@@ -599,6 +602,7 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 			PosterWechat:     activity.PosterWechat,
 			QualificationDoc: activity.QualificationDoc,
 			Status:           activity.Status,
+			AuditType:        activity.AuditType,
 			RejectReason:     activity.RejectReason,
 			IsHidden:         activity.IsHidden,
 			HiddenAt:         formatAdminPtrTime(activity.HiddenAt),
@@ -1152,17 +1156,21 @@ func (s *AdminService) GetUserList(ctx context.Context, page, pageSize int, keyw
 	if pageSize <= 0 {
 		pageSize = 20
 	}
-	query := s.DB.WithContext(ctx).Model(&models.Users{})
+	likesSubquery := "(SELECT COUNT(*) FROM note_likes nl JOIN notes n ON n.id = nl.note_id WHERE n.user_id = u.id AND n.status <> -1 AND nl.status = 1)"
+	query := s.DB.WithContext(ctx).Table("users u")
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("nickname LIKE ? OR mobile LIKE ?", like, like)
+		query = query.Where("u.nickname LIKE ? OR u.mobile LIKE ?", like, like)
 	}
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	var users []models.Users
-	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error; err != nil {
+	if err := query.Select("u.*, " + likesSubquery + " AS likes_cnt").
+		Order("likes_cnt DESC, u.created_at DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Scan(&users).Error; err != nil {
 		return nil, err
 	}
 	userIDs := make([]int, 0, len(users))
@@ -1187,6 +1195,7 @@ func (s *AdminService) GetUserList(ctx context.Context, page, pageSize int, keyw
 			}{Amount: row.Amount, Count: row.Count}
 		}
 	}
+	counts := s.countUserBehavior(ctx, userIDs)
 	list := make([]types.AdminUserItem, 0, len(users))
 	for _, user := range users {
 		item := types.AdminUserItem{ID: user.Id, Nickname: user.Nickname, Avatar: user.Avatar, Mobile: user.Mobile, Status: user.Status, CreatedAt: user.CreatedAt.Format("2006-01-02 15:04:05"), UpdatedAt: user.UpdatedAt.Format("2006-01-02 15:04:05")}
@@ -1194,9 +1203,115 @@ func (s *AdminService) GetUserList(ctx context.Context, page, pageSize int, keyw
 			item.TotalAmount = stat.Amount
 			item.OrderCount = stat.Count
 		}
+		if c, ok := counts[user.Id]; ok {
+			item.LikesCount = c.Likes
+			item.CollectionsCount = c.Collections
+			item.FollowingCount = c.Following
+			item.FollowersCount = c.Followers
+			item.AttendCount = c.Attends
+			item.SubscribeCount = c.Subscribes
+		}
 		list = append(list, item)
 	}
 	return &types.AdminUserListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+type userBehaviorCounts struct {
+	Likes       int64
+	Collections int64
+	Following   int64
+	Followers   int64
+	Attends     int64
+	Subscribes  int64
+}
+
+// countUserBehavior aggregates likes/collections/follow/attend/subscribe counts
+// for the given page of users, matching the semantics of ListUserRecords.
+func (s *AdminService) countUserBehavior(ctx context.Context, userIDs []int) map[int]userBehaviorCounts {
+	result := make(map[int]userBehaviorCounts, len(userIDs))
+	if len(userIDs) == 0 {
+		return result
+	}
+
+	type countRow struct {
+		UserID int
+		Cnt    int64
+	}
+
+	// likes received on this user's published notes
+	var likeRows []countRow
+	_ = s.DB.WithContext(ctx).Table("note_likes nl").
+		Select("n.user_id AS user_id, COUNT(*) AS cnt").
+		Joins("JOIN notes n ON n.id = nl.note_id").
+		Where("n.user_id IN ? AND n.status <> ? AND nl.status = 1", userIDs, -1).
+		Group("n.user_id").Scan(&likeRows).Error
+	for _, row := range likeRows {
+		c := result[row.UserID]
+		c.Likes = row.Cnt
+		result[row.UserID] = c
+	}
+
+	// collections by this user
+	var collectionRows []countRow
+	_ = s.DB.WithContext(ctx).Table("note_collections").
+		Select("user_id, COUNT(*) AS cnt").
+		Where("user_id IN ? AND status = 1", userIDs).
+		Group("user_id").Scan(&collectionRows).Error
+	for _, row := range collectionRows {
+		c := result[row.UserID]
+		c.Collections = row.Cnt
+		result[row.UserID] = c
+	}
+
+	// following
+	var followingRows []countRow
+	_ = s.DB.WithContext(ctx).Table("user_follow").
+		Select("follower_id AS user_id, COUNT(*) AS cnt").
+		Where("follower_id IN ? AND status = 1", userIDs).
+		Group("follower_id").Scan(&followingRows).Error
+	for _, row := range followingRows {
+		c := result[row.UserID]
+		c.Following = row.Cnt
+		result[row.UserID] = c
+	}
+
+	// followers
+	var followerRows []countRow
+	_ = s.DB.WithContext(ctx).Table("user_follow").
+		Select("followee_id AS user_id, COUNT(*) AS cnt").
+		Where("followee_id IN ? AND status = 1", userIDs).
+		Group("followee_id").Scan(&followerRows).Error
+	for _, row := range followerRows {
+		c := result[row.UserID]
+		c.Followers = row.Cnt
+		result[row.UserID] = c
+	}
+
+	// attended orders
+	var attendRows []countRow
+	_ = s.DB.WithContext(ctx).Table("ticket_orders").
+		Select("user_id, COUNT(*) AS cnt").
+		Where("user_id IN ? AND status IN ?", userIDs, []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed, models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}).
+		Group("user_id").Scan(&attendRows).Error
+	for _, row := range attendRows {
+		c := result[row.UserID]
+		c.Attends = row.Cnt
+		result[row.UserID] = c
+	}
+
+	// activity subscriptions
+	var subscribeRows []countRow
+	_ = s.DB.WithContext(ctx).Table("activity_subscriptions").
+		Select("user_id, COUNT(*) AS cnt").
+		Where("user_id IN ?", userIDs).
+		Group("user_id").Scan(&subscribeRows).Error
+	for _, row := range subscribeRows {
+		c := result[row.UserID]
+		c.Subscribes = row.Cnt
+		result[row.UserID] = c
+	}
+
+	return result
 }
 
 func (s *AdminService) UpdateUserStatus(ctx context.Context, userID int, status int8) error {
