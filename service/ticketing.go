@@ -2089,6 +2089,15 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error) {
 	var act models.Activity
 	if err := s.DB.WithContext(ctx).First(&act, activityID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			canView, historyErr := s.hasHistoricalActivityOrder(ctx, userID, activityID)
+			if historyErr != nil {
+				return nil, historyErr
+			}
+			if canView {
+				return unavailableActivityDetail(activityID), nil
+			}
+		}
 		return nil, err
 	}
 	var org models.Organizer
@@ -2336,7 +2345,60 @@ func (s *TicketingService) DeleteActivity(ctx context.Context, userID, activityI
 	if err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", activityID, org.ID).Delete(&models.Activity{}).Error
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var activity models.Activity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND organizer_id = ?", activityID, org.ID).
+			First(&activity).Error; err != nil {
+			return err
+		}
+
+		var orderCount int64
+		if err := tx.Model(&models.TicketOrder{}).Where("activity_id = ?", activityID).Count(&orderCount).Error; err != nil {
+			return err
+		}
+		if orderCount > 0 {
+			now := time.Now()
+			return tx.Model(&activity).Updates(map[string]any{
+				"is_hidden":     1,
+				"hidden_at":     now,
+				"hidden_reason": "主办方已下架活动",
+			}).Error
+		}
+		return tx.Delete(&activity).Error
+	})
+}
+
+const unavailableActivityName = "活动已下架"
+
+func unavailableActivityDetail(activityID int64) *types.ActivityDetailResponse {
+	return &types.ActivityDetailResponse{
+		Activity: models.Activity{
+			ID:           activityID,
+			Name:         unavailableActivityName,
+			Status:       models.ActivityStatusOnline,
+			IsHidden:     1,
+			HiddenReason: unavailableActivityName,
+		},
+		Tags:        []types.ContentTagItem{},
+		TicketSpecs: []models.TicketSpec{},
+	}
+}
+
+func applyOrderActivityListItem(item *types.TicketOrderListItem, activityID, activityRecordID int64, name string, startTime, endTime time.Time, posterList string, hidden int8, hiddenReason string) {
+	item.Activity.ID = activityID
+	if activityRecordID == 0 {
+		item.Activity.Name = unavailableActivityName
+		item.Activity.IsHidden = true
+		item.Activity.HiddenReason = unavailableActivityName
+		return
+	}
+	item.Activity.Name = name
+	item.Activity.StartTime = startTime
+	item.Activity.EndTime = endTime
+	item.Activity.PosterList = posterList
+	item.Activity.IsHidden = hidden == 1
+	item.Activity.HiddenReason = hiddenReason
 }
 
 func (s *TicketingService) SubmitActivityAudit(ctx context.Context, userID, activityID int64) error {
@@ -2999,29 +3061,30 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 	}
 
 	var rows []struct {
-		ID             int64
-		OrderNo        string
-		Status         int8
-		TotalPrice     int64
-		ActualPrice    int64
-		PointsAmount   int64
-		Quantity       int
-		ActivityID     int64
-		ActivityName   string
-		StartTime      time.Time
-		EndTime        time.Time
-		PosterList     string
-		ActivityHidden int8
-		HiddenReason   string
-		TicketSpecID   int64
-		TicketSpecName string
-		BuyerName      string
-		BuyerIDCard    string
-		CreatedAt      time.Time
-		ExpireTime     time.Time
-		PayTime        *time.Time
-		RefundNo       string
-		RefundStatus   *int8
+		ID               int64
+		OrderNo          string
+		Status           int8
+		TotalPrice       int64
+		ActualPrice      int64
+		PointsAmount     int64
+		Quantity         int
+		ActivityID       int64
+		ActivityRecordID int64
+		ActivityName     string
+		StartTime        time.Time
+		EndTime          time.Time
+		PosterList       string
+		ActivityHidden   int8
+		HiddenReason     string
+		TicketSpecID     int64
+		TicketSpecName   string
+		BuyerName        string
+		BuyerIDCard      string
+		CreatedAt        time.Time
+		ExpireTime       time.Time
+		PayTime          *time.Time
+		RefundNo         string
+		RefundStatus     *int8
 	}
 	err := query.
 		Select(`ticket_orders.id,
@@ -3032,6 +3095,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			ticket_orders.points_amount,
 			ticket_orders.quantity,
 			ticket_orders.activity_id,
+			COALESCE(activities.id, 0) AS activity_record_id,
 			activities.name AS activity_name,
 			activities.start_time,
 			activities.end_time,
@@ -3108,13 +3172,7 @@ func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, s
 			item.RefundStatusText = refundStatusText(*r.RefundStatus)
 		}
 		item.Viewers = orderViewerItems(viewersByOrderNo[r.OrderNo], false)
-		item.Activity.ID = r.ActivityID
-		item.Activity.Name = r.ActivityName
-		item.Activity.StartTime = r.StartTime
-		item.Activity.EndTime = r.EndTime
-		item.Activity.PosterList = r.PosterList
-		item.Activity.IsHidden = r.ActivityHidden == 1
-		item.Activity.HiddenReason = r.HiddenReason
+		applyOrderActivityListItem(&item, r.ActivityID, r.ActivityRecordID, r.ActivityName, r.StartTime, r.EndTime, r.PosterList, r.ActivityHidden, r.HiddenReason)
 		item.TicketSpec.ID = r.TicketSpecID
 		item.TicketSpec.Name = r.TicketSpecName
 		list = append(list, item)
@@ -4756,11 +4814,16 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		order.PayTime = &nowPaid
 	}
 	var act models.Activity
+	activityMissing := false
 	if err := s.DB.WithContext(ctx).First(&act, order.ActivityID).Error; err != nil {
-		return nil, err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			activityMissing = true
+		} else {
+			return nil, err
+		}
 	}
 	var spec models.TicketSpec
-	if err := s.DB.WithContext(ctx).First(&spec, order.TicketSpecID).Error; err != nil {
+	if err := s.DB.WithContext(ctx).First(&spec, order.TicketSpecID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	resp := &types.TicketOrderDetailResponse{
@@ -4781,14 +4844,25 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		QRCodeURL:      order.QRCodeURL,
 		ExpireTime:     order.ExpireTime,
 	}
-	resp.Activity.ID = act.ID
-	resp.Activity.Name = act.Name
-	resp.Activity.StartTime = act.StartTime
-	resp.Activity.EndTime = act.EndTime
-	resp.Activity.PosterList = act.PosterList
-	resp.Activity.IsHidden = act.IsHidden == 1
-	resp.Activity.HiddenReason = act.HiddenReason
-	resp.TicketSpec.Name = spec.Name
+	if activityMissing {
+		resp.Activity.ID = order.ActivityID
+		resp.Activity.Name = unavailableActivityName
+		resp.Activity.IsHidden = true
+		resp.Activity.HiddenReason = unavailableActivityName
+	} else {
+		resp.Activity.ID = act.ID
+		resp.Activity.Name = act.Name
+		resp.Activity.StartTime = act.StartTime
+		resp.Activity.EndTime = act.EndTime
+		resp.Activity.PosterList = act.PosterList
+		resp.Activity.IsHidden = act.IsHidden == 1
+		resp.Activity.HiddenReason = act.HiddenReason
+	}
+	if spec.ID == 0 {
+		resp.TicketSpec.Name = "票券信息不可用"
+	} else {
+		resp.TicketSpec.Name = spec.Name
+	}
 	if viewers, err := s.orderViewers(ctx, order.ID); err == nil {
 		resp.Viewers = orderViewerItems(viewers, true)
 	}
