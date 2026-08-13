@@ -597,6 +597,7 @@ func (s *TicketingService) GetOrganizerCollection(ctx context.Context, userID, c
 				StartTime:  act.StartTime,
 				EndTime:    act.EndTime,
 				Status:     act.Status,
+				AuditType:  act.AuditType,
 			})
 		}
 	}
@@ -2020,6 +2021,7 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			StartTime:   time.Now(),
 			EndTime:     time.Now(),
 			Status:      models.ActivityStatusDraft,
+			AuditType:   models.ActivityAuditTypeInitial,
 		}
 		if err := s.DB.WithContext(ctx).Create(&act).Error; err != nil {
 			return 0, err
@@ -2083,6 +2085,14 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			return 0, err
 		}
 	}
+	// An approved activity or venue must be reviewed again after its merchant
+	// changes publishable content. Draft and rejected records still use the
+	// explicit submit-audit action, while a pending record remains pending.
+	if req.ActivityID > 0 && act.Status == models.ActivityStatusOnline && activityEditNeedsReaudit(req, updates) {
+		if _, err := s.markActivityPendingReview(ctx, act.ID, models.ActivityAuditTypeReaudit); err != nil {
+			return 0, err
+		}
+	}
 	return act.ID, nil
 }
 
@@ -2104,15 +2114,23 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	if err := s.DB.WithContext(ctx).First(&org, act.OrganizerID).Error; err != nil {
 		return nil, err
 	}
-	if act.IsHidden == 1 && userID != org.UserID {
-		canView, err := s.hasHistoricalActivityOrder(ctx, userID, act.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !canView {
+	if userID != org.UserID && !isActivityPublic(act) {
+		// A platform-hidden activity remains available to ticket holders for
+		// historical order lookups. A merchant's pending revision, however, is
+		// not public until the administrator approves it again.
+		if act.IsHidden == 1 {
+			canView, err := s.hasHistoricalActivityOrder(ctx, userID, act.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !canView {
+				return nil, gorm.ErrRecordNotFound
+			}
+		} else {
 			return nil, gorm.ErrRecordNotFound
 		}
 	}
+
 	specs := make([]models.TicketSpec, 0)
 	if defaultActivityType(act.Type) != models.ActivityTypeVenue {
 		if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
@@ -2143,6 +2161,14 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 		FollowCount:      followCounts[contentFollowIDForActivity(act)],
 		FollowTargetType: contentFollowTargetForActivity(act),
 		FollowTargetID:   contentFollowIDForActivity(act),
+	}
+	if defaultActivityType(act.Type) == models.ActivityTypeVenue {
+		var profile models.OrganizerProfile
+		if err := s.DB.WithContext(ctx).Where("organizer_id = ?", act.OrganizerID).First(&profile).Error; err == nil {
+			resp.BusinessHours = profile.BusinessHours
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
 	}
 	if userID > 0 {
 		var count int64
@@ -2254,9 +2280,10 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 		StartTime   time.Time
 		EndTime     time.Time
 		Status      int8
+		AuditType   string
 	}
 	if err := query.
-		Select("a.id, a.organizer_id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status").
+		Select("a.id, a.organizer_id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status, a.audit_type").
 		Order("sub.created_at DESC").
 		Offset((page - 1) * size).
 		Limit(size).
@@ -2284,6 +2311,7 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 			StartTime:        row.StartTime,
 			EndTime:          row.EndTime,
 			Status:           row.Status,
+			AuditType:        row.AuditType,
 			IsSubscribe:      true,
 			IsFollow:         followed[row.ID],
 			FollowCount:      followCounts[row.ID],
@@ -2295,7 +2323,7 @@ func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID 
 }
 
 func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, page, size int, filter types.ActivityListFilter) (*types.PageResponse[types.ActivityListItem], error) {
-	org, err := s.findOrganizerByUser(ctx, userID)
+	org, err := s.findApprovedOrganizerForActivityList(ctx, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &types.PageResponse[types.ActivityListItem]{List: []types.ActivityListItem{}}, nil
@@ -2323,6 +2351,20 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 		query = query.Where("start_time <= ?", *filter.ActivityTo)
 	}
 	return s.listActivities(query, page, size, userID)
+}
+
+func (s *TicketingService) findApprovedOrganizerForActivityList(ctx context.Context, userID int64) (*models.Organizer, error) {
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).
+		Where("user_id = ? AND status = ? AND enabled = ?", userID, models.OrganizerStatusApproved, 1).
+		Order("id DESC").
+		First(&org).Error; err == nil {
+		return &org, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	return s.findOrganizerByUser(ctx, userID)
 }
 
 func (s *TicketingService) SearchActivities(ctx context.Context, userID int64, keyword string) ([]types.ActivityListItem, error) {
@@ -2415,7 +2457,21 @@ func (s *TicketingService) SubmitActivityAudit(ctx context.Context, userID, acti
 	if err := validateChinaCoordinate(activity.Latitude, activity.Longitude); err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).Model(&activity).Update("status", models.ActivityStatusPending).Error
+	switch activity.Status {
+	case models.ActivityStatusPending:
+		return nil
+	case models.ActivityStatusDraft, models.ActivityStatusRejected:
+		return s.DB.WithContext(ctx).Model(&activity).Updates(map[string]any{
+			"status":        models.ActivityStatusPending,
+			"audit_type":    normalizeActivityAuditType(activity.AuditType),
+			"reject_reason": "",
+			"updated_at":    time.Now(),
+		}).Error
+	case models.ActivityStatusOnline:
+		return errors.New("已上架内容修改后会自动提交二次审核")
+	default:
+		return errors.New("活动正在审核中，请勿重复提交")
+	}
 }
 
 func (s *TicketingService) GetActivityStatistics(ctx context.Context, userID, activityID int64) (*types.ActivityStatisticsResponse, error) {
@@ -2659,14 +2715,16 @@ func (s *TicketingService) SaveTicketSpecs(ctx context.Context, userID, activity
 	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
 		return errors.New("场地不支持票券配置")
 	}
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range specs {
 			spec, err := buildTicketSpec(activityID, item)
 			if err != nil {
 				return err
 			}
 			if item.ID > 0 {
-				if err := tx.Model(&models.TicketSpec{}).Where("id = ? AND activity_id = ?", item.ID, activityID).Updates(spec).Error; err != nil {
+				// Map updates deliberately retain zero values: a merchant must be
+				// able to disable a ticket or set its stock/price to zero.
+				if err := tx.Model(&models.TicketSpec{}).Where("id = ? AND activity_id = ?", item.ID, activityID).Updates(ticketSpecUpdates(spec)).Error; err != nil {
 					return err
 				}
 				continue
@@ -2676,7 +2734,13 @@ func (s *TicketingService) SaveTicketSpecs(ctx context.Context, userID, activity
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if len(specs) > 0 {
+		_, err = s.markActivityPendingReview(ctx, activityID, models.ActivityAuditTypeReaudit)
+	}
+	return err
 }
 
 func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID int64) error {
@@ -2684,9 +2748,17 @@ func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID 
 	if err != nil {
 		return err
 	}
-	return s.DB.WithContext(ctx).
+	var spec models.TicketSpec
+	if err := s.DB.WithContext(ctx).
 		Where("id = ? AND activity_id IN (?)", specID, s.DB.Model(&models.Activity{}).Select("id").Where("organizer_id = ?", org.ID)).
-		Delete(&models.TicketSpec{}).Error
+		First(&spec).Error; err != nil {
+		return err
+	}
+	if err := s.DB.WithContext(ctx).Delete(&spec).Error; err != nil {
+		return err
+	}
+	_, err = s.markActivityPendingReview(ctx, spec.ActivityID, models.ActivityAuditTypeReaudit)
+	return err
 }
 
 func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error) {
@@ -3666,11 +3738,19 @@ func (s *TicketingService) GetOrganizerOrderSummary(ctx context.Context, userID 
 	}
 
 	resp := &types.OrganizerOrderSummary{ActivityRanks: make([]types.OrganizerOrderActivityRank, 0)}
+	var totals struct {
+		TotalAmount int64
+		OrderCount  int64
+		TicketCount int64
+	}
 	if err := base().
 		Select("COALESCE(SUM(o.actual_price), 0) AS total_amount, COUNT(o.id) AS order_count, COALESCE(SUM(o.quantity), 0) AS ticket_count").
-		Scan(resp).Error; err != nil {
+		Scan(&totals).Error; err != nil {
 		return nil, err
 	}
+	resp.TotalAmount = totals.TotalAmount
+	resp.OrderCount = totals.OrderCount
+	resp.TicketCount = totals.TicketCount
 	if resp.OrderCount > 0 {
 		resp.AverageOrderAmount = resp.TotalAmount / resp.OrderCount
 	}
@@ -4798,7 +4878,7 @@ func (s *TicketingService) listActivities(query *gorm.DB, page, size int, userID
 			followCount = venueFollowCounts[a.OrganizerID]
 			isFollow = venueFollowed[a.OrganizerID]
 		}
-		list = append(list, types.ActivityListItem{ID: a.ID, Type: activityType, Name: a.Name, PosterList: a.PosterList, StartTime: a.StartTime, EndTime: a.EndTime, Status: a.Status, TagIDs: types.ContentTagIDs(tags), Tags: types.BuildContentTagItems(tags), IsFollow: isFollow, FollowCount: followCount, FollowTargetType: contentFollowTargetForActivity(a), FollowTargetID: contentFollowIDForActivity(a)})
+		list = append(list, types.ActivityListItem{ID: a.ID, Type: activityType, Name: a.Name, PosterList: a.PosterList, StartTime: a.StartTime, EndTime: a.EndTime, Status: a.Status, AuditType: a.AuditType, TagIDs: types.ContentTagIDs(tags), Tags: types.BuildContentTagItems(tags), IsFollow: isFollow, FollowCount: followCount, FollowTargetType: contentFollowTargetForActivity(a), FollowTargetID: contentFollowIDForActivity(a)})
 	}
 	return &types.PageResponse[types.ActivityListItem]{List: list, Total: total}, nil
 }
@@ -5326,6 +5406,39 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 	return updates, nil
 }
 
+// activityEditNeedsReaudit deliberately treats every writable content field
+// (and a tag or business-hours change) as publishable. This keeps the rule
+// simple for merchants and ensures review does not miss a material change.
+func activityEditNeedsReaudit(req types.ActivityCreateRequest, updates map[string]any) bool {
+	return len(updates) > 0 || req.TagIDs != nil || req.BusinessHours != nil || req.TicketSpecs != nil
+}
+
+// markActivityPendingReview is idempotent: it only transitions an online
+// activity. Drafts, rejected records and entries already awaiting review keep
+// their existing workflow state.
+func (s *TicketingService) markActivityPendingReview(ctx context.Context, activityID int64, auditType string) (bool, error) {
+	auditType = normalizeActivityAuditType(auditType)
+	result := s.DB.WithContext(ctx).Model(&models.Activity{}).
+		Where("id = ? AND status = ?", activityID, models.ActivityStatusOnline).
+		Updates(map[string]any{
+			"status":        models.ActivityStatusPending,
+			"audit_type":    auditType,
+			"reject_reason": "",
+			"updated_at":    time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func normalizeActivityAuditType(auditType string) string {
+	if auditType == models.ActivityAuditTypeReaudit {
+		return models.ActivityAuditTypeReaudit
+	}
+	return models.ActivityAuditTypeInitial
+}
+
 // venueValidityWindow only preserves compatibility with the activities table.
 // Venue availability is governed by organizer business_hours, not this range.
 func venueValidityWindow(now time.Time) (time.Time, time.Time) {
@@ -5447,6 +5560,21 @@ func buildTicketSpec(activityID int64, item types.TicketSpecSaveItem) (*models.T
 		PurchaseLimit: item.PurchaseLimit,
 		MaxAttendees:  item.MaxAttendees,
 	}, nil
+}
+
+func ticketSpecUpdates(spec *models.TicketSpec) map[string]any {
+	return map[string]any{
+		"name":           spec.Name,
+		"description":    spec.Description,
+		"is_enabled":     spec.IsEnabled,
+		"sale_start":     spec.SaleStart,
+		"sale_end":       spec.SaleEnd,
+		"price":          spec.Price,
+		"stock":          spec.Stock,
+		"purchase_limit": spec.PurchaseLimit,
+		"max_attendees":  spec.MaxAttendees,
+		"updated_at":     time.Now(),
+	}
 }
 
 func parseDatetime(value string) (time.Time, error) {

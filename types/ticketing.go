@@ -461,6 +461,9 @@ type ActivityCreateRequest struct {
 
 type ActivityDetailResponse struct {
 	models.Activity
+	// BusinessHours belongs to the organizer profile and is returned here for
+	// venue editing. It is empty for party activities.
+	BusinessHours    string              `json:"business_hours"`
 	UserID           int64               `json:"user_id"`
 	TagIDs           []int64             `json:"tag_ids"`
 	Tags             []ContentTagItem    `json:"tags"`
@@ -481,6 +484,7 @@ type ActivityListItem struct {
 	StartTime        time.Time        `json:"start_time"`
 	EndTime          time.Time        `json:"end_time"`
 	Status           int8             `json:"status"`
+	AuditType        string           `json:"audit_type"`
 	TagIDs           []int64          `json:"tag_ids"`
 	Tags             []ContentTagItem `json:"tags"`
 	IsSubscribe      bool             `json:"is_subscribe,omitempty"`
@@ -491,7 +495,7 @@ type ActivityListItem struct {
 }
 
 type TicketSpecSaveItem struct {
-	ID            int64  `json:"id"`
+	ID            int64  `json:"id,string"`
 	Name          string `json:"name" binding:"required"`
 	Description   string `json:"description"`
 	IsEnabled     int8   `json:"is_enabled"`

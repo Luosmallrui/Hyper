@@ -127,6 +127,7 @@ type AdminActivityItem struct {
 	PosterWechat     string  `json:"poster_wechat"`
 	QualificationDoc string  `json:"qualification_doc"`
 	Status           int8    `json:"status"`
+	AuditType        string  `json:"audit_type"`
 	RejectReason     string  `json:"reject_reason"`
 	IsHidden         int8    `json:"is_hidden"`
 	HiddenAt         string  `json:"hidden_at"`
@@ -246,6 +247,7 @@ type AdminOrganizerItem struct {
 
 type AdminActivityFilter struct {
 	Status        *int8
+	AuditType     string
 	IsHidden      *int8
 	Keyword       string
 	OrganizerID   int64
@@ -330,15 +332,21 @@ type AdminSettlementListResponse struct {
 }
 
 type AdminUserItem struct {
-	ID          int    `json:"id"`
-	Nickname    string `json:"nickname"`
-	Avatar      string `json:"avatar"`
-	Mobile      string `json:"mobile"`
-	Status      int8   `json:"status"`
-	TotalAmount int64  `json:"total_amount"`
-	OrderCount  int64  `json:"order_count"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID               int    `json:"id"`
+	Nickname         string `json:"nickname"`
+	Avatar           string `json:"avatar"`
+	Mobile           string `json:"mobile"`
+	Status           int8   `json:"status"`
+	TotalAmount      int64  `json:"total_amount"`
+	OrderCount       int64  `json:"order_count"`
+	LikesCount       int64  `json:"likes_count"`
+	CollectionsCount int64  `json:"collections_count"`
+	FollowingCount   int64  `json:"following_count"`
+	FollowersCount   int64  `json:"followers_count"`
+	AttendCount      int64  `json:"attend_count"`
+	SubscribeCount   int64  `json:"subscribe_count"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type AdminUserListResponse struct {

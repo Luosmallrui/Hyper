@@ -3,6 +3,7 @@ package service
 import (
 	"Hyper/models"
 	"Hyper/types"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,65 @@ func TestActivityUpdatesUsesTypeSpecificTimeFields(t *testing.T) {
 	}, models.ActivityTypeParty)
 	if err == nil {
 		t.Fatal("party must validate start_time")
+	}
+}
+
+func TestActivityEditNeedsReaudit(t *testing.T) {
+	if activityEditNeedsReaudit(types.ActivityCreateRequest{}, map[string]any{}) {
+		t.Fatal("empty edit must not trigger a re-audit")
+	}
+	if !activityEditNeedsReaudit(types.ActivityCreateRequest{}, map[string]any{"name": "new name"}) {
+		t.Fatal("content update must trigger a re-audit")
+	}
+	if !activityEditNeedsReaudit(types.ActivityCreateRequest{TagIDs: []int64{}}, map[string]any{}) {
+		t.Fatal("tag replacement, including clearing tags, must trigger a re-audit")
+	}
+	if !activityEditNeedsReaudit(types.ActivityCreateRequest{TicketSpecs: []types.TicketSpecSaveItem{}}, map[string]any{}) {
+		t.Fatal("ticket specification save must trigger a re-audit")
+	}
+}
+
+func TestNormalizeActivityAuditType(t *testing.T) {
+	if got := normalizeActivityAuditType(models.ActivityAuditTypeReaudit); got != models.ActivityAuditTypeReaudit {
+		t.Fatalf("re_audit type = %q", got)
+	}
+	if got := normalizeActivityAuditType("unexpected"); got != models.ActivityAuditTypeInitial {
+		t.Fatalf("unknown type = %q, want initial", got)
+	}
+}
+
+func TestActivityDetailResponseIncludesVenueBusinessHours(t *testing.T) {
+	response := types.ActivityDetailResponse{BusinessHours: "19:30-02:30"}
+	if response.BusinessHours != "19:30-02:30" {
+		t.Fatalf("business_hours = %q", response.BusinessHours)
+	}
+}
+
+func TestTicketSpecUpdatesKeepsZeroValues(t *testing.T) {
+	updates := ticketSpecUpdates(&models.TicketSpec{IsEnabled: 0, Price: 0, Stock: 0})
+	for _, key := range []string{"is_enabled", "price", "stock"} {
+		if _, ok := updates[key]; !ok {
+			t.Fatalf("ticket update must include %s even when it is zero", key)
+		}
+	}
+}
+
+func TestTicketSpecIDUsesJSONString(t *testing.T) {
+	const unsafeID int64 = 9007199254740993
+	encoded, err := json.Marshal(models.TicketSpec{ID: unsafeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"id":"9007199254740993"`) {
+		t.Fatalf("ticket spec id must be serialized as a string, got %s", encoded)
+	}
+
+	var input types.TicketSpecSaveItem
+	if err := json.Unmarshal([]byte(`{"id":"9007199254740993","name":"test","price":1}`), &input); err != nil {
+		t.Fatalf("string ticket spec id must be accepted: %v", err)
+	}
+	if input.ID != unsafeID {
+		t.Fatalf("ticket spec id = %d, want %d", input.ID, unsafeID)
 	}
 }
 
