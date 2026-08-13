@@ -132,3 +132,24 @@ func TestIsActivityPublic(t *testing.T) {
 		})
 	}
 }
+
+func TestUnavailableActivityDetail(t *testing.T) {
+	resp := unavailableActivityDetail(8)
+	if resp.ID != 8 {
+		t.Fatalf("activity id = %d, want 8", resp.ID)
+	}
+	if resp.Name != unavailableActivityName || resp.IsHidden != 1 || resp.HiddenReason != unavailableActivityName {
+		t.Fatalf("unexpected unavailable activity response: %+v", resp.Activity)
+	}
+	if resp.TicketSpecs == nil || resp.Tags == nil {
+		t.Fatal("unavailable activity must return empty collections instead of null")
+	}
+}
+
+func TestApplyOrderActivityListItemForMissingActivity(t *testing.T) {
+	var item types.TicketOrderListItem
+	applyOrderActivityListItem(&item, 13, 0, "", time.Time{}, time.Time{}, "", 0, "")
+	if item.Activity.ID != 13 || item.Activity.Name != unavailableActivityName || !item.Activity.IsHidden || item.Activity.HiddenReason != unavailableActivityName {
+		t.Fatalf("unexpected missing activity list item: %+v", item.Activity)
+	}
+}
