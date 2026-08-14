@@ -258,6 +258,9 @@ CREATE TABLE IF NOT EXISTS `activities`
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0草稿 1待审核 2审核中 3已上架 4未通过',
 	`audit_type`        varchar(20)     NOT NULL DEFAULT 'initial' COMMENT '审核类型: initial首次审核 re_audit修改后二审',
     `reject_reason`     varchar(500)    NOT NULL DEFAULT '',
+	`pending_revision` varchar(20000) NOT NULL DEFAULT '' COMMENT '已上架活动待审核修改快照(JSON)',
+	`pending_revision_status` tinyint NOT NULL DEFAULT 0 COMMENT '待审核修改状态: 0无 1待审核 4驳回',
+	`pending_revision_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '待审核修改驳回原因',
 	`is_hidden`         tinyint         NOT NULL DEFAULT 0 COMMENT '0公开 1平台下架隐藏',
 	`hidden_at`         datetime        NULL COMMENT '平台下架时间',
 	`hidden_reason`     varchar(500)    NOT NULL DEFAULT '' COMMENT '平台下架原因',
@@ -280,6 +283,10 @@ CREATE TABLE IF NOT EXISTS `activities`
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_public` (`status`, `is_hidden`);
 -- ALTER TABLE `activities` ADD COLUMN `audit_type` varchar(20) NOT NULL DEFAULT 'initial' COMMENT '审核类型: initial首次审核 re_audit修改后二审' AFTER `status`;
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_audit_type` (`status`, `audit_type`);
+-- ALTER TABLE `activities` ADD COLUMN `pending_revision` mediumtext NOT NULL COMMENT '已上架活动待审核修改快照(JSON)' AFTER `reject_reason`;
+-- ALTER TABLE `activities` ADD COLUMN `pending_revision_status` tinyint NOT NULL DEFAULT 0 COMMENT '待审核修改状态: 0无 1待审核 4驳回' AFTER `pending_revision`;
+-- ALTER TABLE `activities` ADD COLUMN `pending_revision_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '待审核修改驳回原因' AFTER `pending_revision_status`;
+-- ALTER TABLE `activities` ADD INDEX `idx_activity_pending_revision` (`pending_revision_status`);
 
 CREATE TABLE IF NOT EXISTS `ticket_specs`
 (

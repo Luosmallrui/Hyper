@@ -148,16 +148,6 @@ func (s *AdminService) SendCustomerServiceMessage(ctx context.Context, customerI
 	if err := s.customerServiceSessionExists(ctx, int64(serviceAccount.Id), int64(customerID)); err != nil {
 		return nil, err
 	}
-	if req.MsgType < types.MsgTypeText || req.MsgType > types.MsgTypeActivity {
-		return nil, errors.New("不支持的客服消息类型")
-	}
-	req.Content = strings.TrimSpace(req.Content)
-	if req.Content == "" {
-		return nil, errors.New("消息内容不能为空")
-	}
-	if len([]rune(req.Content)) > 5000 {
-		return nil, errors.New("消息内容不能超过 5000 个字符")
-	}
 	if s.MessageService == nil {
 		return nil, errors.New("客服消息服务未初始化")
 	}

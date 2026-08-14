@@ -45,6 +45,8 @@ const (
 	ExtKeyNoteID   = "note_id"
 	ExtKeyNote     = "note"
 	ExtKeyActivity = "activity_id"
+	ExtKeyImageURL = "image_url"
+	ExtKeyThumbURL = "thumbnail_url"
 )
 
 const (
@@ -62,7 +64,7 @@ type Message struct {
 	SessionID   string `json:"session_id"`   // 原始会话ID，用于碰撞校验和展示
 
 	MsgType     int                    `json:"msg_type"` // 1-文本, 2-图片等
-	Content     string                 `json:"content"`  // 消息内容
+	Content     string                 `json:"content"`  // 文本内容；图片消息为图片 URL
 	ParentMsgID int64                  `json:"parent_msg_id,string"`
 	Timestamp   int64                  `json:"timestamp"` // 服务端生成的时间戳
 	Status      int                    `json:"status"`    // 0-发送中, 1-成功, 2-已读, 3-撤回

@@ -125,8 +125,8 @@ type AdminCustomerServiceMessageListResponse struct {
 }
 
 type AdminCustomerServiceSendMessageRequest struct {
-	MsgType     int                    `json:"msg_type" binding:"required,oneof=1 2 3 4 5 6 7 8 9"`
-	Content     string                 `json:"content"`
+	MsgType     int                    `json:"msg_type" binding:"required,oneof=1 2 3 4 5 6 7 8 9"` // 2 为图片消息
+	Content     string                 `json:"content"`                                             // 图片消息可填写图片 URL；也可改传 ext.image_url
 	ParentMsgID int64                  `json:"parent_msg_id,string"`
 	Ext         map[string]interface{} `json:"ext"`
 }

@@ -44,6 +44,9 @@ venue_subscriptions(organizer_id=9, user_id=当前用户)
 ```http
 GET /api/v1/activity/:id
 GET /api/v1/map/markers
+GET /api/v1/activity/subscriptions
 ```
 
 前端不需要因场地增加单独的订阅按钮分支；直接使用活动 ID 调用订阅接口，并以接口返回的 `is_subscribe` 为准。
+
+`GET /api/v1/activity/subscriptions` 会把 `venue_subscriptions` 中的场地主办方订阅展开为其当前所有已上架、未隐藏的场地活动，并与派对订阅按订阅时间合并分页。历史上误写进 `activity_subscriptions` 的场地订阅也会兼容返回。

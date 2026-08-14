@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
@@ -188,6 +190,13 @@ func (s *MessageService) SaveGroupMessage(msg *models.ImGroupMessage) error {
 	return s.MessageDao.SaveGroup(msg)
 }
 func (s *MessageService) SendMessage(msg *types.Message) error {
+	if msg == nil {
+		return errors.New("消息不能为空")
+	}
+	if err := normalizeMessagePayload(msg); err != nil {
+		return err
+	}
+
 	// 1) 服务端统一补字段：时间、状态、雪花ID、Ext兜底
 	msg.Timestamp = time.Now().UnixMilli()
 	msg.Status = types.MsgStatusSending
@@ -272,6 +281,46 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		return err
 	}
 
+	return nil
+}
+
+// normalizeMessagePayload keeps image messages compatible with the existing
+// Content-based protocol while making image_url available to newer clients.
+func normalizeMessagePayload(msg *types.Message) error {
+	if msg.MsgType < types.MsgTypeText || msg.MsgType > types.MsgTypeActivity {
+		return errors.New("不支持的消息类型")
+	}
+	if msg.Ext == nil {
+		msg.Ext = make(map[string]interface{})
+	}
+
+	msg.Content = strings.TrimSpace(msg.Content)
+	if msg.MsgType == types.MsgTypeImage {
+		imageURL := msg.Content
+		if rawURL, ok := msg.Ext[types.ExtKeyImageURL].(string); ok && strings.TrimSpace(rawURL) != "" {
+			imageURL = strings.TrimSpace(rawURL)
+		}
+		if imageURL == "" {
+			return errors.New("图片消息缺少 image_url")
+		}
+		parsedURL, err := url.ParseRequestURI(imageURL)
+		if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+			return errors.New("图片消息 image_url 必须是有效的 http 或 https 地址")
+		}
+		if len([]rune(imageURL)) > 5000 {
+			return errors.New("图片消息 image_url 不能超过 5000 个字符")
+		}
+		msg.Content = imageURL
+		msg.Ext[types.ExtKeyImageURL] = imageURL
+		return nil
+	}
+
+	if msg.Content == "" {
+		return errors.New("消息内容不能为空")
+	}
+	if len([]rune(msg.Content)) > 5000 {
+		return errors.New("消息内容不能超过 5000 个字符")
+	}
 	return nil
 }
 

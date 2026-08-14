@@ -224,6 +224,38 @@ Content-Type: application/json
 
 消息先进入既有 `IM_CHAT_MSGS`，由 conn-server 落库、更新双方会话并尽力 Socket 推送。接口成功代表已进入消息队列；用户离线时仍能在下次进入小程序时通过会话历史查看。
 
+### 发送图片
+
+客服工作台和小程序单聊均支持图片消息。先将图片上传到已有上传接口，随后发送 `msg_type = 2`。
+
+```http
+POST /api/v1/upload
+Content-Type: multipart/form-data
+Authorization: Bearer <access_token>
+```
+
+上传字段使用 `file`，`type` 可传 `misc`。从响应 `data.url` 取得 CDN 地址后发送：
+
+```http
+POST /api/v1/admin/customer-service/sessions/35/messages
+Content-Type: application/json
+```
+
+```json
+{
+  "msg_type": 2,
+  "content": "https://cdn.hypercn.cn/ticketing/misc/2026/08/14/xxx.jpg",
+  "ext": {
+    "image_url": "https://cdn.hypercn.cn/ticketing/misc/2026/08/14/xxx.jpg",
+    "thumbnail_url": "https://cdn.hypercn.cn/ticketing/misc/2026/08/14/xxx_thumb.jpg",
+    "width": 1080,
+    "height": 1440
+  }
+}
+```
+
+图片 URL 可只传 `content` 或只传 `ext.image_url`；服务端会校验其为 `http`/`https` 地址，并将最终 URL 同时写回 `content` 和 `ext.image_url`。`thumbnail_url`、`width`、`height` 为可选展示信息，历史消息和 Socket 推送均通过 `msg_type`、`content`、`ext` 渲染。
+
 ## 4. 标记客服会话已读
 
 ```http

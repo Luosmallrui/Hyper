@@ -501,12 +501,22 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 
 	query := s.DB.WithContext(ctx).Model(&models.Activity{})
 	if filter.Status != nil {
-		query = query.Where("status = ?", *filter.Status)
+		if *filter.Status == models.ActivityStatusPending {
+			query = query.Where("status = ? OR (status = ? AND pending_revision_status = ?)", models.ActivityStatusPending, models.ActivityStatusOnline, models.ActivityStatusPending)
+		} else if *filter.Status == models.ActivityStatusOnline {
+			query = query.Where("status = ? AND pending_revision_status <> ?", models.ActivityStatusOnline, models.ActivityStatusPending)
+		} else {
+			query = query.Where("status = ?", *filter.Status)
+		}
 	} else {
 		query = query.Where("status <> ?", models.ActivityStatusDraft)
 	}
 	if filter.AuditType != "" {
-		query = query.Where("audit_type = ?", filter.AuditType)
+		if filter.AuditType == models.ActivityAuditTypeReaudit {
+			query = query.Where("audit_type = ? OR pending_revision_status = ?", filter.AuditType, models.ActivityStatusPending)
+		} else {
+			query = query.Where("audit_type = ? AND pending_revision_status <> ?", filter.AuditType, models.ActivityStatusPending)
+		}
 	}
 	if filter.IsHidden != nil {
 		query = query.Where("is_hidden = ?", *filter.IsHidden)
@@ -539,6 +549,27 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 	var activities []models.Activity
 	if err := query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&activities).Error; err != nil {
 		return nil, err
+	}
+	revisionTicketSpecCounts := make(map[int64]int)
+	for i := range activities {
+		if activities[i].PendingRevisionStatus != models.ActivityStatusPending {
+			continue
+		}
+		payload, err := decodeActivityRevision(activities[i])
+		if err != nil {
+			return nil, err
+		}
+		if payload == nil {
+			continue
+		}
+		candidate := payload.Activity
+		candidate.ID = activities[i].ID
+		candidate.OrganizerID = activities[i].OrganizerID
+		candidate.Status = models.ActivityStatusPending
+		candidate.AuditType = models.ActivityAuditTypeReaudit
+		candidate.PendingRevisionStatus = models.ActivityStatusPending
+		activities[i] = candidate
+		revisionTicketSpecCounts[candidate.ID] = len(payload.TicketSpecs)
 	}
 
 	organizerIDs := make([]int64, 0, len(activities))
@@ -611,6 +642,9 @@ func (s *AdminService) GetActivityList(ctx context.Context, page, pageSize int, 
 			CreatedAt:        activity.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:        activity.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
+		if count, ok := revisionTicketSpecCounts[activity.ID]; ok {
+			item.TicketSpecCount = count
+		}
 		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
 			item.OrganizerName = organizer.Name
 			item.OrganizerType = organizer.Type
@@ -627,12 +661,28 @@ func (s *AdminService) GetActivityDetail(ctx context.Context, activityID int64) 
 		return nil, err
 	}
 
+	payload, err := decodeActivityRevision(activity)
+	if err != nil {
+		return nil, err
+	}
+	showPendingRevision := payload != nil && activity.PendingRevisionStatus == models.ActivityStatusPending
+	if showPendingRevision {
+		candidate := payload.Activity
+		candidate.ID = activity.ID
+		candidate.OrganizerID = activity.OrganizerID
+		candidate.Status = models.ActivityStatusPending
+		candidate.AuditType = models.ActivityAuditTypeReaudit
+		candidate.PendingRevisionStatus = models.ActivityStatusPending
+		activity = candidate
+	}
 	detail := &types.AdminActivityDetail{Activity: activity}
 	var organizer models.Organizer
 	if err := s.DB.WithContext(ctx).Where("id = ?", activity.OrganizerID).First(&organizer).Error; err == nil {
 		detail.Organizer = &organizer
 	}
-	if err := s.DB.WithContext(ctx).Where("activity_id = ?", activity.ID).Order("id ASC").Find(&detail.TicketSpecs).Error; err != nil {
+	if showPendingRevision {
+		detail.TicketSpecs = payload.TicketSpecs
+	} else if err := s.DB.WithContext(ctx).Where("activity_id = ?", activity.ID).Order("id ASC").Find(&detail.TicketSpecs).Error; err != nil {
 		return nil, err
 	}
 	targetType, targetID := models.ContentTagTargetActivity, activityID
@@ -645,6 +695,9 @@ func (s *AdminService) GetActivityDetail(ctx context.Context, activityID int64) 
 	}
 	detail.TagIDs = types.ContentTagIDs(tagMap[targetID])
 	detail.Tags = types.BuildContentTagItems(tagMap[targetID])
+	if showPendingRevision {
+		detail.TagIDs = payload.TagIDs
+	}
 	return detail, nil
 }
 
@@ -693,11 +746,31 @@ func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req 
 	if req.Status == models.ActivityStatusRejected && req.RejectReason == "" {
 		return errors.New("拒绝时必须填写 reject_reason")
 	}
-	if req.Status == models.ActivityStatusOnline {
-		var activity models.Activity
-		if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ?", activityID).First(&activity).Error; err != nil {
+		return err
+	}
+	if activity.Status == models.ActivityStatusOnline && activity.PendingRevisionStatus == models.ActivityStatusPending {
+		if req.Status == models.ActivityStatusRejected {
+			return s.DB.WithContext(ctx).Model(&activity).Updates(map[string]any{
+				"pending_revision_status": models.ActivityStatusRejected,
+				"pending_revision_reason": req.RejectReason,
+				"updated_at":              time.Now(),
+			}).Error
+		}
+		payload, err := decodeActivityRevision(activity)
+		if err != nil {
 			return err
 		}
+		if payload == nil {
+			return errors.New("待审核修改不存在")
+		}
+		if err := validateChinaCoordinate(payload.Activity.Latitude, payload.Activity.Longitude); err != nil {
+			return err
+		}
+		return s.publishActivityRevision(ctx, activity, payload)
+	}
+	if req.Status == models.ActivityStatusOnline {
 		if err := validateChinaCoordinate(activity.Latitude, activity.Longitude); err != nil {
 			return err
 		}
@@ -717,6 +790,81 @@ func (s *AdminService) AuditActivity(ctx context.Context, activityID int64, req 
 	}
 	if result.RowsAffected == 0 {
 		return errors.New("活动不存在")
+	}
+	return nil
+}
+
+func (s *AdminService) publishActivityRevision(ctx context.Context, activity models.Activity, payload *types.ActivityRevisionPayload) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.Activity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ? AND pending_revision_status = ?", activity.ID, models.ActivityStatusOnline, models.ActivityStatusPending).First(&locked).Error; err != nil {
+			return err
+		}
+		candidate := payload.Activity
+		updates := map[string]any{
+			"type": candidate.Type, "name": candidate.Name, "share_title": candidate.ShareTitle,
+			"start_time": candidate.StartTime, "end_time": candidate.EndTime,
+			"real_name_mode": candidate.RealNameMode, "minor_check": candidate.MinorCheck,
+			"description": candidate.Description, "province": candidate.Province, "city": candidate.City,
+			"district": candidate.District, "address": candidate.Address, "latitude": candidate.Latitude,
+			"longitude": candidate.Longitude, "poster_detail": candidate.PosterDetail,
+			"poster_long": candidate.PosterLong, "poster_list": candidate.PosterList,
+			"poster_wechat": candidate.PosterWechat, "qualification_doc": candidate.QualificationDoc,
+			"audit_type": models.ActivityAuditTypeReaudit, "reject_reason": "",
+			"pending_revision": "", "pending_revision_status": 0, "pending_revision_reason": "",
+			"updated_at": time.Now(),
+		}
+		if err := tx.Model(&locked).Updates(updates).Error; err != nil {
+			return err
+		}
+		if defaultActivityType(candidate.Type) != models.ActivityTypeVenue {
+			if err := replacePublishedTicketSpecs(ctx, tx, locked.ID, payload.TicketSpecs); err != nil {
+				return err
+			}
+		}
+		targetType, targetID := models.ContentTagTargetActivity, locked.ID
+		if defaultActivityType(candidate.Type) == models.ActivityTypeVenue {
+			targetType, targetID = models.ContentTagTargetVenue, locked.OrganizerID
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}}, DoUpdates: clause.Assignments(map[string]any{"business_hours": payload.BusinessHours, "updated_at": time.Now()})}).Create(&models.OrganizerProfile{OrganizerID: locked.OrganizerID, BusinessHours: payload.BusinessHours}).Error; err != nil {
+				return err
+			}
+		}
+		return dao.ReplaceContentTags(ctx, tx, targetType, targetID, payload.TagIDs)
+	})
+}
+
+func replacePublishedTicketSpecs(ctx context.Context, tx *gorm.DB, activityID int64, desired []models.TicketSpec) error {
+	var current []models.TicketSpec
+	if err := tx.WithContext(ctx).Where("activity_id = ?", activityID).Find(&current).Error; err != nil {
+		return err
+	}
+	desiredIDs := make(map[int64]bool, len(desired))
+	for _, spec := range desired {
+		if spec.ID == 0 {
+			spec.ActivityID = activityID
+			if err := tx.Create(&spec).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		desiredIDs[spec.ID] = true
+		if err := tx.Model(&models.TicketSpec{}).Where("id = ? AND activity_id = ?", spec.ID, activityID).Updates(ticketSpecUpdates(&spec)).Error; err != nil {
+			return err
+		}
+	}
+	for _, spec := range current {
+		if desiredIDs[spec.ID] {
+			continue
+		}
+		if spec.SoldCount > 0 {
+			if err := tx.Model(&spec).Updates(map[string]any{"is_enabled": 0, "updated_at": time.Now()}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err := tx.Delete(&spec).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
