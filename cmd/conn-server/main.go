@@ -2,6 +2,7 @@ package main
 
 import (
 	"Hyper/config"
+	"Hyper/pkg/llm"
 	"Hyper/pkg/log"
 	"Hyper/rpc"
 	"Hyper/rpc/kitex_gen/im/push/pushservice"
@@ -25,6 +26,7 @@ func main() {
 	}
 	path := fmt.Sprintf("configs/config.%s.yaml", env)
 	cfg := config.New(path)
+	llm.Init(cfg.Llm)
 	conn := InitSocketServer(cfg)
 
 	cliApp := &cli.App{

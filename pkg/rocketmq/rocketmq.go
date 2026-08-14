@@ -84,8 +84,9 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	c, err := rmq_client.NewSimpleConsumer(rmqConfig,
 		rmq_client.WithSimpleAwaitDuration(awaitDuration),
 		rmq_client.WithSimpleSubscriptionExpressions(map[string]*rmq_client.FilterExpression{
-			"IM_CHAT_MSGS":      rmq_client.SUB_ALL,
-			"HYPER_SYSTEM_MSGS": rmq_client.SUB_ALL,
+			"IM_CHAT_MSGS":          rmq_client.SUB_ALL,
+			"HYPER_SYSTEM_MSGS":     rmq_client.SUB_ALL,
+			types.NoteClassifyTopic: rmq_client.SUB_ALL,
 		}),
 	)
 	if err != nil {

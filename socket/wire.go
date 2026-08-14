@@ -28,6 +28,7 @@ var ProviderSet = wire.NewSet(
 	process.NewHealthSubscribe,
 	wire.Struct(new(process.NoticeSubscribe), "*"),
 	wire.Struct(new(process.MessageSubscribe), "*"),
+	wire.Struct(new(process.NoteClassifySubscribe), "*"),
 	//wire.Struct(new(process.QueueSubscribe), "*"),
 	//wire.Struct(new(queue.GlobalMessage), "*"),
 	//wire.Struct(new(queue.LocalMessage), "*"),

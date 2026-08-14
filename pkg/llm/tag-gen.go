@@ -16,10 +16,22 @@ import (
 
 var client openai.Client
 
+// 模型名，可在 config.yaml 的 llm 段覆盖
+var (
+	tagModel      = "qwen3-vl-flash"
+	classifyModel = "qwen3.7-flash"
+)
+
 func Init(cfg *config.LlmConfig) {
 	if cfg == nil {
 		log.L.Warn("llm config missing, tag generation disabled")
 		return
+	}
+	if cfg.TagModel != "" {
+		tagModel = cfg.TagModel
+	}
+	if cfg.ClassifyModel != "" {
+		classifyModel = cfg.ClassifyModel
 	}
 	client = openai.NewClient(
 		option.WithAPIKey(cfg.APIKey),
@@ -52,7 +64,7 @@ func GenNoteTag(ctx context.Context, ossURL string) []string {
 		},
 	}
 	params := openai.ChatCompletionNewParams{
-		Model: "qwen3-vl-flash",
+		Model: tagModel,
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			{OfUser: &userMessage},
 		},
@@ -96,19 +108,16 @@ func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs 
 			},
 		},
 	}
-	for _, url := range ossURLs {
-		url = url + "?x-oss-process=image/resize,w_200"
+	// 只取第一张图，降低视觉 token 消耗
+	if len(ossURLs) > 0 && ossURLs[0] != "" {
 		contentParts = append(contentParts, openai.ChatCompletionContentPartUnionParam{
 			OfImageURL: &openai.ChatCompletionContentPartImageParam{
 				ImageURL: openai.ChatCompletionContentPartImageImageURLParam{
-					URL: url,
+					URL: ossURLs[0] + "?x-oss-process=image/resize,w_200",
 				},
 			},
 		})
 	}
-	contentParts = append(contentParts, openai.ChatCompletionContentPartUnionParam{
-		OfText: &openai.ChatCompletionContentPartTextParam{},
-	})
 	startTime := time.Now()
 	userMessage := openai.ChatCompletionUserMessageParam{
 		Content: openai.ChatCompletionUserMessageParamContentUnion{
@@ -116,7 +125,7 @@ func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs 
 		},
 	}
 	params := openai.ChatCompletionNewParams{
-		Model: "qwen3-vl-plus",
+		Model: classifyModel,
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			{OfUser: &userMessage},
 		},
