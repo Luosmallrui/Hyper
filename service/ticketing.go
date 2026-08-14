@@ -2150,7 +2150,7 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	}
 	pendingRevisionStatus := act.PendingRevisionStatus
 	pendingRevisionReason := act.PendingRevisionReason
-	showPendingRevision := userID == org.UserID && revision != nil && pendingRevisionStatus == models.ActivityStatusPending
+	showPendingRevision := userID == org.UserID && act.IsHidden == 0 && revision != nil && pendingRevisionStatus == models.ActivityStatusPending
 	if showPendingRevision {
 		act = revision.Activity
 		act.Status = models.ActivityStatusPending
