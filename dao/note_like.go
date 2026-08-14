@@ -81,7 +81,7 @@ func (d *NoteLikeDAO) CheckExists(ctx context.Context, userID, noteID uint64) (b
 	var count int64
 	err := d.Db.WithContext(ctx).
 		Model(&models.NoteLike{}).
-		Where("user_id = ? AND note_id = ?", userID, noteID).
+		Where("user_id = ? AND note_id = ? AND status = 1", userID, noteID).
 		Count(&count).Error
 	return count > 0, err
 }
@@ -89,7 +89,7 @@ func (d *NoteLikeDAO) CheckExists(ctx context.Context, userID, noteID uint64) (b
 func (d *NoteLikeDAO) BatchGetByUserAndNotes(ctx context.Context, userID uint64, noteIDs []uint64) ([]*models.NoteLike, error) {
 	var likes []*models.NoteLike
 	err := d.Db.WithContext(ctx).
-		Where("user_id = ? AND note_id IN ?", userID, noteIDs).
+		Where("user_id = ? AND note_id IN ? AND status = 1", userID, noteIDs).
 		Find(&likes).Error
 	return likes, err
 }
