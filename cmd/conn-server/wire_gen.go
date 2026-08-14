@@ -116,10 +116,19 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		Redis:          redisClient,
 		ConnectService: clientConnectService,
 	}
+	channelService := &service.ChannelService{
+		Db:    db,
+		Redis: redisClient,
+	}
+	noteClassifySubscribe := &process.NoteClassifySubscribe{
+		DB:             db,
+		ChannelService: channelService,
+	}
 	subServers := &process.SubServers{
-		HealthSubscribe:  healthSubscribe,
-		MessageSubscribe: messageSubscribe,
-		NoticeSubscribe:  noticeSubscribe,
+		HealthSubscribe:       healthSubscribe,
+		MessageSubscribe:      messageSubscribe,
+		NoticeSubscribe:       noticeSubscribe,
+		NoteClassifySubscribe: noteClassifySubscribe,
 	}
 	simpleConsumer := rocketmq.InitConsumer(rocketMQConfig)
 	server := process.NewServer(subServers, simpleConsumer)

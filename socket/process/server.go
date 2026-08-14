@@ -2,6 +2,7 @@ package process
 
 import (
 	"Hyper/pkg/log"
+	"Hyper/types"
 	"context"
 	"fmt"
 	"reflect"
@@ -33,9 +34,10 @@ type IServer interface {
 
 // SubServers 订阅的服务列表
 type SubServers struct {
-	HealthSubscribe  *HealthSubscribe  // 注册健康上报
-	MessageSubscribe *MessageSubscribe /// 注册消息订阅
-	NoticeSubscribe  *NoticeSubscribe
+	HealthSubscribe       *HealthSubscribe  // 注册健康上报
+	MessageSubscribe      *MessageSubscribe /// 注册消息订阅
+	NoticeSubscribe       *NoticeSubscribe
+	NoteClassifySubscribe *NoteClassifySubscribe
 }
 
 type Server struct {
@@ -134,6 +136,10 @@ func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView)
 	case "HYPER_SYSTEM_MSGS":
 		if c.NoticeSubscribe != nil {
 			err = c.NoticeSubscribe.handleSystem(ctx, mv)
+		}
+	case types.NoteClassifyTopic:
+		if c.NoteClassifySubscribe != nil {
+			err = c.NoteClassifySubscribe.handleNoteClassify(ctx, mv)
 		}
 	default:
 		// 不认识的 topic，直接返回错误看日志

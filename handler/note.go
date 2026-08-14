@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	_ "golang.org/x/image/webp"
@@ -33,7 +34,7 @@ type Note struct {
 	CollectService service.ICollectService
 	TopicService   service.ITopicService
 	Config         *config.Config
-	Channel        service.IChannelService
+	Producer       rmq_client.Producer
 	Db             *gorm.DB
 }
 
@@ -92,49 +93,33 @@ func (n *Note) RecordShare(c *gin.Context) error {
 	return nil
 }
 
+// Gen 兜底：把积压的未分类笔记（channel_id = 0）逐条发到 MQ，由 conn-server 消费分类。
+// 供定时任务/手动触发（/v1/note/gen），不再在发帖时触发。
 func (n *Note) Gen(c *gin.Context) error {
-	// 1. 预先获取频道映射，避免在循环里调接口
-	// 2. 异步处理，不阻塞接口返回
 	go func() {
-		// 使用一个独立的 Context，不要用 Gin 的 c.Request.Context()，因为请求结束它会 cancel
 		ctx := base.Background()
-		tags, err := n.Channel.ListChannels(ctx, &types.ListChannelsReq{})
-		if err != nil {
-		}
-		tagsSlice := make([]string, 0)
-		tagsMap := make(map[string]int) // ID 建议用 uint32，与数据库对应
-		for _, v := range tags.Channels {
-			tagsSlice = append(tagsSlice, v.Name)
-			tagsMap[v.Name] = v.Id
-		}
-
-		// 3. 分批处理（例如每次取 100 条），只取未分类的 (channel_id = 0)
 		var notes []models.Note
-		n.Db.WithContext(ctx).Where("channel_id = ?", 0).FindInBatches(&notes, 100, func(tx *gorm.DB, batch int) error {
+		_ = n.Db.WithContext(ctx).Where("channel_id = ?", 0).FindInBatches(&notes, 100, func(tx *gorm.DB, batch int) error {
 			for _, v := range notes {
-				// 4. 解析媒体数据
-				var noteMedia []types.NoteMedia
-				_ = json.Unmarshal([]byte(v.MediaData), &noteMedia)
-				urlImages := make([]string, 0)
-				for _, m := range noteMedia {
-					urlImages = append(urlImages, m.URL)
-				}
-
-				// 5. 调用大模型
-				label := llm.ClassifyMultiImageNote(ctx, v.Title, v.Content, urlImages, tagsSlice)
-
-				// 6. 安全匹配 ID
-				if labelId, ok := tagsMap[label]; ok {
-					err := n.Db.Model(&models.Note{}).Where("id = ?", v.ID).Update("channel_id", labelId).Error
-					if err != nil {
-						log.L.Info("error", zap.Error(err))
-					}
-				}
+				n.publishNoteClassify(v.ID)
 			}
 			return nil
 		})
 	}()
 	return nil
+}
+
+// publishNoteClassify 发送笔记分类消息到 RocketMQ。
+func (n *Note) publishNoteClassify(noteID uint64) {
+	if n.Producer == nil {
+		log.L.Warn("note classify producer is nil")
+		return
+	}
+	body, _ := json.Marshal(&types.NoteClassifyMessage{NoteID: noteID})
+	msg := &rmq_client.Message{Topic: types.NoteClassifyTopic, Body: body}
+	if _, err := n.Producer.Send(base.Background(), msg); err != nil {
+		log.L.Error("send note classify msg error", zap.Error(err))
+	}
 }
 
 // CreateNote 创建笔记
@@ -162,7 +147,7 @@ func (n *Note) CreateNote(c *gin.Context) error {
 		}
 		return response.NewError(http.StatusInternalServerError, "创建笔记失败: "+err.Error())
 	}
-	go n.Gen(c)
+	n.publishNoteClassify(noteID)
 	// 返回成功响应
 	response.Success(c, types.CreateNoteResponse{
 		NoteID: noteID,

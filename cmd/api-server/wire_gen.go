@@ -168,10 +168,6 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TopicService:    topicService,
 		DB:              db,
 	}
-	channelService := &service.ChannelService{
-		Db:    db,
-		Redis: redisClient,
-	}
 	note := &handler.Note{
 		OssService:     iOssService,
 		NoteService:    noteService,
@@ -179,7 +175,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		CollectService: collectService,
 		TopicService:   topicService,
 		Config:         cfg,
-		Channel:        channelService,
+		Producer:       producer,
 		Db:             db,
 	}
 	follow := &handler.Follow{
@@ -271,6 +267,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		NoteService:     noteService,
 		MerchantService: merchantService,
 		FollowService:   followService,
+	}
+	channelService := &service.ChannelService{
+		Db:    db,
+		Redis: redisClient,
 	}
 	channel := &handler.Channel{
 		Config:     cfg,
