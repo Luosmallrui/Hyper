@@ -19,9 +19,12 @@ type GetDistrictDetailResponse struct {
 }
 
 type MapMarker struct {
-	ID               string           `json:"id"`
-	Source           string           `json:"source"`    // party | activity
-	SourceID         int64            `json:"source_id"` // 原表 ID
+	ID       string `json:"id"`
+	Source   string `json:"source"`    // party | activity
+	SourceID int64  `json:"source_id"` // 原表 ID
+	// ActivityID is the activities.id backing a new activity or venue marker.
+	// For source=venue, SourceID remains the organizer ID used by /venues/:id.
+	ActivityID       int64            `json:"activity_id,omitempty"`
 	DetailType       string           `json:"detail_type,omitempty"`
 	DetailURL        string           `json:"detail_url,omitempty"`
 	UserID           int64            `json:"user_id"`

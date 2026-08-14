@@ -997,25 +997,33 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 	resp.Activities = *activities
 	resp.ActivityCount = activities.Total
 
-	venueQuery := s.DB.WithContext(ctx).Table("organizers o").
-		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district, o.created_at,
-			COALESCE(p.cover_image, '') AS cover_image,
-			COALESCE(p.description, '') AS description,
+	// A venue is now an activity row. Query it directly so one organizer can
+	// publish and expose multiple independent venues on its public homepage.
+	venueQuery := s.DB.WithContext(ctx).Table("activities a").
+		Select(`o.id, o.user_id, o.name, o.logo,
+			a.id AS activity_id, a.name AS activity_name,
+			COALESCE(NULLIF(a.poster_list, ''), p.cover_image, '') AS cover_image,
+			COALESCE(NULLIF(a.description, ''), p.description, '') AS description,
 			COALESCE(p.business_hours, '') AS business_hours,
 			COALESCE(p.service_phone, '') AS service_phone,
-			COALESCE(p.address, '') AS address,
-			COALESCE(p.latitude, 0) AS latitude,
-			COALESCE(p.longitude, 0) AS longitude,
-			COALESCE(p.average_spend, 0) AS average_spend`).
+			COALESCE(NULLIF(a.province, ''), o.province, '') AS province,
+			COALESCE(NULLIF(a.city, ''), o.city, '') AS city,
+			COALESCE(NULLIF(a.district, ''), o.district, '') AS district,
+			COALESCE(NULLIF(a.address, ''), p.address, '') AS address,
+			COALESCE(NULLIF(a.latitude, 0), p.latitude, 0) AS latitude,
+			COALESCE(NULLIF(a.longitude, 0), p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend,
+			a.created_at`).
+		Joins("JOIN organizers o ON o.id = a.organizer_id").
 		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
-		Where("o.id = ?", row.ID).
-		Where(visibleVenueOrganizerSQL(), models.OrganizerStatusApproved, models.ActivityTypeVenue, models.ActivityStatusOnline)
+		Where("a.organizer_id = ? AND a.type = ? AND a.status = ? AND a.is_hidden = 0", row.ID, models.ActivityTypeVenue, models.ActivityStatusOnline).
+		Where("o.status = ? AND o.enabled = 1", models.OrganizerStatusApproved)
 	var venueTotal int64
 	if err := venueQuery.Count(&venueTotal).Error; err != nil {
 		return nil, err
 	}
 	venues := []types.VenueListItem{}
-	if err := venueQuery.Order("o.created_at DESC").Offset((venuePage - 1) * venueSize).Limit(venueSize).Scan(&venues).Error; err != nil {
+	if err := venueQuery.Order("a.created_at DESC, a.id DESC").Offset((venuePage - 1) * venueSize).Limit(venueSize).Scan(&venues).Error; err != nil {
 		return nil, err
 	}
 	if err := s.fillVenueStats(ctx, userID, venues); err != nil {
@@ -1023,6 +1031,14 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 	}
 	resp.Venues = types.PageResponse[types.VenueListItem]{List: venues, Total: venueTotal}
 	resp.VenueCount = venueTotal
+	// Organizer application type no longer controls what can be published.
+	// Return a content-oriented default so venue-only storefronts open on the
+	// venue section while mixed storefronts retain the activity-first default.
+	if resp.ActivityCount == 0 && resp.VenueCount > 0 {
+		resp.Type = models.ActivityTypeVenue
+	} else {
+		resp.Type = models.ActivityTypeParty
+	}
 	return resp, nil
 }
 
@@ -2172,9 +2188,15 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	}
 	if userID > 0 {
 		var count int64
-		_ = s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
-			Where("activity_id = ? AND user_id = ?", activityID, userID).
-			Count(&count).Error
+		if defaultActivityType(act.Type) == models.ActivityTypeVenue {
+			_ = s.DB.WithContext(ctx).Model(&models.VenueSubscription{}).
+				Where("organizer_id = ? AND user_id = ?", act.OrganizerID, userID).
+				Count(&count).Error
+		} else {
+			_ = s.DB.WithContext(ctx).Model(&models.ActivitySubscription{}).
+				Where("activity_id = ? AND user_id = ?", activityID, userID).
+				Count(&count).Error
+		}
 		resp.IsSubscribe = count > 0
 	}
 	return resp, nil
@@ -2241,20 +2263,28 @@ func activityVisitorKey(userID int64, visitorID string) string {
 }
 
 func (s *TicketingService) SubscribeActivity(ctx context.Context, userID, activityID int64) error {
-	var count int64
-	if err := s.DB.WithContext(ctx).Model(&models.Activity{}).
-		Where("id = ? AND type <> ? AND status = ? AND is_hidden = 0", activityID, models.ActivityTypeVenue, models.ActivityStatusOnline).
-		Count(&count).Error; err != nil {
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).
+		Where("id = ? AND status = ? AND is_hidden = 0", activityID, models.ActivityStatusOnline).
+		First(&activity).Error; err != nil {
 		return err
 	}
-	if count == 0 {
-		return gorm.ErrRecordNotFound
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return s.SubscribeVenue(ctx, userID, activity.OrganizerID)
 	}
 	sub := models.ActivitySubscription{ActivityID: activityID, UserID: userID}
 	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&sub).Error
 }
 
 func (s *TicketingService) UnsubscribeActivity(ctx context.Context, userID, activityID int64) error {
+	var activity models.Activity
+	err := s.DB.WithContext(ctx).Select("id", "type", "organizer_id").Where("id = ?", activityID).First(&activity).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if err == nil && defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		return s.UnsubscribeVenue(ctx, userID, activity.OrganizerID)
+	}
 	return s.DB.WithContext(ctx).
 		Where("activity_id = ? AND user_id = ?", activityID, userID).
 		Delete(&models.ActivitySubscription{}).Error

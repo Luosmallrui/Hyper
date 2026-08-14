@@ -189,6 +189,7 @@ GET /api/v1/map/markers?source=all&limit=200&category_id=1&district=武侯区
         "id": "activity-1",
         "source": "activity",
         "source_id": 1,
+		"activity_id": 1,
         "detail_type": "activity",
         "detail_url": "/api/v1/activity/1",
         "user_id": 1,
@@ -233,6 +234,8 @@ GET /api/v1/activity/:id
 ### 订阅/取消订阅活动
 
 > 新活动不要再调用旧 `/api/v1/merchant/subscribe`。正式接口如下：
+
+`type=venue` 的场地活动同样可以直接传活动 ID 调用；后端会自动写入场地订阅关系。完整约定见 [activity_subscribe_venue_compat_api_20260814.md](activity_subscribe_venue_compat_api_20260814.md)。
 
 ```http
 POST /api/v1/activity/{id}/subscribe
