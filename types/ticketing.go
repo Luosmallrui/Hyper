@@ -466,35 +466,48 @@ type ActivityDetailResponse struct {
 	models.Activity
 	// BusinessHours belongs to the organizer profile and is returned here for
 	// venue editing. It is empty for party activities.
-	BusinessHours    string              `json:"business_hours"`
-	UserID           int64               `json:"user_id"`
-	TagIDs           []int64             `json:"tag_ids"`
-	Tags             []ContentTagItem    `json:"tags"`
-	TicketSpecs      []models.TicketSpec `json:"ticket_specs"`
-	Organizer        *models.Organizer   `json:"organizer,omitempty"`
-	IsSubscribe      bool                `json:"is_subscribe"`
-	IsFollow         bool                `json:"is_follow"`
-	FollowCount      int64               `json:"follow_count"`
-	FollowTargetType string              `json:"follow_target_type"`
-	FollowTargetID   int64               `json:"follow_target_id"`
+	BusinessHours         string              `json:"business_hours"`
+	UserID                int64               `json:"user_id"`
+	TagIDs                []int64             `json:"tag_ids"`
+	Tags                  []ContentTagItem    `json:"tags"`
+	TicketSpecs           []models.TicketSpec `json:"ticket_specs"`
+	Organizer             *models.Organizer   `json:"organizer,omitempty"`
+	IsSubscribe           bool                `json:"is_subscribe"`
+	IsFollow              bool                `json:"is_follow"`
+	FollowCount           int64               `json:"follow_count"`
+	FollowTargetType      string              `json:"follow_target_type"`
+	FollowTargetID        int64               `json:"follow_target_id"`
+	HasPendingRevision    bool                `json:"has_pending_revision"`
+	PendingRevisionReason string              `json:"pending_revision_reason,omitempty"`
+}
+
+// ActivityRevisionPayload is an unpublished snapshot for an already-online
+// activity. It becomes public only after an administrator approves it.
+type ActivityRevisionPayload struct {
+	Activity      models.Activity     `json:"activity"`
+	TicketSpecs   []models.TicketSpec `json:"ticket_specs"`
+	TagIDs        []int64             `json:"tag_ids"`
+	BusinessHours string              `json:"business_hours"`
 }
 
 type ActivityListItem struct {
-	ID               int64            `json:"id"`
-	Type             string           `json:"type"`
-	Name             string           `json:"name"`
-	PosterList       string           `json:"poster_list"`
-	StartTime        time.Time        `json:"start_time"`
-	EndTime          time.Time        `json:"end_time"`
-	Status           int8             `json:"status"`
-	AuditType        string           `json:"audit_type"`
-	TagIDs           []int64          `json:"tag_ids"`
-	Tags             []ContentTagItem `json:"tags"`
-	IsSubscribe      bool             `json:"is_subscribe,omitempty"`
-	IsFollow         bool             `json:"is_follow"`
-	FollowCount      int64            `json:"follow_count"`
-	FollowTargetType string           `json:"follow_target_type"`
-	FollowTargetID   int64            `json:"follow_target_id"`
+	ID                    int64            `json:"id"`
+	Type                  string           `json:"type"`
+	Name                  string           `json:"name"`
+	PosterList            string           `json:"poster_list"`
+	StartTime             time.Time        `json:"start_time"`
+	EndTime               time.Time        `json:"end_time"`
+	Status                int8             `json:"status"`
+	AuditType             string           `json:"audit_type"`
+	HasPendingRevision    bool             `json:"has_pending_revision"`
+	PendingRevisionReason string           `json:"pending_revision_reason,omitempty"`
+	TagIDs                []int64          `json:"tag_ids"`
+	Tags                  []ContentTagItem `json:"tags"`
+	IsSubscribe           bool             `json:"is_subscribe,omitempty"`
+	IsFollow              bool             `json:"is_follow"`
+	FollowCount           int64            `json:"follow_count"`
+	FollowTargetType      string           `json:"follow_target_type"`
+	FollowTargetID        int64            `json:"follow_target_id"`
 }
 
 type TicketSpecSaveItem struct {

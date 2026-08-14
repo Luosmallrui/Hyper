@@ -267,6 +267,9 @@ GET /api/v1/activity/subscriptions?page=1&pageSize=20
 Authorization: Bearer <token>
 ```
 
+该接口同时返回已订阅的派对和场地：派对来自 `activity_subscriptions`，场地来自
+`venue_subscriptions`。场地项的 `type` 为 `venue`，前端据此展示营业时间样式，点击详情仍使用活动 ID。
+
 响应：
 
 ```json

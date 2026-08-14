@@ -2062,11 +2062,6 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			return 0, errors.New("已有票券的派对不能转换为场地")
 		}
 	}
-	if req.Step == 4 {
-		if err := s.SaveTicketSpecs(ctx, userID, act.ID, req.TicketSpecs); err != nil {
-			return 0, err
-		}
-	}
 	updates, err := activityUpdates(req, activityType)
 	if err != nil {
 		return 0, err
@@ -2075,6 +2070,17 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 		startTime, endTime := venueValidityWindow(time.Now())
 		updates["start_time"] = startTime
 		updates["end_time"] = endTime
+	}
+	if req.ActivityID > 0 && act.Status == models.ActivityStatusOnline && activityEditNeedsReaudit(req, updates) {
+		if err := s.saveActivityRevision(ctx, org.ID, &act, req, updates); err != nil {
+			return 0, err
+		}
+		return act.ID, nil
+	}
+	if req.Step == 4 {
+		if err := s.SaveTicketSpecs(ctx, userID, act.ID, req.TicketSpecs); err != nil {
+			return 0, err
+		}
 	}
 	if len(updates) > 0 {
 		if err := s.DB.WithContext(ctx).Model(&act).Updates(updates).Error; err != nil {
@@ -2098,14 +2104,6 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			targetType, targetID = models.ContentTagTargetVenue, org.ID
 		}
 		if err := dao.ReplaceContentTags(ctx, s.DB, targetType, targetID, req.TagIDs); err != nil {
-			return 0, err
-		}
-	}
-	// An approved activity or venue must be reviewed again after its merchant
-	// changes publishable content. Draft and rejected records still use the
-	// explicit submit-audit action, while a pending record remains pending.
-	if req.ActivityID > 0 && act.Status == models.ActivityStatusOnline && activityEditNeedsReaudit(req, updates) {
-		if _, err := s.markActivityPendingReview(ctx, act.ID, models.ActivityAuditTypeReaudit); err != nil {
 			return 0, err
 		}
 	}
@@ -2146,9 +2144,23 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 			return nil, gorm.ErrRecordNotFound
 		}
 	}
+	revision, err := decodeActivityRevision(act)
+	if err != nil {
+		return nil, err
+	}
+	pendingRevisionStatus := act.PendingRevisionStatus
+	pendingRevisionReason := act.PendingRevisionReason
+	showPendingRevision := userID == org.UserID && revision != nil && pendingRevisionStatus == models.ActivityStatusPending
+	if showPendingRevision {
+		act = revision.Activity
+		act.Status = models.ActivityStatusPending
+		act.AuditType = models.ActivityAuditTypeReaudit
+	}
 
 	specs := make([]models.TicketSpec, 0)
-	if defaultActivityType(act.Type) != models.ActivityTypeVenue {
+	if showPendingRevision {
+		specs = revision.TicketSpecs
+	} else if defaultActivityType(act.Type) != models.ActivityTypeVenue {
 		if err := s.DB.WithContext(ctx).Where("activity_id = ?", activityID).Order("id asc").Find(&specs).Error; err != nil {
 			return nil, err
 		}
@@ -2166,17 +2178,26 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 	if err != nil {
 		return nil, err
 	}
+	hasPendingRevision := userID == org.UserID && revision != nil && (pendingRevisionStatus == models.ActivityStatusPending || pendingRevisionStatus == models.ActivityStatusRejected)
+	if userID != org.UserID {
+		pendingRevisionReason = ""
+	}
 	resp := &types.ActivityDetailResponse{
-		Activity:         act,
-		UserID:           org.UserID,
-		TagIDs:           types.ContentTagIDs(tags),
-		Tags:             types.BuildContentTagItems(tags),
-		TicketSpecs:      specs,
-		Organizer:        &org,
-		IsFollow:         followed[contentFollowIDForActivity(act)],
-		FollowCount:      followCounts[contentFollowIDForActivity(act)],
-		FollowTargetType: contentFollowTargetForActivity(act),
-		FollowTargetID:   contentFollowIDForActivity(act),
+		Activity:              act,
+		UserID:                org.UserID,
+		TagIDs:                types.ContentTagIDs(tags),
+		Tags:                  types.BuildContentTagItems(tags),
+		TicketSpecs:           specs,
+		Organizer:             &org,
+		IsFollow:              followed[contentFollowIDForActivity(act)],
+		FollowCount:           followCounts[contentFollowIDForActivity(act)],
+		FollowTargetType:      contentFollowTargetForActivity(act),
+		FollowTargetID:        contentFollowIDForActivity(act),
+		HasPendingRevision:    hasPendingRevision,
+		PendingRevisionReason: pendingRevisionReason,
+	}
+	if showPendingRevision {
+		resp.TagIDs = revision.TagIDs
 	}
 	if defaultActivityType(act.Type) == models.ActivityTypeVenue {
 		var profile models.OrganizerProfile
@@ -2184,6 +2205,9 @@ func (s *TicketingService) GetActivity(ctx context.Context, userID, activityID i
 			resp.BusinessHours = profile.BusinessHours
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
+		}
+		if showPendingRevision {
+			resp.BusinessHours = revision.BusinessHours
 		}
 	}
 	if userID > 0 {
@@ -2292,34 +2316,83 @@ func (s *TicketingService) UnsubscribeActivity(ctx context.Context, userID, acti
 
 func (s *TicketingService) ListSubscribedActivities(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.ActivityListItem], error) {
 	page, size = normalizePage(page, size)
-	query := s.DB.WithContext(ctx).Table("activity_subscriptions AS sub").
-		Joins("JOIN activities a ON a.id = sub.activity_id").
-		Where("sub.user_id = ? AND a.type <> ? AND a.status = ? AND a.is_hidden = 0", userID, models.ActivityTypeVenue, models.ActivityStatusOnline)
+	type subscribedActivityRow struct {
+		ID           int64
+		OrganizerID  int64
+		Type         string
+		Name         string
+		PosterList   string
+		StartTime    time.Time
+		EndTime      time.Time
+		Status       int8
+		AuditType    string
+		SubscribedAt time.Time
+	}
 
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	// Venue subscriptions are organizer-scoped for compatibility, while party
+	// subscriptions are activity-scoped. Merge both sources here so the legacy
+	// "subscribed activities" page does not silently lose subscribed venues.
+	rowsByActivityID := make(map[int64]subscribedActivityRow)
+	mergeRows := func(rows []subscribedActivityRow) {
+		for _, row := range rows {
+			current, exists := rowsByActivityID[row.ID]
+			if !exists || row.SubscribedAt.After(current.SubscribedAt) {
+				rowsByActivityID[row.ID] = row
+			}
+		}
+	}
+	loadRows := func(query *gorm.DB, subscribedAtColumn string) error {
+		var rows []subscribedActivityRow
+		if err := query.Select("a.id, a.organizer_id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status, a.audit_type, " + subscribedAtColumn + " AS subscribed_at").Scan(&rows).Error; err != nil {
+			return err
+		}
+		mergeRows(rows)
+		return nil
+	}
+
+	if err := loadRows(
+		s.DB.WithContext(ctx).Table("activity_subscriptions AS sub").
+			Joins("JOIN activities a ON a.id = sub.activity_id").
+			Where("sub.user_id = ? AND a.type <> ? AND a.status = ? AND a.is_hidden = 0", userID, models.ActivityTypeVenue, models.ActivityStatusOnline),
+		"sub.created_at",
+	); err != nil {
+		return nil, err
+	}
+	// Keep venue rows written by an early activity-subscription implementation
+	// visible during the storage migration.
+	if err := loadRows(
+		s.DB.WithContext(ctx).Table("activity_subscriptions AS sub").
+			Joins("JOIN activities a ON a.id = sub.activity_id").
+			Where("sub.user_id = ? AND a.type = ? AND a.status = ? AND a.is_hidden = 0", userID, models.ActivityTypeVenue, models.ActivityStatusOnline),
+		"sub.created_at",
+	); err != nil {
+		return nil, err
+	}
+	if err := loadRows(
+		s.DB.WithContext(ctx).Table("venue_subscriptions AS sub").
+			Joins("JOIN activities a ON a.organizer_id = sub.organizer_id").
+			Joins("JOIN organizers o ON o.id = a.organizer_id").
+			Where("sub.user_id = ? AND a.type = ? AND a.status = ? AND a.is_hidden = 0 AND o.status = ? AND o.enabled = 1", userID, models.ActivityTypeVenue, models.ActivityStatusOnline, models.OrganizerStatusApproved),
+		"sub.created_at",
+	); err != nil {
 		return nil, err
 	}
 
-	var rows []struct {
-		ID          int64
-		OrganizerID int64
-		Type        string
-		Name        string
-		PosterList  string
-		StartTime   time.Time
-		EndTime     time.Time
-		Status      int8
-		AuditType   string
+	rows := make([]subscribedActivityRow, 0, len(rowsByActivityID))
+	for _, row := range rowsByActivityID {
+		rows = append(rows, row)
 	}
-	if err := query.
-		Select("a.id, a.organizer_id, a.type, a.name, a.poster_list, a.start_time, a.end_time, a.status, a.audit_type").
-		Order("sub.created_at DESC").
-		Offset((page - 1) * size).
-		Limit(size).
-		Scan(&rows).Error; err != nil {
-		return nil, err
+	sort.Slice(rows, func(i, j int) bool { return rows[i].SubscribedAt.After(rows[j].SubscribedAt) })
+	total := int64(len(rows))
+	start := (page - 1) * size
+	if start >= len(rows) {
+		return &types.PageResponse[types.ActivityListItem]{List: []types.ActivityListItem{}, Total: total}, nil
 	}
+	end := start + size
+	if end > len(rows) {
+		end = len(rows)
+	}
+	rows = rows[start:end]
 
 	activities := make([]models.Activity, 0, len(rows))
 	for _, row := range rows {
@@ -2380,7 +2453,33 @@ func (s *TicketingService) GetMyActivities(ctx context.Context, userID int64, pa
 	if filter.ActivityTo != nil {
 		query = query.Where("start_time <= ?", *filter.ActivityTo)
 	}
-	return s.listActivities(query, page, size, userID)
+	resp, err := s.listActivities(query, page, size, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.List) == 0 {
+		return resp, nil
+	}
+	activityIDs := make([]int64, 0, len(resp.List))
+	for _, item := range resp.List {
+		activityIDs = append(activityIDs, item.ID)
+	}
+	var revisions []models.Activity
+	if err := s.DB.WithContext(ctx).Select("id", "pending_revision_status", "pending_revision_reason").
+		Where("organizer_id = ? AND id IN ? AND pending_revision_status IN ?", org.ID, activityIDs, []int8{models.ActivityStatusPending, models.ActivityStatusRejected}).Find(&revisions).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]models.Activity, len(revisions))
+	for _, activity := range revisions {
+		byID[activity.ID] = activity
+	}
+	for i := range resp.List {
+		if activity, ok := byID[resp.List[i].ID]; ok {
+			resp.List[i].HasPendingRevision = true
+			resp.List[i].PendingRevisionReason = activity.PendingRevisionReason
+		}
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) findApprovedOrganizerForActivityList(ctx context.Context, userID int64) (*models.Organizer, error) {
@@ -2745,6 +2844,13 @@ func (s *TicketingService) SaveTicketSpecs(ctx context.Context, userID, activity
 	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
 		return errors.New("场地不支持票券配置")
 	}
+	if activity.Status == models.ActivityStatusOnline {
+		return s.saveActivityRevision(ctx, org.ID, &activity, types.ActivityCreateRequest{
+			ActivityID:  activityID,
+			Step:        4,
+			TicketSpecs: specs,
+		}, map[string]any{})
+	}
 	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range specs {
 			spec, err := buildTicketSpec(activityID, item)
@@ -2767,10 +2873,7 @@ func (s *TicketingService) SaveTicketSpecs(ctx context.Context, userID, activity
 	}); err != nil {
 		return err
 	}
-	if len(specs) > 0 {
-		_, err = s.markActivityPendingReview(ctx, activityID, models.ActivityAuditTypeReaudit)
-	}
-	return err
+	return nil
 }
 
 func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID int64) error {
@@ -2784,11 +2887,17 @@ func (s *TicketingService) DeleteTicketSpec(ctx context.Context, userID, specID 
 		First(&spec).Error; err != nil {
 		return err
 	}
+	var activity models.Activity
+	if err := s.DB.WithContext(ctx).Where("id = ?", spec.ActivityID).First(&activity).Error; err != nil {
+		return err
+	}
+	if activity.Status == models.ActivityStatusOnline {
+		return s.deleteRevisionTicketSpec(ctx, org.ID, &activity, specID)
+	}
 	if err := s.DB.WithContext(ctx).Delete(&spec).Error; err != nil {
 		return err
 	}
-	_, err = s.markActivityPendingReview(ctx, spec.ActivityID, models.ActivityAuditTypeReaudit)
-	return err
+	return nil
 }
 
 func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, req types.CreateTicketOrderRequest) (*types.CreateTicketOrderResponse, error) {
@@ -5441,6 +5550,171 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 // simple for merchants and ensures review does not miss a material change.
 func activityEditNeedsReaudit(req types.ActivityCreateRequest, updates map[string]any) bool {
 	return len(updates) > 0 || req.TagIDs != nil || req.BusinessHours != nil || req.TicketSpecs != nil
+}
+
+func decodeActivityRevision(activity models.Activity) (*types.ActivityRevisionPayload, error) {
+	if strings.TrimSpace(activity.PendingRevision) == "" {
+		return nil, nil
+	}
+	var payload types.ActivityRevisionPayload
+	if err := json.Unmarshal([]byte(activity.PendingRevision), &payload); err != nil {
+		return nil, fmt.Errorf("待审核修改数据损坏: %w", err)
+	}
+	payload.Activity.ID = activity.ID
+	payload.Activity.OrganizerID = activity.OrganizerID
+	return &payload, nil
+}
+
+func (s *TicketingService) activityRevisionSnapshot(ctx context.Context, tx *gorm.DB, activity models.Activity) (*types.ActivityRevisionPayload, error) {
+	if payload, err := decodeActivityRevision(activity); err != nil || payload == nil {
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return payload, nil
+	}
+
+	payload := &types.ActivityRevisionPayload{Activity: activity, TicketSpecs: []models.TicketSpec{}, TagIDs: []int64{}}
+	payload.Activity.PendingRevision = ""
+	payload.Activity.PendingRevisionStatus = 0
+	payload.Activity.PendingRevisionReason = ""
+	if defaultActivityType(activity.Type) != models.ActivityTypeVenue {
+		if err := tx.WithContext(ctx).Where("activity_id = ?", activity.ID).Order("id ASC").Find(&payload.TicketSpecs).Error; err != nil {
+			return nil, err
+		}
+	}
+	targetType, targetID := models.ContentTagTargetActivity, activity.ID
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		targetType, targetID = models.ContentTagTargetVenue, activity.OrganizerID
+	}
+	tags, err := dao.LoadContentTags(ctx, tx, targetType, []int64{targetID}, false)
+	if err != nil {
+		return nil, err
+	}
+	payload.TagIDs = types.ContentTagIDs(tags[targetID])
+	if defaultActivityType(activity.Type) == models.ActivityTypeVenue {
+		var profile models.OrganizerProfile
+		if err := tx.WithContext(ctx).Where("organizer_id = ?", activity.OrganizerID).First(&profile).Error; err == nil {
+			payload.BusinessHours = profile.BusinessHours
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	return payload, nil
+}
+
+func applyActivityUpdateSnapshot(activity *models.Activity, updates map[string]any) error {
+	encoded, err := json.Marshal(updates)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(encoded, activity)
+}
+
+func applyRevisionTicketSpecs(activityID int64, current []models.TicketSpec, items []types.TicketSpecSaveItem) ([]models.TicketSpec, error) {
+	byID := make(map[int64]int, len(current))
+	for i := range current {
+		byID[current[i].ID] = i
+	}
+	for _, item := range items {
+		spec, err := buildTicketSpec(activityID, item)
+		if err != nil {
+			return nil, err
+		}
+		if item.ID > 0 {
+			index, ok := byID[item.ID]
+			if !ok {
+				return nil, errors.New("票券不存在")
+			}
+			spec.ID = item.ID
+			spec.SoldCount = current[index].SoldCount
+			current[index] = *spec
+			continue
+		}
+		current = append(current, *spec)
+	}
+	return current, nil
+}
+
+// saveActivityRevision stages changes for an already-online activity. The
+// public row is intentionally untouched until the administrator approves it.
+func (s *TicketingService) saveActivityRevision(ctx context.Context, organizerID int64, activity *models.Activity, req types.ActivityCreateRequest, updates map[string]any) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.Activity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND organizer_id = ? AND status = ?", activity.ID, organizerID, models.ActivityStatusOnline).First(&locked).Error; err != nil {
+			return err
+		}
+		payload, err := s.activityRevisionSnapshot(ctx, tx, locked)
+		if err != nil {
+			return err
+		}
+		if err := applyActivityUpdateSnapshot(&payload.Activity, updates); err != nil {
+			return err
+		}
+		payload.Activity.ID = locked.ID
+		payload.Activity.OrganizerID = locked.OrganizerID
+		payload.Activity.Status = models.ActivityStatusPending
+		payload.Activity.AuditType = models.ActivityAuditTypeReaudit
+		payload.Activity.RejectReason = ""
+		if req.TicketSpecs != nil {
+			payload.TicketSpecs, err = applyRevisionTicketSpecs(locked.ID, payload.TicketSpecs, req.TicketSpecs)
+			if err != nil {
+				return err
+			}
+		}
+		if req.TagIDs != nil {
+			payload.TagIDs = append([]int64(nil), req.TagIDs...)
+		}
+		if req.BusinessHours != nil {
+			payload.BusinessHours = *req.BusinessHours
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&locked).Updates(map[string]any{
+			"pending_revision":        string(encoded),
+			"pending_revision_status": models.ActivityStatusPending,
+			"pending_revision_reason": "",
+			"updated_at":              time.Now(),
+		}).Error
+	})
+}
+
+func (s *TicketingService) deleteRevisionTicketSpec(ctx context.Context, organizerID int64, activity *models.Activity, specID int64) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.Activity
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND organizer_id = ? AND status = ?", activity.ID, organizerID, models.ActivityStatusOnline).First(&locked).Error; err != nil {
+			return err
+		}
+		payload, err := s.activityRevisionSnapshot(ctx, tx, locked)
+		if err != nil {
+			return err
+		}
+		index := -1
+		for i := range payload.TicketSpecs {
+			if payload.TicketSpecs[i].ID == specID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return gorm.ErrRecordNotFound
+		}
+		payload.TicketSpecs = append(payload.TicketSpecs[:index], payload.TicketSpecs[index+1:]...)
+		payload.Activity.Status = models.ActivityStatusPending
+		payload.Activity.AuditType = models.ActivityAuditTypeReaudit
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&locked).Updates(map[string]any{
+			"pending_revision":        string(encoded),
+			"pending_revision_status": models.ActivityStatusPending,
+			"pending_revision_reason": "",
+			"updated_at":              time.Now(),
+		}).Error
+	})
 }
 
 // markActivityPendingReview is idempotent: it only transitions an online
