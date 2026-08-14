@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/kitex/tool/internal_pkg/log"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
-	"strings"
+	"gorm.io/gorm/clause"
 	"time"
 )
 
@@ -191,7 +191,8 @@ func (s *LikeService) LikeNote(ctx context.Context, userID, noteID uint64) error
 		return err
 	}
 	if isLiked {
-		return errors.New("已经点赞过了")
+		// 点赞接口按幂等语义处理，双击或请求重试不应报错。
+		return nil
 	}
 
 	// 3. 先写数据库(保证数据一致性)
@@ -234,24 +235,31 @@ func (s *LikeService) UnlikeNote(ctx context.Context, userID, noteID uint64) err
 	return nil
 }
 
-// 写数据库:创建点赞记录 + 更新统计
+// 写数据库:创建或恢复点赞记录，并更新统计。
 func (s *LikeService) createLikeRecord(ctx context.Context, userID, noteID uint64) error {
 	return s.LikeDAO.Transaction(ctx, func(tx *gorm.DB) error {
-		// 1. 插入点赞记录
-		like := &models.NoteLike{
-			UserID:    int(userID),
-			NoteID:    noteID,
-			CreatedAt: time.Now(),
-		}
-		if err := tx.Create(like).Error; err != nil {
-			// 唯一键冲突说明已经点赞了
-			if strings.Contains(err.Error(), "Duplicate entry") {
-				return errors.New("已经点赞过了")
+		var like models.NoteLike
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND note_id = ?", userID, noteID).
+			First(&like).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			like = models.NoteLike{UserID: int(userID), NoteID: noteID, Status: 1, CreatedAt: time.Now()}
+			if err := tx.Create(&like).Error; err != nil {
+				return err
 			}
+		case err != nil:
 			return err
+		case like.Status == 1:
+			// 并发请求已经完成点赞，保持幂等且不重复增加计数。
+			return nil
+		default:
+			if err := tx.Model(&models.NoteLike{}).Where("id = ?", like.ID).Update("status", 1).Error; err != nil {
+				return err
+			}
 		}
 
-		// 2. 更新统计表
+		// 更新统计表。
 		result := tx.Model(&models.NoteStats{}).
 			Where("note_id = ?", noteID).
 			UpdateColumn("like_count", gorm.Expr("like_count + 1"))
@@ -343,11 +351,12 @@ func (s *LikeService) updateRedisAfterUnlike(ctx context.Context, userID, noteID
 
 // 检查点赞状态
 func (s *LikeService) checkLikeStatus(ctx context.Context, userID, noteID uint64) (bool, error) {
-	// 1. 先查 Redis
+	// 1. 先查 Redis。集合未命中只能说明缓存里没有，不能说明数据库
+	// 没有点赞记录；否则冷缓存会把已点赞状态错误返回为 false。
 	userLikedKey := fmt.Sprintf(UserLikedNotesKey, userID)
 	exists, err := s.Redis.SIsMember(ctx, userLikedKey, noteID).Result()
-	if err == nil {
-		return exists, nil
+	if err == nil && exists {
+		return true, nil
 	}
 
 	// 2. Redis 查不到,查数据库
@@ -496,14 +505,14 @@ func (s *LikeService) BatchCheckLikeStatus(ctx context.Context, userID uint64, n
 
 	pipe.Exec(ctx)
 
-	// 2. 收集结果
+	// 2. Redis 的 false 和 Redis 异常都必须回源数据库。点赞集合只缓存
+	// 正向状态，不能把未命中当作可靠的未点赞结果。
 	needDBCheck := make([]uint64, 0)
 	for noteID, cmd := range cmds {
 		exists, err := cmd.Result()
 		if err == nil && exists {
 			result[noteID] = true
-		} else if err != nil {
-			// Redis 查不到,需要查数据库
+		} else {
 			needDBCheck = append(needDBCheck, noteID)
 		}
 	}
