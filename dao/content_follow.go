@@ -11,18 +11,15 @@ import (
 )
 
 // FollowContent validates a public content target and creates an idempotent
-// object-level follow relation. The returned owner ID is used to reject
-// following one's own content.
+// object-level follow relation. Content follows are intentionally allowed for
+// the owner too: an organizer can follow their own activity or venue so it is
+// retained in their personal follow list just like any other content.
 func FollowContent(ctx context.Context, db *gorm.DB, userID int64, targetType string, targetID int64) error {
-	ownerID, err := ResolveContentFollowOwner(ctx, db, targetType, targetID)
-	if err != nil {
+	if _, err := ResolveContentFollowOwner(ctx, db, targetType, targetID); err != nil {
 		return err
 	}
 	if userID <= 0 {
 		return errors.New("用户未登录")
-	}
-	if ownerID == userID {
-		return errors.New("不能关注自己的内容")
 	}
 	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&models.ContentFollow{
 		UserID: userID, TargetType: targetType, TargetID: targetID,

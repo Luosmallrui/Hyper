@@ -294,7 +294,8 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 		}
 	}
 
-	subscribedMap := m.loadActivitySubscriptionSet(c, activityIDs)
+	activitySubscribedMap := m.loadActivitySubscriptionSet(c, activityIDs)
+	venueSubscribedMap := m.loadVenueSubscriptionSet(c, organizerIDs)
 	activityFollowCounts, activityFollowed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetActivity, activityFollowIDs, int64(currentUserID(c)))
 	if err != nil {
 		return nil, err
@@ -360,6 +361,7 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			ID:               markerID,
 			Source:           markerSource,
 			SourceID:         markerSourceID,
+			ActivityID:       activity.ID,
 			DetailType:       detailType,
 			DetailURL:        detailURL,
 			Title:            activity.Name,
@@ -392,15 +394,18 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			continue
 		}
 		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
-			if activityType == models.ActivityTypeVenue && organizer.Name != "" {
-				marker.Title = organizer.Name
-			}
+			// A venue is now represented by an activities row. Keep its own
+			// activities.name as the marker title; organizer.Name is exposed as
+			// user/username for the merchant identity.
 			marker.UserID = organizer.UserID
 			marker.User = organizer.Name
 			marker.UserName = organizer.Name
 			marker.UserAvatar = organizer.Logo
 			marker.UserAvatarCamel = organizer.Logo
-			marker.IsSubscriber = subscribedMap[activity.ID]
+			marker.IsSubscriber = activitySubscribedMap[activity.ID]
+			if activityType == models.ActivityTypeVenue {
+				marker.IsSubscriber = venueSubscribedMap[activity.OrganizerID]
+			}
 		}
 		markers = append(markers, marker)
 	}
@@ -465,6 +470,24 @@ func (m *Map) loadActivitySubscriptionSet(c *gin.Context, activityIDs []int64) m
 	if err := m.DB.WithContext(c.Request.Context()).Model(&models.ActivitySubscription{}).
 		Where("user_id = ? AND activity_id IN ?", userID, activityIDs).
 		Pluck("activity_id", &subscribedIDs).Error; err != nil {
+		return subscribed
+	}
+	for _, id := range subscribedIDs {
+		subscribed[id] = true
+	}
+	return subscribed
+}
+
+func (m *Map) loadVenueSubscriptionSet(c *gin.Context, organizerIDs []int64) map[int64]bool {
+	subscribed := make(map[int64]bool)
+	userID := currentUserID(c)
+	if userID <= 0 || len(organizerIDs) == 0 {
+		return subscribed
+	}
+	var subscribedIDs []int64
+	if err := m.DB.WithContext(c.Request.Context()).Model(&models.VenueSubscription{}).
+		Where("user_id = ? AND organizer_id IN ?", userID, organizerIDs).
+		Pluck("organizer_id", &subscribedIDs).Error; err != nil {
 		return subscribed
 	}
 	for _, id := range subscribedIDs {

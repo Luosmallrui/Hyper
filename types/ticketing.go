@@ -140,6 +140,8 @@ type OrganizerSubscriptionSummary struct {
 
 type VenueListItem struct {
 	ID               int64            `json:"id"`
+	ActivityID       int64            `json:"activity_id,omitempty"`
+	ActivityName     string           `json:"activity_name,omitempty"`
 	UserID           int64            `json:"user_id"`
 	Name             string           `json:"name"`
 	Logo             string           `json:"logo"`
@@ -258,6 +260,7 @@ type OrganizerProfileResponse struct {
 type PublicOrganizerHomeResponse struct {
 	ID               int64                          `json:"id"`
 	UserID           int64                          `json:"user_id"`
+	Type             string                         `json:"type"`
 	Name             string                         `json:"name"`
 	Logo             string                         `json:"logo"`
 	OwnerNickname    string                         `json:"owner_nickname"`

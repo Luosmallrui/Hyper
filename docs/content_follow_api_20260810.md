@@ -82,7 +82,7 @@ Content-Type: application/json
 | `venue` | 新场地、`type=venue` 的活动 | `organizers.id` |
 | `party` | 旧 `parties` 表派对 | `parties.id` |
 
-特别注意：地图中场地型活动的 `source_id` 是 `activities.id`，但它的 `follow_target_id` 是场地主办方 `organizers.id`。因此应直接传服务端返回的 `follow_target_*`。
+特别注意：地图中场地型活动的 `source_id` 是场地主办方 `organizers.id`，`activity_id` 才是承载场地资料的 `activities.id`；`follow_target_id` 同样是场地主办方 `organizers.id`。因此应直接传服务端返回的 `follow_target_*`。
 
 ## 4. 返回字段
 

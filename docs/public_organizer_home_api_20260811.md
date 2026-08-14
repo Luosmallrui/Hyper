@@ -31,6 +31,7 @@ Authorization: Bearer <access_token>   # 可选
   "data": {
     "id": 7,
     "user_id": 51,
+    "type": "party",
     "name": "Hyper Club",
     "logo": "https://cdn.hypercn.cn/organizer/logo.png",
     "owner_nickname": "Hyper 官方",
@@ -78,6 +79,8 @@ Authorization: Bearer <access_token>   # 可选
         {
           "id": 7,
           "name": "Hyper Club",
+          "activity_id": 15,
+          "activity_name": "Hyper Club 场地",
           "cover_image": "https://cdn.hypercn.cn/organizer/cover.png",
           "description": "场地介绍",
           "business_hours": "10:00-22:00",
@@ -96,10 +99,10 @@ Authorization: Bearer <access_token>   # 可选
 
 ## 2. 展示与跳转约定
 
-1. 活动详情中已有 `organizer.id`，点击主办方区域后跳转商家主页，并请求 `GET /organizers/:id`。
+1. 活动详情中已有 `organizer.id`，点击主办方区域后跳转商家主页，并请求 `GET /organizers/:id`。根级 `type` 用于前端决定默认内容区：仅有场地的商家返回 `venue`，存在派对（包括同时拥有派对和场地）的商家返回 `party`。它不是历史入驻资料的 `organizers.type`，前端不应把 `merchant` 当作内容类型。
 2. `activities.list` 只包含该商家 `type=party` 且 `status=3` 的活动。派对使用 `start_time`、`end_time` 表示单次活动时间；点击后使用既有 `GET /api/v1/activity/:id`。
-3. `venues.list` 只包含已上架场地。场地是持续经营实体，使用 `business_hours` 表示营业时间，不展示或使用活动的 `start_time`、`end_time`；点击后使用既有 `GET /api/v1/venues/:id`。
-4. 现有新架构中，一个商家对应一份 `organizer_profiles` 场地资料，因此当前 `venues.total` 为 `0` 或 `1`。门店信息仍在场地详情的 `stores` 字段展示。
+3. `venues.list` 逐条返回该商家所有已上架、未隐藏的 `type=venue` 活动，支持多个场地并按场地创建时间倒序分页。`id` 与 `name` 保持历史兼容，分别是场地主办方 ID 与商家名称；`activity_id` 与 `activity_name` 是当前这一条场地活动的 ID 与标题。场地卡片标题应优先展示 `activity_name`，需要跳转活动详情时使用 `GET /api/v1/activity/:activity_id`；原有场地详情仍使用 `GET /api/v1/venues/:id`。
+4. 每条场地的封面、简介、行政区、地址与经纬度优先来自对应活动；商家资料仅在该字段为空时兜底。`business_hours`、客服电话、人均消费仍来自商家资料。场地是持续经营实体，使用 `business_hours` 表示营业时间，不展示或使用活动的 `start_time`、`end_time`。
 5. 未审核、已驳回或被停用的商家主页不可见，前端按不存在处理。
 
 ### 场地与派对的时间填写
