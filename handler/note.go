@@ -5,7 +5,6 @@ import (
 	"Hyper/middleware"
 	"Hyper/models"
 	"Hyper/pkg/context"
-	"Hyper/pkg/llm"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
 	"Hyper/service"
@@ -45,6 +44,7 @@ func (n *Note) RegisterRouter(r gin.IRouter) {
 
 	g.GET("/gen", authorize, context.Wrap(n.Gen))
 	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
+	g.GET("/upload/:image_id/tags", authorize, context.Wrap(n.GetUploadImageTags))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
 	g.GET("/my", authorize, context.Wrap(n.GetMyNotes))
 	g.GET("/my/likes", authorize, context.Wrap(n.GetMyLikes))
@@ -120,6 +120,29 @@ func (n *Note) publishNoteClassify(noteID uint64) {
 	if _, err := n.Producer.Send(base.Background(), msg); err != nil {
 		log.L.Error("send note classify msg error", zap.Error(err))
 	}
+}
+
+// publishNoteImageTag 将耗时的视觉标签生成移到 MQ 消费端，避免阻塞上传接口。
+func (n *Note) publishNoteImageTag(imageID int64, userID uint64, url string) error {
+	if n.Producer == nil {
+		return errors.New("note image tag producer is nil")
+	}
+	body, err := json.Marshal(&types.NoteImageTagMessage{
+		ImageID: imageID,
+		UserID:  userID,
+		URL:     url,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = n.Producer.Send(base.Background(), &rmq_client.Message{
+		Topic: types.NoteImageTagTopic,
+		Body:  body,
+	})
+	if err == nil {
+		log.L.Info("note image tag task enqueued", zap.Int64("image_id", imageID), zap.Uint64("user_id", userID))
+	}
+	return err
 }
 
 // CreateNote 创建笔记
@@ -209,13 +232,77 @@ func (n *Note) UploadImage(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
-	tags := llm.GenNoteTag(c, img.Url)
-
-	tag, err := n.TopicService.GetOrCreateTopicIDs(c, tags, uint64(userID))
-	img.Tags = tag
+	if err := n.publishNoteImageTag(img.ImageID, uint64(userID), img.Url); err != nil {
+		log.L.Error("send note image tag msg error", zap.Error(err), zap.Int64("image_id", img.ImageID))
+		if n.Db != nil {
+			_ = n.Db.WithContext(c.Request.Context()).Model(&models.Image{}).
+				Where("id = ? AND user_id = ?", img.ImageID, userID).
+				Updates(map[string]interface{}{
+					"tag_status": types.ImageTagStatusFailed,
+					"tag_error":  "标签任务投递失败",
+				}).Error
+		}
+		img.TagStatus = "failed"
+	}
 
 	response.Success(c, img)
 	return nil
+}
+
+// GetUploadImageTags 为 Socket 离线或丢包场景提供标签结果兜底查询。
+func (n *Note) GetUploadImageTags(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(http.StatusUnauthorized, "未登录")
+	}
+	imageID, err := strconv.ParseInt(c.Param("image_id"), 10, 64)
+	if err != nil || imageID <= 0 {
+		return response.NewError(http.StatusBadRequest, "图片ID格式错误")
+	}
+
+	var image models.Image
+	if err := n.Db.WithContext(c.Request.Context()).
+		Where("id = ? AND user_id = ?", imageID, userID).
+		First(&image).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "图片不存在")
+		}
+		return response.NewError(http.StatusInternalServerError, "查询图片标签失败")
+	}
+
+	tags := make([]types.CreateOrGetTopicResponse, 0)
+	if image.Tags != "" {
+		if err := json.Unmarshal([]byte(image.Tags), &tags); err != nil {
+			log.L.Warn("unmarshal image tags error", zap.Error(err), zap.Int64("image_id", imageID))
+			tags = make([]types.CreateOrGetTopicResponse, 0)
+		}
+	}
+	response.Success(c, types.NoteImageTagResult{
+		ImageID: image.ID,
+		URL:     "https://cdn.hypercn.cn/" + image.OssKey,
+		Status:  imageTagStatusName(image.TagStatus),
+		Tags:    tags,
+		Error:   imageTagError(image.TagStatus),
+	})
+	return nil
+}
+
+func imageTagStatusName(status int) string {
+	switch status {
+	case types.ImageTagStatusCompleted:
+		return "completed"
+	case types.ImageTagStatusFailed:
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
+func imageTagError(status int) string {
+	if status == types.ImageTagStatusFailed {
+		return "标签生成失败"
+	}
+	return ""
 }
 
 func (n *Note) ListNote(c *gin.Context) error {

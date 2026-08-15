@@ -50,7 +50,11 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 			AccessSecret: cfg.Sk,
 		},
 	}
-	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(types.ImTopicChat))
+	p, err := rmq_client.NewProducer(rmqConfig, rmq_client.WithTopics(
+		types.ImTopicChat,
+		types.NoteClassifyTopic,
+		types.NoteImageTagTopic,
+	))
 	if err != nil {
 		log.L.Info("Failed to create producer", zap.Error(err))
 	}
@@ -87,6 +91,7 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 			"IM_CHAT_MSGS":          rmq_client.SUB_ALL,
 			"HYPER_SYSTEM_MSGS":     rmq_client.SUB_ALL,
 			types.NoteClassifyTopic: rmq_client.SUB_ALL,
+			types.NoteImageTagTopic: rmq_client.SUB_ALL,
 		}),
 	)
 	if err != nil {

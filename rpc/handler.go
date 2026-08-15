@@ -133,6 +133,9 @@ func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.Batch
 		log.L.Error("ch is nil")
 		return &push.PushResponse{Success: false, Msg: "chat channel not initialized"}, nil
 	}
+	if req.Event != "chat" {
+		return s.batchPushEvent(ch, req)
+	}
 
 	// 2. 公共逻辑提取：消息解析与 DTO 转换（只做一次）
 	// 这里直接复用你之前的解析逻辑
@@ -215,6 +218,32 @@ func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.Batch
 		Success: successCount > 0, // 只要有一个成功就算成功，或者根据业务自定义
 		Msg:     fmt.Sprintf("success:%d, fail:%d", successCount, failCount),
 	}, nil
+}
+
+// batchPushEvent 转发不属于 IM 聊天协议的业务事件，不将它误解析为聊天消息。
+func (s *PushServiceImpl) batchPushEvent(ch *socket.Channel, req *push.BatchPushRequest) (*push.PushResponse, error) {
+	var content interface{}
+	if err := json.Unmarshal([]byte(req.Payload), &content); err != nil {
+		log.L.Error("batch unmarshal event payload failed", zap.Error(err), zap.String("event", req.Event))
+		return &push.PushResponse{Success: false, Msg: "invalid payload"}, nil
+	}
+
+	successCount := 0
+	failCount := 0
+	for _, cid := range req.Cids {
+		client, ok := ch.Client(cid)
+		if !ok {
+			failCount++
+			continue
+		}
+		if err := client.Write(&socket.ClientResponse{IsAck: true, Event: req.Event, Content: content}); err != nil {
+			log.L.Error("batch write event error", zap.Int64("cid", cid), zap.Error(err), zap.String("event", req.Event))
+			failCount++
+			continue
+		}
+		successCount++
+	}
+	return &push.PushResponse{Success: successCount > 0, Msg: fmt.Sprintf("success:%d, fail:%d", successCount, failCount)}, nil
 }
 
 func (s *PushServiceImpl) BatchGetUserInfo(ctx context.Context, uids []uint64) map[uint64]types.UserProfile {

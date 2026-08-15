@@ -294,6 +294,49 @@ func (m *MessageSubscribe) doBatchPush(ctx context.Context, uid int, msg *types.
 	}
 }
 
+// PushEventToUser 向用户的所有在线连接推送非聊天类 Socket 事件。
+// 推送失败不影响已持久化业务结果，客户端可通过对应查询接口补拉。
+func (m *MessageSubscribe) PushEventToUser(ctx context.Context, targetUID int, event string, payload interface{}) {
+	routeMap, err := m.GetUserRoute(ctx, targetUID)
+	if err != nil {
+		log.L.Error("get user route for event failed", zap.Error(err), zap.Int("target", targetUID), zap.String("event", event))
+		return
+	}
+	if len(routeMap) == 0 {
+		return
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.L.Error("marshal socket event payload failed", zap.Error(err), zap.String("event", event))
+		return
+	}
+	for sid, cids := range routeMap {
+		clientIDs := make([]int64, 0, len(cids))
+		for _, cid := range cids {
+			id, err := strconv.ParseInt(cid, 10, 64)
+			if err == nil {
+				clientIDs = append(clientIDs, id)
+			}
+		}
+		if len(clientIDs) == 0 {
+			continue
+		}
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			log.L.Error("get rpc client for event failed", zap.Error(err), zap.String("sid", sid), zap.String("event", event))
+			continue
+		}
+		if _, err := cli.BatchPushToClient(ctx, &push.BatchPushRequest{
+			Cids:    clientIDs,
+			Uid:     int32(targetUID),
+			Payload: string(body),
+			Event:   event,
+		}); err != nil {
+			log.L.Error("push socket event failed", zap.Error(err), zap.String("sid", sid), zap.String("event", event))
+		}
+	}
+}
+
 type RouterKey struct{}
 
 func (RouterKey) UserLocation(uid int) string {

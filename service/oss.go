@@ -222,6 +222,8 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 		Width:     cfg.Width,
 		Height:    cfg.Height,
 		Status:    types.ImageStatusUploaded,
+		Tags:      "[]",
+		TagStatus: types.ImageTagStatusPending,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -233,10 +235,11 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 	url := "https://cdn.hypercn.cn/" + objectKey
 	//tag := llm.GenNoteTag(ctx, url+"?x-oss-process=image/resize,w_100")
 	resp := &types.UploadImageResp{
-		ImageID: imageID,
-		Url:     url,
-		Width:   cfg.Width,
-		Height:  cfg.Height,
+		ImageID:   imageID,
+		Url:       url,
+		Width:     cfg.Width,
+		Height:    cfg.Height,
+		TagStatus: "pending",
 	}
 	if resp.Tags == nil {
 		resp.Tags = make([]types.CreateOrGetTopicResponse, 0)
