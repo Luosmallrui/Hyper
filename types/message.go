@@ -89,7 +89,7 @@ type MessageDTO struct {
 }
 
 type ListMessageReq struct {
-	Id       uint64                 `json:"id"`
+	Id       string                 `json:"id"`
 	SenderId uint64                 `json:"sender_id"`
 	Content  string                 `json:"content"`
 	MsgType  int                    `json:"msg_type"`
@@ -101,7 +101,7 @@ type ListMessageReq struct {
 }
 
 type ListGroupMessageReq struct {
-	Id       uint64 `json:"id"`
+	Id       string `json:"id"`
 	Nickname string `json:"nickname"`
 
 	SenderId uint64                 `json:"sender_id"`
@@ -110,4 +110,14 @@ type ListGroupMessageReq struct {
 	Ext      map[string]interface{} `json:"ext"`
 	Time     int64                  `json:"time"`
 	IsSelf   bool                   `json:"is_self"`
+}
+
+type DeleteMessageRequest struct {
+	SessionType int    `json:"session_type" binding:"required,oneof=1 2"`
+	PeerID      uint64 `json:"peer_id" binding:"required"`
+}
+
+type ClearMessageSessionRequest struct {
+	SessionType int    `json:"session_type" binding:"required,oneof=1 2"`
+	PeerID      uint64 `json:"peer_id" binding:"required"`
 }

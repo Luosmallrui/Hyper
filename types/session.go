@@ -25,3 +25,8 @@ type TalkSessionClearUnreadNumRequest struct {
 
 type TalkSessionClearUnreadNumResponse struct {
 }
+
+type RemoveSessionRequest struct {
+	SessionType int    `json:"session_type" binding:"required,oneof=1 2"`
+	PeerID      uint64 `json:"peer_id" binding:"required"`
+}

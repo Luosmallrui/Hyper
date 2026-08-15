@@ -28,6 +28,8 @@ func (m *Message) RegisterRouter(r gin.IRouter) {
 	message := r.Group("/v1/message")
 	message.Use(authorize)
 	message.POST("/send", context.Wrap(m.SendMessage))
+	message.POST("/clear", context.Wrap(m.ClearMessageSession))
+	message.DELETE("/:message_id", context.Wrap(m.DeleteMessage))
 	message.GET("/list", context.Wrap(m.ListMessages))
 }
 
@@ -46,6 +48,51 @@ func (m *Message) SendMessage(c *gin.Context) error {
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, msg)
+	return nil
+}
+
+// DeleteMessage hides one message for the current user only.
+func (m *Message) DeleteMessage(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	messageID, err := strconv.ParseInt(c.Param("message_id"), 10, 64)
+	if err != nil || messageID <= 0 {
+		return response.NewError(400, "message_id 非法")
+	}
+	var req types.DeleteMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := m.MessageService.DeleteMessageForUser(c.Request.Context(), uint64(userID), req.SessionType, req.PeerID, messageID); err != nil {
+		if errors.Is(err, service.ErrGroupNotFound) {
+			return response.NewError(404, "群不存在或已解散")
+		}
+		if errors.Is(err, service.ErrNotGroupMember) {
+			return response.NewError(403, "你不在群内或已退群")
+		}
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"message_id": strconv.FormatInt(messageID, 10), "deleted": true})
+	return nil
+}
+
+// ClearMessageSession hides all existing messages in a session for the
+// current user while retaining the peer's history.
+func (m *Message) ClearMessageSession(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	var req types.ClearMessageSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := m.SessionService.ClearSessionMessages(c.Request.Context(), uint64(userID), req.SessionType, req.PeerID); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"cleared": true})
 	return nil
 }
 

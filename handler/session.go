@@ -18,11 +18,12 @@ type Session struct {
 
 func (s *Session) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(s.Config.Jwt.Secret))
-	session := r.Group("/v1/session/")
+	session := r.Group("/v1/session")
 	session.Use(authorize)
 	session.GET("/", context.Wrap(s.ListSessions))
 	session.POST("setting", context.Wrap(s.SessionSetting))
 	session.POST("clear-unread", context.Wrap(s.ClearUnread)) //清除会话未读数
+	session.DELETE("", context.Wrap(s.RemoveSession))
 }
 func (s *Session) ListSessions(c *gin.Context) error {
 	userId, err := context.GetUserID(c)
@@ -95,5 +96,22 @@ func (s *Session) ClearUnread(c *gin.Context) error {
 	}
 
 	response.Success(c, "ok")
+	return nil
+}
+
+// RemoveSession removes a session from only the current user's message list.
+func (s *Session) RemoveSession(c *gin.Context) error {
+	userID, err := context.GetUserID(c)
+	if err != nil {
+		return response.NewError(401, "未登录")
+	}
+	var req types.RemoveSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "参数格式错误")
+	}
+	if err := s.SessionService.RemoveSession(c.Request.Context(), uint64(userID), req.SessionType, req.PeerID); err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"removed": true})
 	return nil
 }

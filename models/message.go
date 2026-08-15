@@ -59,4 +59,18 @@ func (ImSingleMessage) TableName() string {
 	return "im_single_messages"
 }
 
+// ImMessageUserDeletion records a user's local deletion. Messages remain
+// available to the peer and to operational audit queries.
+type ImMessageUserDeletion struct {
+	ID          uint64    `gorm:"primaryKey;column:id"`
+	MessageID   int64     `gorm:"column:message_id;not null;uniqueIndex:uk_message_user_delete,priority:1"`
+	SessionType int       `gorm:"column:session_type;not null;uniqueIndex:uk_message_user_delete,priority:2"`
+	UserID      uint64    `gorm:"column:user_id;not null;uniqueIndex:uk_message_user_delete,priority:3;index:idx_message_user_delete_user"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (ImMessageUserDeletion) TableName() string {
+	return "im_message_user_deletions"
+}
+
 type MessageExt map[string]interface{}

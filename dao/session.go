@@ -38,8 +38,9 @@ func (d *SessionDAO) BatchUpsert(ctx context.Context, rows []models.Session) err
 			"last_msg_content": gorm.Expr("VALUES(last_msg_content)"),
 			"last_msg_time":    gorm.Expr("VALUES(last_msg_time)"),
 			// 未读：累加（发送者传 0，其他成员传 1）
-			"unread_count": gorm.Expr("unread_count + VALUES(unread_count)"),
-			"updated_at":   gorm.Expr("VALUES(updated_at)"),
+			"unread_count":    gorm.Expr("unread_count + VALUES(unread_count)"),
+			"last_msg_hidden": 0,
+			"updated_at":      gorm.Expr("VALUES(updated_at)"),
 		}),
 	}).Create(&rows).Error
 }
