@@ -38,6 +38,7 @@ type SubServers struct {
 	MessageSubscribe      *MessageSubscribe /// 注册消息订阅
 	NoticeSubscribe       *NoticeSubscribe
 	NoteClassifySubscribe *NoteClassifySubscribe
+	NoteImageTagSubscribe *NoteImageTagSubscribe
 }
 
 type Server struct {
@@ -140,6 +141,10 @@ func (c *Server) processMessage(ctx context.Context, mv *rmq_client.MessageView)
 	case types.NoteClassifyTopic:
 		if c.NoteClassifySubscribe != nil {
 			err = c.NoteClassifySubscribe.handleNoteClassify(ctx, mv)
+		}
+	case types.NoteImageTagTopic:
+		if c.NoteImageTagSubscribe != nil {
+			err = c.NoteImageTagSubscribe.handleNoteImageTag(ctx, mv)
 		}
 	default:
 		// 不认识的 topic，直接返回错误看日志

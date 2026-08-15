@@ -9,6 +9,9 @@ type Image struct {
 	Width     int       `gorm:"column:width;not null" json:"width"`
 	Height    int       `gorm:"column:height;not null" json:"height"`
 	Status    int       `gorm:"column:status;not null;index:idx_user_status,priority:2" json:"status"`
+	Tags      string    `gorm:"column:tags;type:json" json:"-"`
+	TagStatus int       `gorm:"column:tag_status;not null;default:0;index:idx_tag_status" json:"-"`
+	TagError  string    `gorm:"column:tag_error;type:varchar(255);not null;default:''" json:"-"`
 	CreatedAt time.Time `gorm:"column:created_at;not null;index:idx_created_at" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 }

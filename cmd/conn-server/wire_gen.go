@@ -124,11 +124,13 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		DB:             db,
 		ChannelService: channelService,
 	}
+	noteImageTagSubscribe := process.NewNoteImageTagSubscribe(db, messageSubscribe)
 	subServers := &process.SubServers{
 		HealthSubscribe:       healthSubscribe,
 		MessageSubscribe:      messageSubscribe,
 		NoticeSubscribe:       noticeSubscribe,
 		NoteClassifySubscribe: noteClassifySubscribe,
+		NoteImageTagSubscribe: noteImageTagSubscribe,
 	}
 	simpleConsumer := rocketmq.InitConsumer(rocketMQConfig)
 	server := process.NewServer(subServers, simpleConsumer)
