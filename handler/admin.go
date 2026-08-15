@@ -1664,7 +1664,11 @@ func (a *Admin) GetPublicSystemConfig(c *gin.Context) error {
 	}
 	// The cache is intentionally short so configuration changes become visible promptly.
 	c.Header("Cache-Control", "public, max-age=300")
-	response.Success(c, types.PublicSystemConfig{SystemName: config.SystemName, ICPRecordNo: config.ICPRecordNo})
+	directMessageEnabled := true
+	if config.DirectMessageEnabled != nil {
+		directMessageEnabled = *config.DirectMessageEnabled
+	}
+	response.Success(c, types.PublicSystemConfig{SystemName: config.SystemName, ICPRecordNo: config.ICPRecordNo, DirectMessageEnabled: directMessageEnabled})
 	return nil
 }
 
