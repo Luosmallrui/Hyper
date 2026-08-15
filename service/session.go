@@ -35,6 +35,8 @@ type ISessionService interface {
 	UpsertGroupSessions(ctx context.Context, msg *types.Message, memberIDs []int) error
 	UpdateSessionSettings(ctx context.Context, userID uint64, req *types.SessionSettingRequest) error
 	ClearUnread(ctx context.Context, userId uint64, sessionType int, peerId uint64, readTime int64) error
+	ClearSessionMessages(ctx context.Context, userID uint64, sessionType int, peerID uint64) error
+	RemoveSession(ctx context.Context, userID uint64, sessionType int, peerID uint64) error
 	GetUnreadNum(ctx context.Context, userId int) (int64, error)
 	//CreateSession(ctx context.Context, tx *gorm.DB, userId int, groupId uint64) (uint64, error)
 }
@@ -214,6 +216,7 @@ func (s *SessionService) upsertConversation(
 			"last_msg_type":    msg.MsgType,
 			"last_msg_content": summary,
 			"last_msg_time":    msg.Timestamp,
+			"last_msg_hidden":  0,
 			"updated_at":       time.Now(),
 		}
 
@@ -306,7 +309,7 @@ func (s *SessionService) ListUserSessions(ctx context.Context, userId uint64, li
 		// 优先使用 Redis 中的实时数据，但必须保证不被旧值覆盖 DB
 		k := SessionMapKey(c.SessionType, c.PeerId)
 
-		if last, ok := lastMsgMap[k]; ok {
+		if last, ok := lastMsgMap[k]; ok && c.LastMsgHidden == 0 && (c.ClearedAt == 0 || last.Timestamp > c.ClearedAt) {
 			// 只有当 Redis 的时间 >= DB 才采用 Redis，避免 Redis 陈旧覆盖 DB
 			if last.Timestamp >= c.LastMsgTime {
 				dto.LastMsg = last.Content
@@ -371,6 +374,67 @@ func (s *SessionService) ClearUnread(ctx context.Context, userId uint64, session
 	// DB 权威未读：Redis unread 仅用于清理历史残留 key（兼容旧逻辑/防鬼未读）
 	if s.UnreadStorage != nil {
 		s.UnreadStorage.Reset(ctx, int(userId), sessionType, int(peerId))
+	}
+	return nil
+}
+
+// ClearSessionMessages hides all history up to now for only the current user.
+// The peer's copy and later messages are preserved.
+func (s *SessionService) ClearSessionMessages(ctx context.Context, userID uint64, sessionType int, peerID uint64) error {
+	if sessionType != types.SessionTypeSingle && sessionType != types.GroupChatSessionTypeGroup {
+		return errors.New("session_type 必须是 1 或 2")
+	}
+	if userID == 0 || peerID == 0 {
+		return errors.New("会话参数不能为空")
+	}
+	now := time.Now().UnixMilli()
+	updates := map[string]interface{}{
+		"cleared_at":       now,
+		"last_msg_id":      0,
+		"last_msg_type":    0,
+		"last_msg_content": "",
+		"last_msg_time":    0,
+		"last_msg_hidden":  1,
+		"unread_count":     0,
+	}
+	result := s.DB.WithContext(ctx).Model(&models.Session{}).
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", userID, sessionType, peerID).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		session := models.Session{
+			UserId:        userID,
+			SessionType:   sessionType,
+			PeerId:        peerID,
+			ClearedAt:     now,
+			LastMsgHidden: 1,
+		}
+		if err := s.DB.WithContext(ctx).Create(&session).Error; err != nil {
+			return err
+		}
+	}
+	if s.UnreadStorage != nil {
+		s.UnreadStorage.Reset(ctx, int(userID), sessionType, int(peerID))
+	}
+	return nil
+}
+
+// RemoveSession removes only the current user's list row. Message history is
+// intentionally retained; a later incoming message recreates the session.
+func (s *SessionService) RemoveSession(ctx context.Context, userID uint64, sessionType int, peerID uint64) error {
+	if sessionType != types.SessionTypeSingle && sessionType != types.GroupChatSessionTypeGroup {
+		return errors.New("session_type 必须是 1 或 2")
+	}
+	if userID == 0 || peerID == 0 {
+		return errors.New("会话参数不能为空")
+	}
+	if err := s.SessionDAO.DeleteSession(ctx, userID, sessionType, peerID); err != nil {
+		return err
+	}
+	if s.UnreadStorage != nil {
+		s.UnreadStorage.Reset(ctx, int(userID), sessionType, int(peerID))
 	}
 	return nil
 }

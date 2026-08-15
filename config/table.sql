@@ -962,6 +962,22 @@ CREATE TABLE IF NOT EXISTS `platform_finance_flows`
 -- Existing point_logs table migration. It makes request_no idempotency safe under concurrent submissions.
 -- ALTER TABLE `point_logs` ADD UNIQUE KEY `uk_point_log_user_source_type` (`user_id`, `source_id`, `change_type`);
 
+-- IM local deletion and clear-history migration. These changes preserve the
+-- peer's messages while allowing each user to manage their own inbox.
+-- ALTER TABLE `im_session`
+--   ADD COLUMN `cleared_at` BIGINT NOT NULL DEFAULT 0 COMMENT '当前用户清空会话历史的时间戳(毫秒)' AFTER `is_mute`,
+--   ADD COLUMN `last_msg_hidden` TINYINT NOT NULL DEFAULT 0 COMMENT '当前用户是否隐藏最新消息预览' AFTER `cleared_at`;
+-- CREATE TABLE IF NOT EXISTS `im_message_user_deletions` (
+--   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+--   `message_id` BIGINT NOT NULL,
+--   `session_type` TINYINT NOT NULL,
+--   `user_id` BIGINT UNSIGNED NOT NULL,
+--   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_message_user_delete` (`message_id`, `session_type`, `user_id`),
+--   KEY `idx_message_user_delete_user` (`user_id`, `session_type`, `created_at`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='IM 用户本地删除记录';
+
 INSERT IGNORE INTO `cancel_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '计划有变', 1),
     (2, '买错票券', 2),

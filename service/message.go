@@ -43,6 +43,7 @@ type IMessageService interface {
 	SaveSingleMessage(msg *models.ImSingleMessage) error
 	SaveGroupMessage(msg *models.ImGroupMessage) error
 	SendMessage(msg *types.Message) error
+	DeleteMessageForUser(ctx context.Context, userID uint64, sessionType int, peerID uint64, messageID int64) error
 	ListMessages(ctx context.Context, userId, peerId uint64, sessionType int, cursor int64, since int64, limit int) ([]types.ListMessageReq, error)
 }
 
@@ -66,6 +67,10 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		q := s.DB.WithContext(ctx).
 			Model(&models.ImSingleMessage{}).
 			Where("session_hash = ?", sessionHash)
+		q, visibilityErr := s.applyMessageVisibilityFilters(ctx, q, "im_single_messages", userId, sessionType, peerId)
+		if visibilityErr != nil {
+			return nil, visibilityErr
+		}
 
 		// 分页逻辑：since 模式向前拉新；cursor 模式向上翻旧
 		if since > 0 {
@@ -90,16 +95,12 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		// 统一映射为 types.ListMessageReq
 		result := make([]types.ListMessageReq, 0, len(msgs))
 		for _, m := range msgs {
-			ext := map[string]interface{}{}
-			if m.Ext != "" {
-				_ = json.Unmarshal([]byte(m.Ext), &ext)
-			}
 			result = append(result, types.ListMessageReq{
-				Id:       uint64(m.Id),
+				Id:       strconv.FormatInt(m.Id, 10),
 				SenderId: uint64(m.SenderId),
 				Content:  m.Content,
 				MsgType:  m.MsgType,
-				Ext:      ext,
+				Ext:      decodeMessageExt(m.Ext),
 				Time:     m.CreatedAt,
 				IsSelf:   m.SenderId == int64(userId),
 			})
@@ -125,6 +126,10 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		q := s.DB.WithContext(ctx).
 			Model(&models.ImGroupMessage{}).
 			Where("session_hash = ?", sessionHash)
+		q, visibilityErr := s.applyMessageVisibilityFilters(ctx, q, "im_group_messages", userId, sessionType, peerId)
+		if visibilityErr != nil {
+			return nil, visibilityErr
+		}
 
 		if since > 0 {
 			q = q.Where("created_at > ?", since).Order("created_at ASC")
@@ -160,18 +165,14 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 		}
 		userInfo := s.UserService.BatchGetUserInfo(ctx, userIds)
 		for _, m := range msgs {
-			ext := map[string]interface{}{}
-			if m.Ext != "" {
-				_ = json.Unmarshal([]byte(m.Ext), &ext)
-			}
 			result = append(result, types.ListMessageReq{
-				Id:       uint64(m.Id),
+				Id:       strconv.FormatInt(m.Id, 10),
 				Nickname: userInfo[uint64(m.SenderId)].Nickname,
 				Avatar:   userInfo[uint64(m.SenderId)].Avatar,
 				SenderId: uint64(m.SenderId),
 				Content:  m.Content,
 				MsgType:  m.MsgType,
-				Ext:      ext,
+				Ext:      decodeMessageExt(m.Ext),
 				Time:     m.CreatedAt,
 				IsSelf:   m.SenderId == int64(userId),
 			})
@@ -181,6 +182,151 @@ func (s *MessageService) ListMessages(ctx context.Context, userId, peerId uint64
 	default:
 		return nil, fmt.Errorf("invalid session_type=%d (only 1 or 2)", sessionType)
 	}
+}
+
+// DeleteMessageForUser hides one message only for the current user. It does
+// not revoke the message for the peer or remove it from operational storage.
+func (s *MessageService) DeleteMessageForUser(ctx context.Context, userID uint64, sessionType int, peerID uint64, messageID int64) error {
+	if userID == 0 || peerID == 0 || messageID <= 0 {
+		return errors.New("消息或会话参数无效")
+	}
+	if err := s.ensureMessageSessionAccess(ctx, userID, sessionType, peerID); err != nil {
+		return err
+	}
+
+	sessionHash := GetSessionHash(int64(userID), int64(peerID))
+	if sessionType == types.GroupChatSessionTypeGroup {
+		sessionHash = GetGroupSessionHash(int64(peerID))
+	}
+
+	var exists bool
+	switch sessionType {
+	case types.SessionTypeSingle:
+		var message models.ImSingleMessage
+		err := s.DB.WithContext(ctx).Where("id = ? AND session_hash = ?", messageID, sessionHash).First(&message).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("消息不存在或不属于当前会话")
+		}
+		if err != nil {
+			return err
+		}
+		exists = true
+	case types.GroupChatSessionTypeGroup:
+		var message models.ImGroupMessage
+		err := s.DB.WithContext(ctx).Where("id = ? AND session_hash = ?", messageID, sessionHash).First(&message).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("消息不存在或不属于当前会话")
+		}
+		if err != nil {
+			return err
+		}
+		exists = true
+	default:
+		return fmt.Errorf("invalid session_type=%d (only 1 or 2)", sessionType)
+	}
+	if !exists {
+		return nil
+	}
+
+	deletion := models.ImMessageUserDeletion{MessageID: messageID, SessionType: sessionType, UserID: userID}
+	if err := s.DB.WithContext(ctx).Where("message_id = ? AND session_type = ? AND user_id = ?", messageID, sessionType, userID).FirstOrCreate(&deletion).Error; err != nil {
+		return err
+	}
+	return s.refreshSessionPreviewAfterMessageDelete(ctx, userID, sessionType, peerID, messageID, sessionHash)
+}
+
+func (s *MessageService) applyMessageVisibilityFilters(ctx context.Context, query *gorm.DB, table string, userID uint64, sessionType int, peerID uint64) (*gorm.DB, error) {
+	var session models.Session
+	err := s.DB.WithContext(ctx).
+		Select("cleared_at").
+		Where("user_id = ? AND session_type = ? AND peer_id = ?", userID, sessionType, peerID).
+		First(&session).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if session.ClearedAt > 0 {
+		query = query.Where("created_at > ?", session.ClearedAt)
+	}
+	query = query.Where(
+		"NOT EXISTS (SELECT 1 FROM im_message_user_deletions d WHERE d.message_id = "+table+".id AND d.session_type = ? AND d.user_id = ?)",
+		sessionType,
+		userID,
+	)
+	return query, nil
+}
+
+func (s *MessageService) ensureMessageSessionAccess(ctx context.Context, userID uint64, sessionType int, peerID uint64) error {
+	if sessionType == types.SessionTypeSingle {
+		return nil
+	}
+	if sessionType != types.GroupChatSessionTypeGroup {
+		return fmt.Errorf("invalid session_type=%d (only 1 or 2)", sessionType)
+	}
+	if s.GroupDAO == nil || s.GroupMemberDAO == nil {
+		return errors.New("群聊服务未初始化")
+	}
+	if _, err := s.GroupDAO.GetGroup(ctx, int(peerID)); err != nil {
+		return ErrGroupNotFound
+	}
+	if !s.GroupMemberDAO.IsMember(ctx, int(peerID), int(userID), false) {
+		return ErrNotGroupMember
+	}
+	return nil
+}
+
+func (s *MessageService) refreshSessionPreviewAfterMessageDelete(ctx context.Context, userID uint64, sessionType int, peerID uint64, messageID, sessionHash int64) error {
+	var session models.Session
+	if err := s.DB.WithContext(ctx).Where("user_id = ? AND session_type = ? AND peer_id = ?", userID, sessionType, peerID).First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if int64(session.LastMsgId) != messageID {
+		return nil
+	}
+
+	updates := map[string]interface{}{"last_msg_hidden": 1}
+	if sessionType == types.SessionTypeSingle {
+		var previous models.ImSingleMessage
+		query := s.DB.WithContext(ctx).Where("session_hash = ?", sessionHash).Where("created_at > ?", session.ClearedAt).
+			Where("NOT EXISTS (SELECT 1 FROM im_message_user_deletions d WHERE d.message_id = im_single_messages.id AND d.session_type = ? AND d.user_id = ?)", sessionType, userID).
+			Order("created_at DESC")
+		err := query.First(&previous).Error
+		if err == nil {
+			updates["last_msg_id"] = previous.Id
+			updates["last_msg_type"] = previous.MsgType
+			updates["last_msg_content"] = previous.Content
+			updates["last_msg_time"] = previous.CreatedAt
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			updates["last_msg_id"] = 0
+			updates["last_msg_type"] = 0
+			updates["last_msg_content"] = ""
+			updates["last_msg_time"] = 0
+		} else {
+			return err
+		}
+	} else {
+		var previous models.ImGroupMessage
+		query := s.DB.WithContext(ctx).Where("session_hash = ?", sessionHash).Where("created_at > ?", session.ClearedAt).
+			Where("NOT EXISTS (SELECT 1 FROM im_message_user_deletions d WHERE d.message_id = im_group_messages.id AND d.session_type = ? AND d.user_id = ?)", sessionType, userID).
+			Order("created_at DESC")
+		err := query.First(&previous).Error
+		if err == nil {
+			updates["last_msg_id"] = previous.Id
+			updates["last_msg_type"] = previous.MsgType
+			updates["last_msg_content"] = previous.Content
+			updates["last_msg_time"] = previous.CreatedAt
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			updates["last_msg_id"] = 0
+			updates["last_msg_type"] = 0
+			updates["last_msg_content"] = ""
+			updates["last_msg_time"] = 0
+		} else {
+			return err
+		}
+	}
+	return s.DB.WithContext(ctx).Model(&models.Session{}).Where("id = ?", session.Id).Updates(updates).Error
 }
 
 func (s *MessageService) SaveSingleMessage(msg *models.ImSingleMessage) error {
@@ -387,6 +533,7 @@ func (s *MessageService) fillNoteForwardCard(ctx context.Context, msg *types.Mes
 	if noteID == 0 {
 		return errors.New("note_id 不能为空")
 	}
+	msg.Ext[types.ExtKeyNoteID] = strconv.FormatUint(noteID, 10)
 	if s.NoteDAO == nil {
 		return errors.New("NoteDAO 未初始化")
 	}
@@ -456,16 +603,72 @@ func (s *MessageService) fillActivityCard(ctx context.Context, msg *types.Messag
 	if err := s.DB.Model(&models.Merchant{}).Where("id = ?", id).First(&merchant).Error; err != nil {
 		return nil
 	}
+	msg.Ext[types.ExtKeyActivity] = strconv.FormatUint(id, 10)
 	msg.Ext["party"] = map[string]interface{}{
-		"id":            merchant.ID,           // 商家/活动ID
-		"title":         merchant.Title,        // 标题
-		"type":          merchant.Type,         // 类型 (如：剧本杀、徒步等)
-		"cover_image":   merchant.CoverImage,   // 封面图
-		"location_name": merchant.LocationName, // 场地名称
-		"address":       merchant.Address,      // 详细地址
-		"lat":           merchant.Latitude,     // 纬度
-		"lng":           merchant.Longitude,    // 经度
-		"status":        "active",              // 额外状态标识
+		"id":            strconv.FormatUint(uint64(merchant.ID), 10), // 商家/活动ID
+		"title":         merchant.Title,                              // 标题
+		"type":          merchant.Type,                               // 类型 (如：剧本杀、徒步等)
+		"cover_image":   merchant.CoverImage,                         // 封面图
+		"location_name": merchant.LocationName,                       // 场地名称
+		"address":       merchant.Address,                            // 详细地址
+		"lat":           merchant.Latitude,                           // 纬度
+		"lng":           merchant.Longitude,                          // 经度
+		"status":        "active",                                    // 额外状态标识
 	}
 	return nil
+}
+
+// decodeMessageExt preserves JSON number tokens until known snowflake IDs are
+// converted to strings. json.Unmarshal into interface{} would turn them into
+// float64 and permanently lose precision before the HTTP response is written.
+func decodeMessageExt(raw string) map[string]interface{} {
+	ext := make(map[string]interface{})
+	if raw == "" {
+		return ext
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&ext); err != nil {
+		return map[string]interface{}{}
+	}
+	normalizeMessageExtIDs(ext)
+	return ext
+}
+
+func normalizeMessageExtIDs(ext map[string]interface{}) {
+	for _, key := range []string{types.ExtKeyNoteID, types.ExtKeyActivity} {
+		if value, ok := ext[key]; ok {
+			ext[key] = messageIDString(value)
+		}
+	}
+	for _, key := range []string{types.ExtKeyNote, "party", "activity"} {
+		item, ok := ext[key].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if value, ok := item["id"]; ok {
+			item["id"] = messageIDString(value)
+		}
+	}
+}
+
+func messageIDString(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	case float64:
+		return strconv.FormatUint(uint64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case int:
+		return strconv.Itoa(v)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	default:
+		return fmt.Sprint(value)
+	}
 }
