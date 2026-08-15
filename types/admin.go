@@ -398,10 +398,12 @@ type AdminSystemConfig struct {
 	CustomerServiceHours  string `json:"customer_service_hours"`
 	CustomerServiceUserID int64  `json:"customer_service_user_id"`
 	WithdrawArrivalCycle  string `json:"withdraw_arrival_cycle"`
+	DirectMessageEnabled  *bool  `json:"direct_message_enabled,omitempty"`
 }
 
 // PublicSystemConfig is safe to expose before login, for example on the admin login page.
 type PublicSystemConfig struct {
-	SystemName  string `json:"system_name"`
-	ICPRecordNo string `json:"icp_record_no"`
+	SystemName           string `json:"system_name"`
+	ICPRecordNo          string `json:"icp_record_no"`
+	DirectMessageEnabled bool   `json:"direct_message_enabled"`
 }

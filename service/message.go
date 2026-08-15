@@ -32,8 +32,9 @@ type MessageService struct {
 }
 
 var (
-	ErrGroupNotFound  = errors.New("群不存在或已解散")
-	ErrNotGroupMember = errors.New("你不在群内或已退群")
+	ErrGroupNotFound         = errors.New("群不存在或已解散")
+	ErrNotGroupMember        = errors.New("你不在群内或已退群")
+	ErrDirectMessageDisabled = errors.New("平台已关闭私信功能")
 )
 
 var _ IMessageService = (*MessageService)(nil)
@@ -342,6 +343,15 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	if err := normalizeMessagePayload(msg); err != nil {
 		return err
 	}
+	if msg.SessionType == types.SessionTypeSingle {
+		allowed, err := s.directMessageAllowed(context.Background(), msg.SenderID, msg.TargetID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrDirectMessageDisabled
+		}
+	}
 
 	// 1) 服务端统一补字段：时间、状态、雪花ID、Ext兜底
 	msg.Timestamp = time.Now().UnixMilli()
@@ -428,6 +438,25 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	}
 
 	return nil
+}
+
+// directMessageAllowed reads the platform switch at send time so configuration
+// changes are effective immediately. The configured customer-service account
+// remains available when ordinary user DMs are closed.
+func (s *MessageService) directMessageAllowed(ctx context.Context, senderID, targetID int64) (bool, error) {
+	var settings []models.PlatformSetting
+	if err := s.DB.WithContext(ctx).Where("setting_key IN ?", []string{"direct_message_enabled", "customer_service_user_id"}).Find(&settings).Error; err != nil {
+		return false, err
+	}
+	values := make(map[string]string, len(settings))
+	for _, setting := range settings {
+		values[setting.Key] = setting.Value
+	}
+	if platformBoolEnabled(values["direct_message_enabled"], true) {
+		return true, nil
+	}
+	serviceUserID, _ := strconv.ParseInt(values["customer_service_user_id"], 10, 64)
+	return serviceUserID > 0 && (senderID == serviceUserID || targetID == serviceUserID), nil
 }
 
 // normalizeMessagePayload keeps image messages compatible with the existing

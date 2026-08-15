@@ -576,7 +576,8 @@ INSERT IGNORE INTO `platform_settings` (`setting_key`, `setting_value`, `remark`
 ('customer_service_wechat', '', '客服微信'),
 ('customer_service_email', '', '客服邮箱'),
 ('customer_service_hours', '', '客服服务时间'),
-('customer_service_user_id', '0', '客服聊天用户 ID');
+('customer_service_user_id', '0', '客服聊天用户 ID'),
+('direct_message_enabled', '1', '普通用户私信开关，1开启 0关闭');
 
 CREATE TABLE IF NOT EXISTS `admin_roles`
 (

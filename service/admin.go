@@ -1541,7 +1541,7 @@ func (s *AdminService) UpdateSettings(ctx context.Context, settings []types.Admi
 }
 
 func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemConfig, error) {
-	keys := []string{"system_name", "icp_record_no", "customer_service_phone", "customer_service_wechat", "customer_service_email", "customer_service_hours", "customer_service_user_id", "withdraw_arrival_cycle"}
+	keys := []string{"system_name", "icp_record_no", "customer_service_phone", "customer_service_wechat", "customer_service_email", "customer_service_hours", "customer_service_user_id", "withdraw_arrival_cycle", "direct_message_enabled"}
 	var rows []models.PlatformSetting
 	if err := s.DB.WithContext(ctx).Where("setting_key IN ?", keys).Find(&rows).Error; err != nil {
 		return nil, err
@@ -1551,10 +1551,11 @@ func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemC
 		values[row.Key] = row.Value
 	}
 	customerServiceUserID, _ := strconv.ParseInt(values["customer_service_user_id"], 10, 64)
+	directMessageEnabled := platformBoolEnabled(values["direct_message_enabled"], true)
 	return &types.AdminSystemConfig{
 		SystemName: values["system_name"], ICPRecordNo: values["icp_record_no"], CustomerServicePhone: values["customer_service_phone"],
 		CustomerServiceWechat: values["customer_service_wechat"], CustomerServiceEmail: values["customer_service_email"], CustomerServiceHours: values["customer_service_hours"],
-		CustomerServiceUserID: customerServiceUserID, WithdrawArrivalCycle: values["withdraw_arrival_cycle"],
+		CustomerServiceUserID: customerServiceUserID, WithdrawArrivalCycle: values["withdraw_arrival_cycle"], DirectMessageEnabled: &directMessageEnabled,
 	}, nil
 }
 
@@ -1583,7 +1584,22 @@ func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.Admi
 	if config.CustomerServiceUserID > 0 {
 		settings = append(settings, types.AdminSettingItem{Key: "customer_service_user_id", Value: strconv.FormatInt(config.CustomerServiceUserID, 10), Remark: "客服聊天用户 ID"})
 	}
+	if config.DirectMessageEnabled != nil {
+		value := "0"
+		if *config.DirectMessageEnabled {
+			value = "1"
+		}
+		settings = append(settings, types.AdminSettingItem{Key: "direct_message_enabled", Value: value, Remark: "普通用户私信开关"})
+	}
 	return s.UpdateSettings(ctx, settings)
+}
+
+func platformBoolEnabled(value string, fallback bool) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "on"
 }
 
 func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []models.TicketOrder) ([]types.AdminTicketOrderItem, error) {

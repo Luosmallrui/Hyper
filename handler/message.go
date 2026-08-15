@@ -45,6 +45,9 @@ func (m *Message) SendMessage(c *gin.Context) error {
 	msg.SenderID = userId
 
 	if err := m.MessageService.SendMessage(&msg); err != nil {
+		if errors.Is(err, service.ErrDirectMessageDisabled) {
+			return response.NewError(403, err.Error())
+		}
 		return response.NewError(500, err.Error())
 	}
 	response.Success(c, msg)
