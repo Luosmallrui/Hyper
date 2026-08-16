@@ -20,12 +20,41 @@ type ActivityListFilter struct {
 }
 
 type OrganizerApplyRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Type     string `json:"type"`
-	Logo     string `json:"logo"`
-	Province string `json:"province"`
-	City     string `json:"city"`
-	District string `json:"district"`
+	Name         string                      `json:"name" binding:"required"`
+	Type         string                      `json:"type"`
+	Logo         string                      `json:"logo"`
+	MarkerIcon   string                      `json:"marker_icon"`
+	Province     string                      `json:"province"`
+	City         string                      `json:"city"`
+	District     string                      `json:"district"`
+	VenueProfile *OrganizerVenueProfileInput `json:"venue_profile,omitempty"`
+}
+
+// OrganizerVenueProfileInput is required only when type is venue. A venue is
+// an organizer with a fixed public place, not an activities row.
+type OrganizerVenueProfileInput struct {
+	CoverImage    string   `json:"cover_image"`
+	Gallery       []string `json:"gallery"`
+	Description   string   `json:"description"`
+	BusinessHours string   `json:"business_hours"`
+	ContactName   string   `json:"contact_name"`
+	ServicePhone  string   `json:"service_phone"`
+	Address       string   `json:"address"`
+	Latitude      float64  `json:"latitude"`
+	Longitude     float64  `json:"longitude"`
+	AverageSpend  int64    `json:"average_spend"`
+}
+
+// OrganizerVenueProfileRevision is the complete staged copy used by the
+// venue profile re-audit workflow.
+type OrganizerVenueProfileRevision struct {
+	Name       string `json:"name"`
+	Logo       string `json:"logo"`
+	MarkerIcon string `json:"marker_icon"`
+	Province   string `json:"province"`
+	City       string `json:"city"`
+	District   string `json:"district"`
+	OrganizerVenueProfileInput
 }
 
 type OrganizerApplyResponse struct {
@@ -35,13 +64,16 @@ type OrganizerApplyResponse struct {
 }
 
 type OrganizerAuditStatusResponse struct {
-	OrganizerID  int64      `json:"organizer_id,omitempty"`
-	Type         string     `json:"type,omitempty"`
-	Status       int8       `json:"status"`
-	Enabled      int8       `json:"enabled"`
-	RejectReason string     `json:"reject_reason"`
-	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
-	ReviewedAt   *time.Time `json:"reviewed_at,omitempty"`
+	OrganizerID               int64      `json:"organizer_id,omitempty"`
+	Type                      string     `json:"type,omitempty"`
+	MarkerIcon                string     `json:"marker_icon"`
+	Status                    int8       `json:"status"`
+	Enabled                   int8       `json:"enabled"`
+	RejectReason              string     `json:"reject_reason"`
+	HasPendingProfileRevision bool       `json:"has_pending_profile_revision"`
+	PendingProfileReason      string     `json:"pending_profile_reason,omitempty"`
+	SubmittedAt               *time.Time `json:"submitted_at,omitempty"`
+	ReviewedAt                *time.Time `json:"reviewed_at,omitempty"`
 }
 
 type OrganizerBasicRequest struct {
@@ -221,6 +253,7 @@ type SubscriptionListItem struct {
 type OrganizerProfileRequest struct {
 	Name          string   `json:"name"`
 	Logo          string   `json:"logo"`
+	MarkerIcon    string   `json:"marker_icon"`
 	CoverImage    string   `json:"cover_image"`
 	Gallery       []string `json:"gallery"`
 	Description   string   `json:"description"`
@@ -237,22 +270,26 @@ type OrganizerProfileRequest struct {
 }
 
 type OrganizerProfileResponse struct {
-	ID            int64    `json:"id"`
-	Name          string   `json:"name"`
-	Logo          string   `json:"logo"`
-	CoverImage    string   `json:"cover_image"`
-	Gallery       []string `json:"gallery"`
-	Description   string   `json:"description"`
-	BusinessHours string   `json:"business_hours"`
-	ContactName   string   `json:"contact_name"`
-	ServicePhone  string   `json:"service_phone"`
-	Province      string   `json:"province"`
-	City          string   `json:"city"`
-	District      string   `json:"district"`
-	Address       string   `json:"address"`
-	Latitude      float64  `json:"latitude"`
-	Longitude     float64  `json:"longitude"`
-	AverageSpend  int64    `json:"average_spend"`
+	ID                        int64                          `json:"id"`
+	Name                      string                         `json:"name"`
+	Logo                      string                         `json:"logo"`
+	MarkerIcon                string                         `json:"marker_icon"`
+	CoverImage                string                         `json:"cover_image"`
+	Gallery                   []string                       `json:"gallery"`
+	Description               string                         `json:"description"`
+	BusinessHours             string                         `json:"business_hours"`
+	ContactName               string                         `json:"contact_name"`
+	ServicePhone              string                         `json:"service_phone"`
+	Province                  string                         `json:"province"`
+	City                      string                         `json:"city"`
+	District                  string                         `json:"district"`
+	Address                   string                         `json:"address"`
+	Latitude                  float64                        `json:"latitude"`
+	Longitude                 float64                        `json:"longitude"`
+	AverageSpend              int64                          `json:"average_spend"`
+	HasPendingProfileRevision bool                           `json:"has_pending_profile_revision"`
+	PendingProfileReason      string                         `json:"pending_profile_reason,omitempty"`
+	PendingProfileRevision    *OrganizerVenueProfileRevision `json:"pending_profile_revision,omitempty"`
 }
 
 // PublicOrganizerHomeResponse is the C-end public storefront for an approved
@@ -414,6 +451,7 @@ type OrganizerInfoResponse struct {
 	Type                   string  `json:"type"`
 	Name                   string  `json:"name"`
 	Logo                   string  `json:"logo"`
+	MarkerIcon             string  `json:"marker_icon"`
 	Status                 int8    `json:"status"`
 	RejectReason           string  `json:"reject_reason,omitempty"`
 	Level                  string  `json:"level"`
@@ -441,6 +479,7 @@ type ActivityCreateRequest struct {
 	Type             *string              `json:"type"`
 	TagIDs           []int64              `json:"tag_ids"`
 	Name             *string              `json:"name"`
+	MarkerIcon       *string              `json:"marker_icon"`
 	ShareTitle       *string              `json:"share_title"`
 	StartTime        *string              `json:"start_time"`
 	EndTime          *string              `json:"end_time"`

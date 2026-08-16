@@ -204,9 +204,13 @@ CREATE TABLE IF NOT EXISTS `organizers`
 (
     `id`                bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主办方ID',
     `user_id`           bigint unsigned NOT NULL COMMENT '用户ID',
-    `type`              varchar(20)     NOT NULL DEFAULT 'merchant' COMMENT '兼容字段: 入驻不再区分场地/派对，场地/派对由 activities.type 决定',
+    `type`              varchar(20)     NOT NULL DEFAULT 'merchant' COMMENT '主办方类型: merchant活动组织者 / venue固定场地',
     `name`              varchar(100)    NOT NULL COMMENT '主办方名称',
     `logo`              varchar(255)    NOT NULL DEFAULT '' COMMENT 'Logo',
+    `marker_icon`       varchar(255)    NOT NULL DEFAULT '' COMMENT '地图标记图标 URL',
+    `pending_profile_revision` mediumtext NOT NULL COMMENT '场地资料待审核修订 JSON',
+    `pending_profile_status` tinyint     NOT NULL DEFAULT 0 COMMENT '场地资料修订状态: 0无 1审核中 3驳回',
+    `pending_profile_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '场地资料修订驳回原因',
     `status`            tinyint         NOT NULL DEFAULT 0 COMMENT '0待审核 1审核中 2已认证 3未通过',
     `enabled`           tinyint         NOT NULL DEFAULT 1 COMMENT '1启用 0停用，与审核状态分离',
     `reject_reason`     varchar(500)    NOT NULL DEFAULT '' COMMENT '拒绝原因',
@@ -226,11 +230,15 @@ CREATE TABLE IF NOT EXISTS `organizers`
     UNIQUE KEY `uk_organizer_user` (`user_id`) USING BTREE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT ='主办方表';
 
--- 如已有 organizers 表，type 字段保留为兼容字段；场地/派对区分请使用 activities.type。
--- ALTER TABLE `organizers` MODIFY COLUMN `type` varchar(20) NOT NULL DEFAULT 'merchant' COMMENT '兼容字段: 入驻不再区分场地/派对，场地/派对由 activities.type 决定';
+-- 现有数据迁移：新建场地使用 organizers.type=venue；历史 activities.type=venue 保持只读兼容。
+-- ALTER TABLE `organizers` MODIFY COLUMN `type` varchar(20) NOT NULL DEFAULT 'merchant' COMMENT '主办方类型: merchant活动组织者 / venue固定场地';
 -- ALTER TABLE `organizers` ADD COLUMN `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '1启用 0停用' AFTER `status`;
 -- ALTER TABLE `organizers` ADD COLUMN `bank_contact_name` varchar(50) NOT NULL DEFAULT '' COMMENT '收款联系人' AFTER `bank_name`;
 -- ALTER TABLE `organizers` ADD COLUMN `bank_contact_phone` varchar(20) NOT NULL DEFAULT '' COMMENT '收款联系电话' AFTER `bank_contact_name`;
+-- ALTER TABLE `organizers` ADD COLUMN `marker_icon` varchar(255) NOT NULL DEFAULT '' COMMENT '地图标记图标 URL' AFTER `logo`;
+-- ALTER TABLE `organizers` ADD COLUMN `pending_profile_revision` mediumtext NOT NULL COMMENT '场地资料待审核修订 JSON' AFTER `marker_icon`;
+-- ALTER TABLE `organizers` ADD COLUMN `pending_profile_status` tinyint NOT NULL DEFAULT 0 COMMENT '场地资料修订状态: 0无 1审核中 3驳回' AFTER `pending_profile_revision`, ADD KEY `idx_organizer_pending_profile_status` (`pending_profile_status`);
+-- ALTER TABLE `organizers` ADD COLUMN `pending_profile_reason` varchar(500) NOT NULL DEFAULT '' COMMENT '场地资料修订驳回原因' AFTER `pending_profile_status`;
 
 CREATE TABLE IF NOT EXISTS `activities`
 (
@@ -238,6 +246,7 @@ CREATE TABLE IF NOT EXISTS `activities`
     `organizer_id`      bigint unsigned NOT NULL COMMENT '主办方ID',
     `type`              varchar(20)     NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地',
     `name`              varchar(80)     NOT NULL COMMENT '活动名称',
+    `marker_icon`       varchar(255)    NOT NULL DEFAULT '' COMMENT '活动地图标记图标 URL',
     `share_title`       varchar(20)     NOT NULL DEFAULT '' COMMENT '分享标题',
     `start_time`        datetime        NULL COMMENT '开始时间',
     `end_time`          datetime        NULL COMMENT '结束时间',
@@ -276,6 +285,7 @@ CREATE TABLE IF NOT EXISTS `activities`
 
 -- 如已有 activities 表，执行以下 ALTER 添加活动类型字段:
 -- ALTER TABLE `activities` ADD COLUMN `type` varchar(20) NOT NULL DEFAULT 'party' COMMENT '活动类型: party派对 venue场地' AFTER `organizer_id`;
+-- ALTER TABLE `activities` ADD COLUMN `marker_icon` varchar(255) NOT NULL DEFAULT '' COMMENT '活动地图标记图标 URL' AFTER `name`;
 -- ALTER TABLE `activities` ADD INDEX `idx_activity_type` (`type`);
 -- ALTER TABLE `activities` ADD COLUMN `is_hidden` tinyint NOT NULL DEFAULT 0 COMMENT '0公开 1平台下架隐藏' AFTER `reject_reason`;
 -- ALTER TABLE `activities` ADD COLUMN `hidden_at` datetime NULL COMMENT '平台下架时间' AFTER `is_hidden`;

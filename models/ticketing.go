@@ -46,27 +46,33 @@ const (
 )
 
 type Organizer struct {
-	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID           int64     `gorm:"column:user_id;not null;uniqueIndex:uk_organizer_user" json:"user_id"`
-	Type             string    `gorm:"column:type;size:20;not null;default:merchant" json:"type"`
-	Name             string    `gorm:"column:name;size:100;not null" json:"name"`
-	Logo             string    `gorm:"column:logo;size:255" json:"logo"`
-	Status           int8      `gorm:"column:status;not null;default:0" json:"status"`
-	Enabled          int8      `gorm:"column:enabled;not null;default:1" json:"enabled"`
-	RejectReason     string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
-	Level            string    `gorm:"column:level;size:10;default:LV1" json:"level"`
-	ServiceFeeRate   float64   `gorm:"column:service_fee_rate;type:decimal(5,2);default:0" json:"service_fee_rate"`
-	JoinDays         int       `gorm:"-" json:"join_days"`
-	Province         string    `gorm:"column:province;size:50" json:"province"`
-	City             string    `gorm:"column:city;size:50" json:"city"`
-	District         string    `gorm:"column:district;size:50" json:"district"`
-	BankAccountName  string    `gorm:"column:bank_account_name;size:50" json:"bank_account_name"`
-	BankAccountNo    string    `gorm:"column:bank_account_no;size:50" json:"bank_account_no"`
-	BankName         string    `gorm:"column:bank_name;size:50" json:"bank_name"`
-	BankContactName  string    `gorm:"column:bank_contact_name;size:50" json:"bank_contact_name"`
-	BankContactPhone string    `gorm:"column:bank_contact_phone;size:20" json:"bank_contact_phone"`
-	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID         int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID     int64  `gorm:"column:user_id;not null;uniqueIndex:uk_organizer_user" json:"user_id"`
+	Type       string `gorm:"column:type;size:20;not null;default:merchant" json:"type"`
+	Name       string `gorm:"column:name;size:100;not null" json:"name"`
+	Logo       string `gorm:"column:logo;size:255" json:"logo"`
+	MarkerIcon string `gorm:"column:marker_icon;size:255" json:"marker_icon"`
+	// PendingProfileRevision keeps an unpublished venue-profile snapshot. The
+	// live organizer/profile rows stay public until an administrator approves it.
+	PendingProfileRevision string    `gorm:"column:pending_profile_revision;type:mediumtext" json:"-"`
+	PendingProfileStatus   int8      `gorm:"column:pending_profile_status;not null;default:0;index" json:"pending_profile_status,omitempty"`
+	PendingProfileReason   string    `gorm:"column:pending_profile_reason;size:500" json:"pending_profile_reason,omitempty"`
+	Status                 int8      `gorm:"column:status;not null;default:0" json:"status"`
+	Enabled                int8      `gorm:"column:enabled;not null;default:1" json:"enabled"`
+	RejectReason           string    `gorm:"column:reject_reason;size:500" json:"reject_reason"`
+	Level                  string    `gorm:"column:level;size:10;default:LV1" json:"level"`
+	ServiceFeeRate         float64   `gorm:"column:service_fee_rate;type:decimal(5,2);default:0" json:"service_fee_rate"`
+	JoinDays               int       `gorm:"-" json:"join_days"`
+	Province               string    `gorm:"column:province;size:50" json:"province"`
+	City                   string    `gorm:"column:city;size:50" json:"city"`
+	District               string    `gorm:"column:district;size:50" json:"district"`
+	BankAccountName        string    `gorm:"column:bank_account_name;size:50" json:"bank_account_name"`
+	BankAccountNo          string    `gorm:"column:bank_account_no;size:50" json:"bank_account_no"`
+	BankName               string    `gorm:"column:bank_name;size:50" json:"bank_name"`
+	BankContactName        string    `gorm:"column:bank_contact_name;size:50" json:"bank_contact_name"`
+	BankContactPhone       string    `gorm:"column:bank_contact_phone;size:20" json:"bank_contact_phone"`
+	CreatedAt              time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt              time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (Organizer) TableName() string {
@@ -78,6 +84,7 @@ type Activity struct {
 	OrganizerID           int64      `gorm:"column:organizer_id;not null;index" json:"organizer_id"`
 	Type                  string     `gorm:"column:type;size:20;not null;default:party;index" json:"type"`
 	Name                  string     `gorm:"column:name;size:80;not null" json:"name"`
+	MarkerIcon            string     `gorm:"column:marker_icon;size:255" json:"marker_icon"`
 	ShareTitle            string     `gorm:"column:share_title;size:20" json:"share_title"`
 	StartTime             time.Time  `gorm:"column:start_time" json:"start_time"`
 	EndTime               time.Time  `gorm:"column:end_time" json:"end_time"`

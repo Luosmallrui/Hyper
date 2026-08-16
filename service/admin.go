@@ -161,7 +161,14 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 	}
 	query := s.DB.WithContext(ctx).Model(&models.Organizer{})
 	if status != nil {
-		query = query.Where("status = ?", *status)
+		if *status == models.OrganizerStatusAuditing {
+			// An approved venue can also have a profile revision waiting for
+			// review. Surface it in the same audit queue without taking the
+			// live venue offline.
+			query = query.Where("status = ? OR pending_profile_status = ?", *status, models.OrganizerStatusAuditing)
+		} else {
+			query = query.Where("status = ?", *status)
+		}
 	}
 	if organizerType != "" {
 		if organizerType != models.OrganizerTypeVenue && organizerType != models.OrganizerTypeMerchant {
@@ -192,21 +199,27 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 	list := make([]types.AdminOrganizerItem, 0, len(organizers))
 	for _, org := range organizers {
 		item := types.AdminOrganizerItem{
-			ID:             org.ID,
-			UserID:         org.UserID,
-			Type:           org.Type,
-			Name:           org.Name,
-			Logo:           org.Logo,
-			Status:         org.Status,
-			Enabled:        org.Enabled,
-			RejectReason:   org.RejectReason,
-			Level:          org.Level,
-			ServiceFeeRate: org.ServiceFeeRate,
-			Province:       org.Province,
-			City:           org.City,
-			District:       org.District,
-			CreatedAt:      org.CreatedAt.Format("2006-01-02 15:04:05"),
-			UpdatedAt:      org.UpdatedAt.Format("2006-01-02 15:04:05"),
+			ID:                        org.ID,
+			UserID:                    org.UserID,
+			Type:                      org.Type,
+			Name:                      org.Name,
+			Logo:                      org.Logo,
+			Status:                    org.Status,
+			Enabled:                   org.Enabled,
+			RejectReason:              org.RejectReason,
+			AuditKind:                 "initial",
+			HasPendingProfileRevision: org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected,
+			PendingProfileReason:      org.PendingProfileReason,
+			Level:                     org.Level,
+			ServiceFeeRate:            org.ServiceFeeRate,
+			Province:                  org.Province,
+			City:                      org.City,
+			District:                  org.District,
+			CreatedAt:                 org.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:                 org.UpdatedAt.Format("2006-01-02 15:04:05"),
+		}
+		if org.Status == models.OrganizerStatusApproved && org.PendingProfileStatus == models.OrganizerStatusAuditing {
+			item.AuditKind = "profile_revision"
 		}
 		if u, ok := userMap[int(org.UserID)]; ok {
 			item.UserName = u.Nickname
@@ -245,6 +258,13 @@ func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64
 		return nil, err
 	}
 	detail := &types.AdminOrganizerDetail{Organizer: org}
+	if org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected {
+		revision, err := decodeOrganizerVenueProfileRevision(org)
+		if err != nil {
+			return nil, err
+		}
+		detail.PendingProfileRevision = revision
+	}
 	var user models.Users
 	if err := s.DB.WithContext(ctx).Where("id = ?", org.UserID).First(&user).Error; err == nil {
 		detail.UserName = user.Nickname
@@ -267,34 +287,63 @@ func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, re
 	if req.Status == models.OrganizerStatusRejected && req.RejectReason == "" {
 		return errors.New("拒绝时必须填写 reject_reason")
 	}
-	updates := map[string]any{
-		"status":        req.Status,
-		"reject_reason": "",
-		"updated_at":    time.Now(),
-	}
-	if req.Status == models.OrganizerStatusApproved {
-		if err := ensureDefaultOrganizerLevelRules(s.DB.WithContext(ctx)); err != nil {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var org models.Organizer
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", organizerID).First(&org).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("入驻申请不存在")
+			}
 			return err
 		}
-		level, feeRate, _, err := organizerLevelByCompletedCount(s.DB.WithContext(ctx), 0)
-		if err != nil {
-			return err
+
+		if org.Status == models.OrganizerStatusApproved && org.PendingProfileStatus == models.OrganizerStatusAuditing {
+			return s.auditVenueProfileRevision(tx, org, req)
 		}
-		updates["enabled"] = 1
-		updates["level"] = fmt.Sprintf("LV%d", level)
-		updates["service_fee_rate"] = feeRate
-	}
+
+		updates := map[string]any{"status": req.Status, "reject_reason": "", "updated_at": time.Now()}
+		if req.Status == models.OrganizerStatusApproved {
+			if err := ensureDefaultOrganizerLevelRules(tx); err != nil {
+				return err
+			}
+			level, feeRate, _, err := organizerLevelByCompletedCount(tx, 0)
+			if err != nil {
+				return err
+			}
+			updates["enabled"] = 1
+			updates["level"] = fmt.Sprintf("LV%d", level)
+			updates["service_fee_rate"] = feeRate
+		}
+		if req.Status == models.OrganizerStatusRejected {
+			updates["reject_reason"] = req.RejectReason
+		}
+		return tx.Model(&models.Organizer{}).Where("id = ?", organizerID).Updates(updates).Error
+	})
+}
+
+func (s *AdminService) auditVenueProfileRevision(tx *gorm.DB, org models.Organizer, req types.AdminAuditOrganizerRequest) error {
 	if req.Status == models.OrganizerStatusRejected {
-		updates["reject_reason"] = req.RejectReason
+		return tx.Model(&models.Organizer{}).Where("id = ?", org.ID).Updates(map[string]any{
+			"pending_profile_status": models.OrganizerStatusRejected,
+			"pending_profile_reason": req.RejectReason,
+			"updated_at":             time.Now(),
+		}).Error
 	}
-	result := s.DB.WithContext(ctx).Model(&models.Organizer{}).Where("id = ?", organizerID).Updates(updates)
-	if result.Error != nil {
-		return result.Error
+
+	revision, err := decodeOrganizerVenueProfileRevision(org)
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
-		return errors.New("入驻申请不存在")
+	if revision == nil {
+		return errors.New("场地资料待审核数据不存在")
 	}
-	return nil
+	if err := upsertOrganizerVenueProfile(tx, org.ID, revision); err != nil {
+		return err
+	}
+	return tx.Model(&models.Organizer{}).Where("id = ?", org.ID).Updates(map[string]any{
+		"name": revision.Name, "logo": revision.Logo, "marker_icon": revision.MarkerIcon,
+		"province": revision.Province, "city": revision.City, "district": revision.District,
+		"pending_profile_revision": "", "pending_profile_status": 0, "pending_profile_reason": "", "updated_at": time.Now(),
+	}).Error
 }
 
 func (s *AdminService) DeleteOrganizer(ctx context.Context, organizerID int64) error {
