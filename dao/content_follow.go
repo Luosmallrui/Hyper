@@ -53,7 +53,12 @@ func ResolveContentFollowOwner(ctx context.Context, db *gorm.DB, targetType stri
 		err = db.WithContext(ctx).Table("organizers o").
 			Select("o.user_id").
 			Where("o.id = ? AND o.status = ? AND o.enabled = 1", targetID, models.OrganizerStatusApproved).
-			Where("EXISTS (SELECT 1 FROM activities a WHERE a.organizer_id = o.id AND a.type = ? AND a.status = ? AND a.is_hidden = 0)", models.ActivityTypeVenue, models.ActivityStatusOnline).
+			// A venue is now modeled by organizers.type=venue. Keep the legacy
+			// activities lookup for migrated records that have not been normalized.
+			Where(`o.type = ? OR EXISTS (
+				SELECT 1 FROM activities a
+				WHERE a.organizer_id = o.id AND a.type = ? AND a.status = ? AND a.is_hidden = 0
+			)`, models.OrganizerTypeVenue, models.ActivityTypeVenue, models.ActivityStatusOnline).
 			Scan(&ownerID).Error
 	case models.ContentFollowTargetOrganizer:
 		err = db.WithContext(ctx).Table("organizers o").

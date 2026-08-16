@@ -235,6 +235,73 @@ GET /api/v1/organizers/:id
 - `venues.list` 包含该主办方自己的固定场地（`id=organizer_id`）。
 - `activities.list` 包含该主办方发布的全部已上架临时活动。
 
+## 7. 场地素材上传与提现流水兼容接口
+
+场地封面和图册继续使用通用上传接口：
+
+```http
+POST /api/v1/upload
+Authorization: Bearer <access_token>
+Content-Type: multipart/form-data
+```
+
+| form 字段 | 值 |
+|---|---|
+| `file` | 图片文件 |
+| `type` | `venue_cover` 或 `venue_gallery` |
+
+成功响应：
+
+```json
+{ "code": 200, "data": { "url": "https://cdn.hypercn.cn/ticketing/venue_cover/...png" } }
+```
+
+场地主办方提现流水主接口为：
+
+```http
+GET /api/v1/organizer/withdraws?page=1&size=10&status=0
+```
+
+同时兼容 PC 已接入的历史路径，两者响应完全一致：
+
+```http
+GET /api/v1/organizer/bank/withdraw/flow/list?page=1&pageSize=10&status=0
+```
+
+`status` 可选：`0` 审核中、`1` 已通过/已打款、`2` 已驳回。金额单位均为分。
+
+## 8. 商家后台粉丝列表
+
+```http
+GET /api/v1/organizer/followers?page=1&pageSize=20&keyword=小王
+Authorization: Bearer <access_token>
+```
+
+返回当前登录主办方被关注的用户。接口合并历史用户关注 `user`、商家主页 `organizer`；固定场地额外合并场地卡片 `venue`，并按 `user_id` 去重。
+
+```json
+{
+  "code": 200,
+  "data": {
+    "list": [
+      {
+        "user_id": 52,
+        "nickname": "小王",
+        "avatar": "https://cdn.hypercn.cn/avatars/52.png",
+        "signature": "周末见",
+        "mobile": "138****0000",
+        "user_status": 1,
+        "target_types": ["organizer", "venue"],
+        "followed_at": "2026-08-16T10:00:00+08:00"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+`keyword` 可按昵称或手机号搜索；手机号仅返回脱敏结果。
+
 ## 前端改动清单
 
 1. 入驻向导保留“场地 / 活动组织者”选择；选场地时展示固定地址、经纬度、营业时间和场地资料，不展示票券。
