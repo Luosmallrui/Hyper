@@ -85,6 +85,17 @@ func ResolveContentFollowOwner(ctx context.Context, db *gorm.DB, targetType stri
 // LoadContentFollowStats returns target fan counts and whether userID follows
 // each target. Empty input is handled without querying the database.
 func LoadContentFollowStats(ctx context.Context, db *gorm.DB, targetType string, targetIDs []int64, userID int64) (map[int64]int64, map[int64]bool, error) {
+	return loadContentFollowStats(ctx, db, targetType, targetIDs, userID, nil)
+}
+
+// LoadContentFollowStatsExcludingOwners counts fans without counting the
+// content owner following their own target. The current user's follow state is
+// deliberately retained so an owner can still see that they followed it.
+func LoadContentFollowStatsExcludingOwners(ctx context.Context, db *gorm.DB, targetType string, targetIDs []int64, userID int64, ownerByTarget map[int64]int64) (map[int64]int64, map[int64]bool, error) {
+	return loadContentFollowStats(ctx, db, targetType, targetIDs, userID, ownerByTarget)
+}
+
+func loadContentFollowStats(ctx context.Context, db *gorm.DB, targetType string, targetIDs []int64, userID int64, ownerByTarget map[int64]int64) (map[int64]int64, map[int64]bool, error) {
 	counts := make(map[int64]int64)
 	followed := make(map[int64]bool)
 	if !isContentFollowTarget(targetType) || len(targetIDs) == 0 {
@@ -96,11 +107,15 @@ func LoadContentFollowStats(ctx context.Context, db *gorm.DB, targetType string,
 		Count    int64
 	}
 	var rows []countRow
-	if err := db.WithContext(ctx).Model(&models.ContentFollow{}).
+	countQuery := db.WithContext(ctx).Model(&models.ContentFollow{}).
 		Select("target_id, COUNT(*) AS count").
-		Where("target_type = ? AND target_id IN ?", targetType, targetIDs).
-		Group("target_id").
-		Scan(&rows).Error; err != nil {
+		Where("target_type = ? AND target_id IN ?", targetType, targetIDs)
+	for targetID, ownerID := range ownerByTarget {
+		if ownerID > 0 {
+			countQuery = countQuery.Where("NOT (target_id = ? AND user_id = ?)", targetID, ownerID)
+		}
+	}
+	if err := countQuery.Group("target_id").Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}
 	for _, row := range rows {

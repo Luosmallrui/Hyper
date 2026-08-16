@@ -875,33 +875,25 @@ func (s *TicketingService) GetOrganizerSubscriptionSummary(ctx context.Context, 
 	return resp, nil
 }
 
-// ListOrganizerFollowers returns followers of the organizer storefront. It
-// merges legacy user-follow relations with organizer/venue content follows so
-// old Mini Program clients and current entity-based clients see one audience.
+// ListOrganizerFollowers returns followers of the organizer's public entity.
+// A fixed venue is followed as target_type=venue; a regular organizer is
+// followed as target_type=organizer. Personal user_follow relations are not
+// part of the merchant audience.
 func (s *TicketingService) ListOrganizerFollowers(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.OrganizerFollowerItem], error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	page, size = normalizePage(page, size)
-	contentTargetSQL := "cf.target_type = ?"
-	contentArgs := []any{models.ContentFollowTargetOrganizer}
-	if org.Type == models.OrganizerTypeVenue {
-		contentTargetSQL = "cf.target_type IN (?, ?)"
-		contentArgs = append(contentArgs, models.ContentFollowTargetVenue)
+	targetType, err := resolveOrganizerFollowTarget(ctx, s.DB, *org)
+	if err != nil {
+		return nil, err
 	}
 	sourceSQL := `
 		SELECT cf.user_id, cf.target_type, cf.created_at AS followed_at
 		FROM content_follows cf
-		WHERE cf.target_id = ? AND ` + contentTargetSQL + `
-		UNION ALL
-		SELECT uf.follower_id AS user_id, 'user' AS target_type, uf.updated_at AS followed_at
-		FROM user_follow uf
-		WHERE uf.followee_id = ? AND uf.status = 1`
-	sourceArgs := make([]any, 0, len(contentArgs)+2)
-	sourceArgs = append(sourceArgs, org.ID)
-	sourceArgs = append(sourceArgs, contentArgs...)
-	sourceArgs = append(sourceArgs, org.UserID)
+		WHERE cf.target_id = ? AND cf.target_type = ?`
+	sourceArgs := []any{org.ID, targetType}
 
 	base := s.DB.WithContext(ctx).Table("("+sourceSQL+") AS f", sourceArgs...).
 		Joins("JOIN users u ON u.id = f.user_id").
@@ -1077,7 +1069,13 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 		return nil, err
 	}
 
-	followCounts, followed, err := dao.LoadContentFollowStats(ctx, s.DB, models.ContentFollowTargetOrganizer, []int64{row.ID}, userID)
+	followTargetType, err := resolveOrganizerFollowTarget(ctx, s.DB, models.Organizer{ID: row.ID, Type: row.Type})
+	if err != nil {
+		return nil, err
+	}
+	followCounts, followed, err := dao.LoadContentFollowStatsExcludingOwners(
+		ctx, s.DB, followTargetType, []int64{row.ID}, userID, map[int64]int64{row.ID: row.UserID},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1103,7 +1101,7 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 		AverageSpend:     row.AverageSpend,
 		FollowCount:      followCounts[row.ID],
 		IsFollow:         followed[row.ID],
-		FollowTargetType: models.ContentFollowTargetOrganizer,
+		FollowTargetType: followTargetType,
 		FollowTargetID:   row.ID,
 		Activities:       types.PageResponse[types.ActivityListItem]{List: []types.ActivityListItem{}},
 		Venues:           types.PageResponse[types.VenueListItem]{List: []types.VenueListItem{}},
