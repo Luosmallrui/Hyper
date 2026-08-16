@@ -251,26 +251,30 @@ type SubscriptionListItem struct {
 }
 
 type OrganizerProfileRequest struct {
-	Name          string   `json:"name"`
-	Logo          string   `json:"logo"`
-	MarkerIcon    string   `json:"marker_icon"`
-	CoverImage    string   `json:"cover_image"`
-	Gallery       []string `json:"gallery"`
-	Description   string   `json:"description"`
-	BusinessHours string   `json:"business_hours"`
-	ContactName   string   `json:"contact_name"`
-	ServicePhone  string   `json:"service_phone"`
-	Province      string   `json:"province"`
-	City          string   `json:"city"`
-	District      string   `json:"district"`
-	Address       string   `json:"address"`
-	Latitude      float64  `json:"latitude"`
-	Longitude     float64  `json:"longitude"`
-	AverageSpend  int64    `json:"average_spend"`
+	Name       string `json:"name"`
+	Logo       string `json:"logo"`
+	MarkerIcon string `json:"marker_icon"`
+	// VenueProfile is the preferred nested payload for venue organizers. The
+	// existing flat fields remain accepted for backward compatibility.
+	VenueProfile  *OrganizerVenueProfileInput `json:"venue_profile,omitempty"`
+	CoverImage    string                      `json:"cover_image"`
+	Gallery       []string                    `json:"gallery"`
+	Description   string                      `json:"description"`
+	BusinessHours string                      `json:"business_hours"`
+	ContactName   string                      `json:"contact_name"`
+	ServicePhone  string                      `json:"service_phone"`
+	Province      string                      `json:"province"`
+	City          string                      `json:"city"`
+	District      string                      `json:"district"`
+	Address       string                      `json:"address"`
+	Latitude      float64                     `json:"latitude"`
+	Longitude     float64                     `json:"longitude"`
+	AverageSpend  int64                       `json:"average_spend"`
 }
 
 type OrganizerProfileResponse struct {
 	ID                        int64                          `json:"id"`
+	Type                      string                         `json:"type"`
 	Name                      string                         `json:"name"`
 	Logo                      string                         `json:"logo"`
 	MarkerIcon                string                         `json:"marker_icon"`
@@ -287,6 +291,7 @@ type OrganizerProfileResponse struct {
 	Latitude                  float64                        `json:"latitude"`
 	Longitude                 float64                        `json:"longitude"`
 	AverageSpend              int64                          `json:"average_spend"`
+	VenueProfile              *OrganizerVenueProfileInput    `json:"venue_profile,omitempty"`
 	HasPendingProfileRevision bool                           `json:"has_pending_profile_revision"`
 	PendingProfileReason      string                         `json:"pending_profile_reason,omitempty"`
 	PendingProfileRevision    *OrganizerVenueProfileRevision `json:"pending_profile_revision,omitempty"`
