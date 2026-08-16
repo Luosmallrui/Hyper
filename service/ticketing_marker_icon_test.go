@@ -2,6 +2,8 @@ package service
 
 import (
 	"Hyper/types"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -30,5 +32,23 @@ func TestValidateVenueProfileInput(t *testing.T) {
 	valid.Address = ""
 	if err := validateVenueProfileInput(valid); err == nil {
 		t.Fatal("venue without address must be rejected")
+	}
+}
+
+func TestOrganizerProfileResponseIncludesVenueContract(t *testing.T) {
+	response := types.OrganizerProfileResponse{
+		Type: "venue",
+		VenueProfile: &types.OrganizerVenueProfileInput{
+			Address: "成都市武侯区天府三街", Latitude: 30.657, Longitude: 104.066,
+		},
+	}
+	body, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"type":"venue"`, `"venue_profile"`, `"latitude":30.657`} {
+		if !strings.Contains(string(body), field) {
+			t.Fatalf("profile response missing %s: %s", field, body)
+		}
 	}
 }

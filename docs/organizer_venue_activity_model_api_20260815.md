@@ -81,11 +81,21 @@ Authorization: Bearer <access_token>
 - 管理端驳回后，旧资料继续公开；主办方得到驳回原因后可重新提交。
 - 普通 `merchant` 主办方继续沿用原来的直接资料更新行为。
 
-`GET /api/v1/organizer/profile` 新增：
+`GET /api/v1/organizer/profile` 现在返回顶层 `type`。当 `type=venue` 时，同时返回 `venue_profile`；保留原有扁平资料字段，兼容旧客户端：
 
 ```json
 {
-  "has_pending_profile_revision": true,
+	  "type": "venue",
+	  "address": "成都市武侯区天府三街 1 号",
+	  "latitude": 30.657,
+	  "longitude": 104.066,
+	  "venue_profile": {
+	    "address": "成都市武侯区天府三街 1 号",
+	    "latitude": 30.657,
+	    "longitude": 104.066,
+	    "business_hours": "19:30-次日02:30"
+	  },
+	  "has_pending_profile_revision": true,
   "pending_profile_reason": "地址证明不清晰",
   "pending_profile_revision": {
     "name": "Hyper Club 新店",
@@ -98,6 +108,23 @@ Authorization: Bearer <access_token>
 ```
 
 `GET /api/v1/organizer/audit-status` 同步返回 `has_pending_profile_revision` 与 `pending_profile_reason`。
+
+`PUT /api/v1/organizer/profile` 既接受历史扁平字段，也接受下列嵌套格式；场地主办方推荐使用嵌套格式：
+
+```json
+{
+  "name": "Hyper Club",
+  "province": "四川省",
+  "city": "成都市",
+  "district": "武侯区",
+  "venue_profile": {
+    "address": "成都市武侯区天府三街 1 号",
+    "latitude": 30.657,
+    "longitude": 104.066,
+    "business_hours": "19:30-次日02:30"
+  }
+}
+```
 
 ## 3. 管理端审核
 

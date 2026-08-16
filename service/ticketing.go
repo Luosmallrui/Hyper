@@ -1435,6 +1435,7 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 	}
 	resp := &types.OrganizerProfileResponse{
 		ID:            org.ID,
+		Type:          org.Type,
 		Name:          org.Name,
 		Logo:          org.Logo,
 		MarkerIcon:    org.MarkerIcon,
@@ -1454,6 +1455,13 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 	}
 	if profile.Gallery != "" {
 		_ = json.Unmarshal([]byte(profile.Gallery), &resp.Gallery)
+	}
+	if org.Type == models.OrganizerTypeVenue {
+		resp.VenueProfile = &types.OrganizerVenueProfileInput{
+			CoverImage: profile.CoverImage, Gallery: resp.Gallery, Description: profile.Description,
+			BusinessHours: profile.BusinessHours, ContactName: profile.ContactName, ServicePhone: profile.ServicePhone,
+			Address: profile.Address, Latitude: profile.Latitude, Longitude: profile.Longitude, AverageSpend: profile.AverageSpend,
+		}
 	}
 	if org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected {
 		revision, err := decodeOrganizerVenueProfileRevision(*org)
@@ -1480,6 +1488,9 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 		CoverImage: req.CoverImage, Gallery: req.Gallery, Description: req.Description,
 		BusinessHours: req.BusinessHours, ContactName: req.ContactName, ServicePhone: req.ServicePhone,
 		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, AverageSpend: req.AverageSpend,
+	}
+	if req.VenueProfile != nil {
+		profileInput = *req.VenueProfile
 	}
 	if org.Type == models.OrganizerTypeVenue {
 		if err := validateVenueProfileInput(profileInput); err != nil {
@@ -1518,7 +1529,7 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 			return s.createOrganizerLog(tx, locked.ID, userID, "submit_profile_revision", "organizer_profile", "", "", "")
 		}
 
-		gallery, _ := json.Marshal(req.Gallery)
+		gallery, _ := json.Marshal(profileInput.Gallery)
 		orgUpdates := map[string]any{}
 		if strings.TrimSpace(req.Name) != "" {
 			orgUpdates["name"] = req.Name
@@ -1543,11 +1554,11 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 				return err
 			}
 		}
-		profile := models.OrganizerProfile{OrganizerID: org.ID, CoverImage: req.CoverImage, Gallery: string(gallery), Description: req.Description, BusinessHours: req.BusinessHours, ContactName: req.ContactName, ServicePhone: req.ServicePhone, Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, AverageSpend: req.AverageSpend}
+		profile := models.OrganizerProfile{OrganizerID: org.ID, CoverImage: profileInput.CoverImage, Gallery: string(gallery), Description: profileInput.Description, BusinessHours: profileInput.BusinessHours, ContactName: profileInput.ContactName, ServicePhone: profileInput.ServicePhone, Address: profileInput.Address, Latitude: profileInput.Latitude, Longitude: profileInput.Longitude, AverageSpend: profileInput.AverageSpend}
 		updates := map[string]any{
-			"cover_image": req.CoverImage, "gallery": string(gallery), "description": req.Description,
-			"business_hours": req.BusinessHours, "contact_name": req.ContactName, "service_phone": req.ServicePhone,
-			"address": req.Address, "latitude": req.Latitude, "longitude": req.Longitude, "average_spend": req.AverageSpend,
+			"cover_image": profileInput.CoverImage, "gallery": string(gallery), "description": profileInput.Description,
+			"business_hours": profileInput.BusinessHours, "contact_name": profileInput.ContactName, "service_phone": profileInput.ServicePhone,
+			"address": profileInput.Address, "latitude": profileInput.Latitude, "longitude": profileInput.Longitude, "average_spend": profileInput.AverageSpend,
 			"updated_at": time.Now(),
 		}
 		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}}, DoUpdates: clause.Assignments(updates)}).Create(&profile).Error; err != nil {
