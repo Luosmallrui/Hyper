@@ -81,6 +81,14 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 		response.Success(c, types.MapMarkerResponse{List: markers, Total: 0})
 		return nil
 	}
+	requestedActivityType := m.resolveActivityTypeFilter(c)
+	if (source == "all" || source == "venue") && requestedActivityType != models.ActivityTypeParty {
+		venues, err := m.getVenueMarkers(c, limit, tagIDs)
+		if err != nil {
+			return err
+		}
+		markers = append(markers, venues...)
+	}
 	if source == "all" || source == "activity" || source == "party" || source == "venue" {
 		activities, err := m.getActivityMarkers(c, limit, tagIDs)
 		if err != nil {
@@ -94,6 +102,87 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 		Total: len(markers),
 	})
 	return nil
+}
+
+// getVenueMarkers reads canonical venues from organizers + organizer_profiles.
+// Historical activities.type=venue records are still emitted by
+// getActivityMarkers as a compatibility fallback, but newly created venues no
+// longer require a synthetic activities row.
+func (m *Map) getVenueMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
+	type venueRow struct {
+		ID, UserID                                      int64
+		Name, Logo, MarkerIcon                          string
+		Province, City, District                        string
+		CoverImage, Description, BusinessHours, Address string
+		Latitude, Longitude                             float64
+		AverageSpend                                    int64
+		CreatedAt                                       time.Time
+	}
+	var venues []venueRow
+	query := m.DB.WithContext(c.Request.Context()).Table("organizers o").
+		Select(`o.id, o.user_id, o.name, o.logo, o.marker_icon, o.province, o.city, o.district, o.created_at,
+			COALESCE(p.cover_image, '') AS cover_image, COALESCE(p.description, '') AS description,
+			COALESCE(p.business_hours, '') AS business_hours, COALESCE(p.address, '') AS address,
+			COALESCE(p.latitude, 0) AS latitude, COALESCE(p.longitude, 0) AS longitude,
+			COALESCE(p.average_spend, 0) AS average_spend`).
+		Joins("JOIN organizer_profiles p ON p.organizer_id = o.id").
+		Where("o.type = ? AND o.status = ? AND o.enabled = 1 AND p.latitude <> 0 AND p.longitude <> 0", models.OrganizerTypeVenue, models.OrganizerStatusApproved)
+	query = dao.ApplyContentTagFilter(query, models.ContentTagTargetVenue, "o.id", tagIDs)
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("o.name LIKE ? OR p.address LIKE ? OR p.description LIKE ? OR o.province LIKE ? OR o.city LIKE ? OR o.district LIKE ?", like, like, like, like, like, like)
+	}
+	if district := strings.TrimSpace(c.Query("district")); district != "" {
+		query = query.Where("o.district = ?", district)
+	}
+	if districtName := m.resolveDistrictName(c, c.Query("district_id")); districtName != "" {
+		query = query.Where("o.district = ?", districtName)
+	}
+	if area := strings.TrimSpace(c.Query("area")); area != "" {
+		query = query.Where("p.address LIKE ?", "%"+area+"%")
+	}
+	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
+		query = query.Where("p.address LIKE ?", "%"+businessArea+"%")
+	}
+	if err := query.Order("o.created_at DESC").Limit(limit).Scan(&venues).Error; err != nil {
+		return nil, err
+	}
+
+	venueIDs := make([]int64, 0, len(venues))
+	for _, venue := range venues {
+		venueIDs = append(venueIDs, venue.ID)
+	}
+	tagMap, err := dao.LoadContentTags(c.Request.Context(), m.DB, models.ContentTagTargetVenue, venueIDs, false)
+	if err != nil {
+		return nil, err
+	}
+	followCounts, followed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetVenue, venueIDs, int64(currentUserID(c)))
+	if err != nil {
+		return nil, err
+	}
+	subscribed := m.loadVenueSubscriptionSet(c, venueIDs)
+	markers := make([]types.MapMarker, 0, len(venues))
+	for _, venue := range venues {
+		tags := tagMap[venue.ID]
+		marker := types.MapMarker{
+			ID: fmt.Sprintf("venue-%d", venue.ID), Source: "venue", SourceID: venue.ID,
+			DetailType: "venue", DetailURL: fmt.Sprintf("/api/v1/venues/%d", venue.ID),
+			UserID: venue.UserID, User: venue.Name, UserName: venue.Name, UserAvatar: venue.Logo, UserAvatarCamel: venue.Logo,
+			Title: venue.Name, Type: models.OrganizerTypeVenue, Location: venue.Address, Address: venue.Address,
+			Lat: venue.Latitude, Lng: venue.Longitude, CoverImage: firstMarkerValue(venue.CoverImage, venue.Logo),
+			CreatedAt: formatMarkerTime(venue.CreatedAt), AvgPrice: venue.AverageSpend,
+			Icon:     firstMarkerValue(venue.MarkerIcon, "https://cdn.hypercn.cn/icon/jiuba.png"),
+			IsFollow: followed[venue.ID], FollowCount: followCounts[venue.ID],
+			FollowTargetType: models.ContentFollowTargetVenue, FollowTargetID: venue.ID,
+			IsSubscriber: subscribed[venue.ID], District: venue.District,
+			TagIDs: types.ContentTagIDs(tags), DiscountTags: types.ContentTagNames(tags), Tags: types.BuildContentTagItems(tags),
+		}
+		marker.Distance = markerDistance(c, marker.Lat, marker.Lng)
+		if !exceedsDistance(c, marker.Distance) {
+			markers = append(markers, marker)
+		}
+	}
+	return markers, nil
 }
 
 func (m *Map) getPartyMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
@@ -226,10 +315,12 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 		Joins("JOIN organizers o ON o.id = a.organizer_id").
 		Where("a.status = ? AND a.is_hidden = 0 AND a.latitude <> 0 AND a.longitude <> 0", models.ActivityStatusOnline).
 		Where("o.status = ? AND o.enabled = 1", models.OrganizerStatusApproved).
-		Where("(a.type = ? OR a.end_time >= ?)", models.ActivityTypeVenue, time.Now()).
+		Where("((a.type <> ? AND a.end_time >= ?) OR (a.type = ? AND o.type <> ?))", models.ActivityTypeVenue, time.Now(), models.ActivityTypeVenue, models.OrganizerTypeVenue).
 		Where("(a.type <> ? OR a.id = (SELECT MAX(av.id) FROM activities av WHERE av.organizer_id = a.organizer_id AND av.type = ? AND av.status = ? AND av.is_hidden = 0))", models.ActivityTypeVenue, models.ActivityTypeVenue, models.ActivityStatusOnline)
 	if activityType := m.resolveActivityTypeFilter(c); activityType != "" {
 		query = query.Where("a.type = ?", activityType)
+	} else if c.Query("source") == "activity" || c.Query("source") == "party" {
+		query = query.Where("a.type <> ?", models.ActivityTypeVenue)
 	}
 	if len(tagIDs) > 0 {
 		activityMatch, activityArgs := dao.ContentTagMatchSQL(models.ContentTagTargetActivity, "a.id", tagIDs)
@@ -333,6 +424,9 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 		if activityType == models.ActivityTypeVenue {
 			icon = "https://cdn.hypercn.cn/icon/jiuba.png"
 		}
+		if activity.MarkerIcon != "" {
+			icon = activity.MarkerIcon
+		}
 		tags := activityTags[activity.ID]
 		followCount := activityFollowCounts[activity.ID]
 		isFollow := activityFollowed[activity.ID]
@@ -394,6 +488,9 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			continue
 		}
 		if organizer, ok := organizerMap[activity.OrganizerID]; ok {
+			if activity.MarkerIcon == "" && organizer.MarkerIcon != "" {
+				marker.Icon = organizer.MarkerIcon
+			}
 			// A venue is now represented by an activities row. Keep its own
 			// activities.name as the marker title; organizer.Name is exposed as
 			// user/username for the merchant identity.
@@ -594,6 +691,15 @@ func formatMarkerTime(t time.Time) string {
 		return ""
 	}
 	return t.Format("2006-01-02 15:04:05")
+}
+
+func firstMarkerValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func queryInt(c *gin.Context, key string) int {

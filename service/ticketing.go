@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -167,24 +168,48 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 	if err != nil {
 		return nil, err
 	}
+	markerIcon, err := normalizeMarkerIcon(req.MarkerIcon)
+	if err != nil {
+		return nil, err
+	}
+	var venueProfile *types.OrganizerVenueProfileRevision
+	if organizerType == models.OrganizerTypeVenue {
+		if req.VenueProfile == nil {
+			return nil, errors.New("场地入驻必须填写固定地址、经纬度和营业时间")
+		}
+		if err := validateVenueProfileInput(*req.VenueProfile); err != nil {
+			return nil, err
+		}
+		venueProfile = &types.OrganizerVenueProfileRevision{
+			Name: req.Name, Logo: req.Logo, MarkerIcon: markerIcon,
+			Province: req.Province, City: req.City, District: req.District,
+			OrganizerVenueProfileInput: *req.VenueProfile,
+		}
+	}
 	var org models.Organizer
 	err = s.DB.WithContext(ctx).Where("user_id = ?", userID).First(&org).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	data := models.Organizer{
-		UserID:   userID,
-		Type:     organizerType,
-		Name:     req.Name,
-		Logo:     req.Logo,
-		Status:   models.OrganizerStatusAuditing,
-		Level:    "LV1",
-		Province: req.Province,
-		City:     req.City,
-		District: req.District,
+		UserID:     userID,
+		Type:       organizerType,
+		Name:       req.Name,
+		Logo:       req.Logo,
+		MarkerIcon: markerIcon,
+		Status:     models.OrganizerStatusAuditing,
+		Level:      "LV1",
+		Province:   req.Province,
+		City:       req.City,
+		District:   req.District,
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if err := s.DB.WithContext(ctx).Create(&data).Error; err != nil {
+		if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&data).Error; err != nil {
+				return err
+			}
+			return upsertOrganizerVenueProfile(tx, data.ID, venueProfile)
+		}); err != nil {
 			return nil, err
 		}
 		s.notifyOrganizerApply(ctx, data, userID)
@@ -196,7 +221,7 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 	if org.Status == models.OrganizerStatusApproved {
 		return nil, errors.New("入驻申请已通过，无需重复提交")
 	}
-	if err := s.DB.WithContext(ctx).Model(&org).Updates(map[string]any{
+	updates := map[string]any{
 		"name":          req.Name,
 		"logo":          req.Logo,
 		"type":          organizerType,
@@ -206,7 +231,16 @@ func (s *TicketingService) ApplyOrganizer(ctx context.Context, userID int64, req
 		"province":      req.Province,
 		"city":          req.City,
 		"district":      req.District,
-	}).Error; err != nil {
+	}
+	if markerIcon != "" {
+		updates["marker_icon"] = markerIcon
+	}
+	if err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&org).Updates(updates).Error; err != nil {
+			return err
+		}
+		return upsertOrganizerVenueProfile(tx, org.ID, venueProfile)
+	}); err != nil {
 		return nil, err
 	}
 	data.ID = org.ID
@@ -225,14 +259,17 @@ func (s *TicketingService) GetOrganizerAuditStatus(ctx context.Context, userID i
 		return nil, err
 	}
 	resp := &types.OrganizerAuditStatusResponse{
-		OrganizerID:  org.ID,
-		Type:         org.Type,
-		Status:       org.Status,
-		Enabled:      org.Enabled,
-		RejectReason: org.RejectReason,
-		SubmittedAt:  &org.CreatedAt,
+		OrganizerID:               org.ID,
+		Type:                      org.Type,
+		MarkerIcon:                org.MarkerIcon,
+		Status:                    org.Status,
+		Enabled:                   org.Enabled,
+		RejectReason:              org.RejectReason,
+		HasPendingProfileRevision: org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected,
+		PendingProfileReason:      org.PendingProfileReason,
+		SubmittedAt:               &org.CreatedAt,
 	}
-	if org.Status == models.OrganizerStatusApproved || org.Status == models.OrganizerStatusRejected {
+	if (org.Status == models.OrganizerStatusApproved || org.Status == models.OrganizerStatusRejected) && org.PendingProfileStatus != models.OrganizerStatusAuditing {
 		resp.ReviewedAt = &org.UpdatedAt
 	}
 	return resp, nil
@@ -242,6 +279,9 @@ func (s *TicketingService) UpdateOrganizerBasic(ctx context.Context, userID int6
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if org.Type == models.OrganizerTypeVenue && org.Status == models.OrganizerStatusApproved {
+		return errors.New("已通过场地请通过主办方资料接口提交完整资料，修改后需重新审核")
 	}
 	updates := map[string]any{}
 	putString(updates, "name", req.Name)
@@ -912,6 +952,7 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 	var row struct {
 		ID            int64
 		UserID        int64
+		Type          string
 		Name          string
 		Logo          string
 		OwnerNickname string
@@ -930,7 +971,7 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 		AverageSpend  int64
 	}
 	if err := s.DB.WithContext(ctx).Table("organizers o").
-		Select(`o.id, o.user_id, o.name, o.logo, o.province, o.city, o.district,
+		Select(`o.id, o.user_id, o.type, o.name, o.logo, o.province, o.city, o.district,
 			COALESCE(u.nickname, '') AS owner_nickname,
 			COALESCE(u.avatar, '') AS owner_avatar,
 			COALESCE(p.cover_image, '') AS cover_image,
@@ -956,6 +997,7 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 	resp := &types.PublicOrganizerHomeResponse{
 		ID:               row.ID,
 		UserID:           row.UserID,
+		Type:             row.Type,
 		Name:             row.Name,
 		Logo:             row.Logo,
 		OwnerNickname:    row.OwnerNickname,
@@ -997,48 +1039,44 @@ func (s *TicketingService) GetPublicOrganizerHome(ctx context.Context, userID, o
 	resp.Activities = *activities
 	resp.ActivityCount = activities.Total
 
-	// A venue is now an activity row. Query it directly so one organizer can
-	// publish and expose multiple independent venues on its public homepage.
-	venueQuery := s.DB.WithContext(ctx).Table("activities a").
-		Select(`o.id, o.user_id, o.name, o.logo,
-			a.id AS activity_id, a.name AS activity_name,
-			COALESCE(NULLIF(a.poster_list, ''), p.cover_image, '') AS cover_image,
-			COALESCE(NULLIF(a.description, ''), p.description, '') AS description,
-			COALESCE(p.business_hours, '') AS business_hours,
-			COALESCE(p.service_phone, '') AS service_phone,
-			COALESCE(NULLIF(a.province, ''), o.province, '') AS province,
-			COALESCE(NULLIF(a.city, ''), o.city, '') AS city,
-			COALESCE(NULLIF(a.district, ''), o.district, '') AS district,
-			COALESCE(NULLIF(a.address, ''), p.address, '') AS address,
-			COALESCE(NULLIF(a.latitude, 0), p.latitude, 0) AS latitude,
-			COALESCE(NULLIF(a.longitude, 0), p.longitude, 0) AS longitude,
-			COALESCE(p.average_spend, 0) AS average_spend,
-			a.created_at`).
-		Joins("JOIN organizers o ON o.id = a.organizer_id").
-		Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
-		Where("a.organizer_id = ? AND a.type = ? AND a.status = ? AND a.is_hidden = 0", row.ID, models.ActivityTypeVenue, models.ActivityStatusOnline).
-		Where("o.status = ? AND o.enabled = 1", models.OrganizerStatusApproved)
-	var venueTotal int64
-	if err := venueQuery.Count(&venueTotal).Error; err != nil {
-		return nil, err
-	}
 	venues := []types.VenueListItem{}
-	if err := venueQuery.Order("a.created_at DESC, a.id DESC").Offset((venuePage - 1) * venueSize).Limit(venueSize).Scan(&venues).Error; err != nil {
-		return nil, err
+	var venueTotal int64
+	if row.Type == models.OrganizerTypeVenue {
+		venueTotal = 1
+		if venuePage == 1 {
+			venues = append(venues, types.VenueListItem{ID: row.ID, UserID: row.UserID, Name: row.Name, Logo: row.Logo,
+				CoverImage: row.CoverImage, Description: row.Description, BusinessHours: row.BusinessHours,
+				ServicePhone: row.ServicePhone, Province: row.Province, City: row.City, District: row.District,
+				Address: row.Address, Latitude: row.Latitude, Longitude: row.Longitude, AverageSpend: row.AverageSpend})
+		}
+	} else {
+		// Compatibility fallback for historical venue activity rows. New venue
+		// organizers are represented by their organizer profile above.
+		venueQuery := s.DB.WithContext(ctx).Table("activities a").
+			Select(`o.id, o.user_id, o.name, o.logo, a.id AS activity_id, a.name AS activity_name,
+				COALESCE(NULLIF(a.poster_list, ''), p.cover_image, '') AS cover_image,
+				COALESCE(NULLIF(a.description, ''), p.description, '') AS description,
+				COALESCE(p.business_hours, '') AS business_hours, COALESCE(p.service_phone, '') AS service_phone,
+				COALESCE(NULLIF(a.province, ''), o.province, '') AS province, COALESCE(NULLIF(a.city, ''), o.city, '') AS city,
+				COALESCE(NULLIF(a.district, ''), o.district, '') AS district, COALESCE(NULLIF(a.address, ''), p.address, '') AS address,
+				COALESCE(NULLIF(a.latitude, 0), p.latitude, 0) AS latitude, COALESCE(NULLIF(a.longitude, 0), p.longitude, 0) AS longitude,
+				COALESCE(p.average_spend, 0) AS average_spend, a.created_at`).
+			Joins("JOIN organizers o ON o.id = a.organizer_id").
+			Joins("LEFT JOIN organizer_profiles p ON p.organizer_id = o.id").
+			Where("a.organizer_id = ? AND a.type = ? AND a.status = ? AND a.is_hidden = 0", row.ID, models.ActivityTypeVenue, models.ActivityStatusOnline).
+			Where("o.status = ? AND o.enabled = 1", models.OrganizerStatusApproved)
+		if err := venueQuery.Count(&venueTotal).Error; err != nil {
+			return nil, err
+		}
+		if err := venueQuery.Order("a.created_at DESC, a.id DESC").Offset((venuePage - 1) * venueSize).Limit(venueSize).Scan(&venues).Error; err != nil {
+			return nil, err
+		}
 	}
 	if err := s.fillVenueStats(ctx, userID, venues); err != nil {
 		return nil, err
 	}
 	resp.Venues = types.PageResponse[types.VenueListItem]{List: venues, Total: venueTotal}
 	resp.VenueCount = venueTotal
-	// Organizer application type no longer controls what can be published.
-	// Return a content-oriented default so venue-only storefronts open on the
-	// venue section while mixed storefronts retain the activity-first default.
-	if resp.ActivityCount == 0 && resp.VenueCount > 0 {
-		resp.Type = models.ActivityTypeVenue
-	} else {
-		resp.Type = models.ActivityTypeParty
-	}
 	return resp, nil
 }
 
@@ -1280,9 +1318,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 func visibleVenueOrganizerSQL() string {
-	return `o.status = ? AND o.enabled = 1 AND EXISTS (
-		SELECT 1 FROM activities va
-		WHERE va.organizer_id = o.id AND va.type = ? AND va.status = ? AND va.is_hidden = 0
+	return `o.status = ? AND o.enabled = 1 AND (
+		o.type = 'venue' OR EXISTS (
+			SELECT 1 FROM activities va
+			WHERE va.organizer_id = o.id AND va.type = ? AND va.status = ? AND va.is_hidden = 0
+		)
 	)`
 }
 
@@ -1397,6 +1437,7 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 		ID:            org.ID,
 		Name:          org.Name,
 		Logo:          org.Logo,
+		MarkerIcon:    org.MarkerIcon,
 		Province:      org.Province,
 		City:          org.City,
 		District:      org.District,
@@ -1414,6 +1455,15 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 	if profile.Gallery != "" {
 		_ = json.Unmarshal([]byte(profile.Gallery), &resp.Gallery)
 	}
+	if org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected {
+		revision, err := decodeOrganizerVenueProfileRevision(*org)
+		if err != nil {
+			return nil, err
+		}
+		resp.HasPendingProfileRevision = revision != nil
+		resp.PendingProfileReason = org.PendingProfileReason
+		resp.PendingProfileRevision = revision
+	}
 	return resp, nil
 }
 
@@ -1422,19 +1472,62 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 	if err != nil {
 		return err
 	}
-	if req.Latitude != 0 || req.Longitude != 0 {
-		if req.Latitude < 18 || req.Latitude > 54 || req.Longitude < 73 || req.Longitude > 135 {
-			return errors.New("经纬度不在中国大陆常用范围内")
+	markerIcon, err := normalizeMarkerIcon(req.MarkerIcon)
+	if err != nil {
+		return err
+	}
+	profileInput := types.OrganizerVenueProfileInput{
+		CoverImage: req.CoverImage, Gallery: req.Gallery, Description: req.Description,
+		BusinessHours: req.BusinessHours, ContactName: req.ContactName, ServicePhone: req.ServicePhone,
+		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, AverageSpend: req.AverageSpend,
+	}
+	if org.Type == models.OrganizerTypeVenue {
+		if err := validateVenueProfileInput(profileInput); err != nil {
+			return err
+		}
+	} else if req.Latitude != 0 || req.Longitude != 0 {
+		if err := validateChinaCoordinate(req.Latitude, req.Longitude); err != nil {
+			return err
 		}
 	}
-	gallery, _ := json.Marshal(req.Gallery)
+	revision := &types.OrganizerVenueProfileRevision{
+		Name: req.Name, Logo: req.Logo, MarkerIcon: markerIcon, Province: req.Province, City: req.City, District: req.District,
+		OrganizerVenueProfileInput: profileInput,
+	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.Organizer
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", org.ID).First(&locked).Error; err != nil {
+			return err
+		}
+		if locked.Type == models.OrganizerTypeVenue && locked.Status == models.OrganizerStatusApproved {
+			if locked.PendingProfileStatus == models.OrganizerStatusAuditing {
+				return errors.New("场地资料正在审核中，请勿重复提交")
+			}
+			payload, err := json.Marshal(revision)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Organizer{}).Where("id = ?", locked.ID).Updates(map[string]any{
+				"pending_profile_revision": string(payload),
+				"pending_profile_status":   models.OrganizerStatusAuditing,
+				"pending_profile_reason":   "",
+				"updated_at":               time.Now(),
+			}).Error; err != nil {
+				return err
+			}
+			return s.createOrganizerLog(tx, locked.ID, userID, "submit_profile_revision", "organizer_profile", "", "", "")
+		}
+
+		gallery, _ := json.Marshal(req.Gallery)
 		orgUpdates := map[string]any{}
 		if strings.TrimSpace(req.Name) != "" {
 			orgUpdates["name"] = req.Name
 		}
 		if req.Logo != "" {
 			orgUpdates["logo"] = req.Logo
+		}
+		if markerIcon != "" {
+			orgUpdates["marker_icon"] = markerIcon
 		}
 		if req.Province != "" {
 			orgUpdates["province"] = req.Province
@@ -1450,19 +1543,7 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 				return err
 			}
 		}
-		profile := models.OrganizerProfile{
-			OrganizerID:   org.ID,
-			CoverImage:    req.CoverImage,
-			Gallery:       string(gallery),
-			Description:   req.Description,
-			BusinessHours: req.BusinessHours,
-			ContactName:   req.ContactName,
-			ServicePhone:  req.ServicePhone,
-			Address:       req.Address,
-			Latitude:      req.Latitude,
-			Longitude:     req.Longitude,
-			AverageSpend:  req.AverageSpend,
-		}
+		profile := models.OrganizerProfile{OrganizerID: org.ID, CoverImage: req.CoverImage, Gallery: string(gallery), Description: req.Description, BusinessHours: req.BusinessHours, ContactName: req.ContactName, ServicePhone: req.ServicePhone, Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, AverageSpend: req.AverageSpend}
 		updates := map[string]any{
 			"cover_image": req.CoverImage, "gallery": string(gallery), "description": req.Description,
 			"business_hours": req.BusinessHours, "contact_name": req.ContactName, "service_phone": req.ServicePhone,
@@ -1474,6 +1555,43 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 		}
 		return s.createOrganizerLog(tx, org.ID, userID, "update_profile", "organizer_profile", "", "", "")
 	})
+}
+
+func validateVenueProfileInput(input types.OrganizerVenueProfileInput) error {
+	if strings.TrimSpace(input.Address) == "" {
+		return errors.New("场地地址不能为空")
+	}
+	if strings.TrimSpace(input.BusinessHours) == "" {
+		return errors.New("场地营业时间不能为空")
+	}
+	return validateChinaCoordinate(input.Latitude, input.Longitude)
+}
+
+func upsertOrganizerVenueProfile(tx *gorm.DB, organizerID int64, revision *types.OrganizerVenueProfileRevision) error {
+	if revision == nil {
+		return nil
+	}
+	gallery, err := json.Marshal(revision.Gallery)
+	if err != nil {
+		return err
+	}
+	profile := models.OrganizerProfile{OrganizerID: organizerID, CoverImage: revision.CoverImage, Gallery: string(gallery), Description: revision.Description, BusinessHours: revision.BusinessHours, ContactName: revision.ContactName, ServicePhone: revision.ServicePhone, Address: revision.Address, Latitude: revision.Latitude, Longitude: revision.Longitude, AverageSpend: revision.AverageSpend}
+	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}}, DoUpdates: clause.Assignments(map[string]any{
+		"cover_image": profile.CoverImage, "gallery": profile.Gallery, "description": profile.Description,
+		"business_hours": profile.BusinessHours, "contact_name": profile.ContactName, "service_phone": profile.ServicePhone,
+		"address": profile.Address, "latitude": profile.Latitude, "longitude": profile.Longitude, "average_spend": profile.AverageSpend, "updated_at": time.Now(),
+	})}).Create(&profile).Error
+}
+
+func decodeOrganizerVenueProfileRevision(org models.Organizer) (*types.OrganizerVenueProfileRevision, error) {
+	if strings.TrimSpace(org.PendingProfileRevision) == "" {
+		return nil, nil
+	}
+	var revision types.OrganizerVenueProfileRevision
+	if err := json.Unmarshal([]byte(org.PendingProfileRevision), &revision); err != nil {
+		return nil, fmt.Errorf("场地待审核修改数据损坏: %w", err)
+	}
+	return &revision, nil
 }
 
 func (s *TicketingService) LookupOrganizerUser(ctx context.Context, userID int64, phone string) (*types.OrganizerUserLookupResponse, error) {
@@ -2024,6 +2142,9 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 			return 0, err
 		}
 	}
+	if req.ActivityID == 0 && activityType == models.ActivityTypeVenue {
+		return 0, errors.New("新场地请在入驻申请中选择 venue 并填写固定资料，活动发布仅支持 party")
+	}
 	var act models.Activity
 	if req.ActivityID > 0 {
 		if err := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", req.ActivityID, org.ID).First(&act).Error; err != nil {
@@ -2065,6 +2186,23 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 	updates, err := activityUpdates(req, activityType)
 	if err != nil {
 		return 0, err
+	}
+	// A venue organizer has one reviewed, fixed public address. Events it
+	// publishes inherit that address instead of creating a second venue.
+	if org.Type == models.OrganizerTypeVenue && activityType == models.ActivityTypeParty {
+		var profile models.OrganizerProfile
+		if err := s.DB.WithContext(ctx).Where("organizer_id = ?", org.ID).First(&profile).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, errors.New("场地固定资料未完善，暂不能发布活动")
+			}
+			return 0, err
+		}
+		updates["province"] = org.Province
+		updates["city"] = org.City
+		updates["district"] = org.District
+		updates["address"] = profile.Address
+		updates["latitude"] = profile.Latitude
+		updates["longitude"] = profile.Longitude
 	}
 	if activityType == models.ActivityTypeVenue && !wasVenue {
 		startTime, endTime := venueValidityWindow(time.Now())
@@ -5363,6 +5501,7 @@ func buildOrganizerInfo(org *models.Organizer) *types.OrganizerInfoResponse {
 		Type:           org.Type,
 		Name:           org.Name,
 		Logo:           org.Logo,
+		MarkerIcon:     org.MarkerIcon,
 		Status:         org.Status,
 		RejectReason:   org.RejectReason,
 		Level:          org.Level,
@@ -5503,6 +5642,13 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 		updates["type"] = activityType
 	}
 	putString(updates, "name", req.Name)
+	if req.MarkerIcon != nil {
+		markerIcon, err := normalizeMarkerIcon(*req.MarkerIcon)
+		if err != nil {
+			return nil, err
+		}
+		updates["marker_icon"] = markerIcon
+	}
 	putString(updates, "share_title", req.ShareTitle)
 	putInt8(updates, "real_name_mode", req.RealNameMode)
 	putInt8(updates, "minor_check", req.MinorCheck)
@@ -5771,6 +5917,23 @@ func normalizeOrganizerType(raw string) (string, error) {
 	default:
 		return "", errors.New("入驻类型无效，仅支持 party 或 venue")
 	}
+}
+
+// normalizeMarkerIcon keeps the database as a passive URL store while
+// preventing arbitrary external hosts from being rendered on the map.
+func normalizeMarkerIcon(raw string) (string, error) {
+	markerIcon := strings.TrimSpace(raw)
+	if markerIcon == "" {
+		return "", nil
+	}
+	if len(markerIcon) > 255 {
+		return "", errors.New("地图图标地址过长")
+	}
+	parsed, err := url.Parse(markerIcon)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "cdn.hypercn.cn" || parsed.Path == "" {
+		return "", errors.New("地图图标必须是 cdn.hypercn.cn 的 HTTPS 地址")
+	}
+	return markerIcon, nil
 }
 
 func defaultActivityType(raw string) string {

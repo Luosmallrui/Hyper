@@ -225,24 +225,27 @@ type AdminOrganizerListResponse struct {
 
 // AdminOrganizerItem 管理后台入驻申请列表项
 type AdminOrganizerItem struct {
-	ID             int64   `json:"id"`
-	UserID         int64   `json:"user_id"`
-	UserName       string  `json:"user_name"`
-	UserAvatar     string  `json:"user_avatar"`
-	UserMobile     string  `json:"user_mobile"`
-	Type           string  `json:"type"`
-	Name           string  `json:"name"`
-	Logo           string  `json:"logo"`
-	Status         int8    `json:"status"`
-	Enabled        int8    `json:"enabled"`
-	RejectReason   string  `json:"reject_reason"`
-	Level          string  `json:"level"`
-	ServiceFeeRate float64 `json:"service_fee_rate"`
-	Province       string  `json:"province"`
-	City           string  `json:"city"`
-	District       string  `json:"district"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	ID                        int64   `json:"id"`
+	UserID                    int64   `json:"user_id"`
+	UserName                  string  `json:"user_name"`
+	UserAvatar                string  `json:"user_avatar"`
+	UserMobile                string  `json:"user_mobile"`
+	Type                      string  `json:"type"`
+	Name                      string  `json:"name"`
+	Logo                      string  `json:"logo"`
+	Status                    int8    `json:"status"`
+	Enabled                   int8    `json:"enabled"`
+	RejectReason              string  `json:"reject_reason"`
+	AuditKind                 string  `json:"audit_kind"`
+	HasPendingProfileRevision bool    `json:"has_pending_profile_revision"`
+	PendingProfileReason      string  `json:"pending_profile_reason,omitempty"`
+	Level                     string  `json:"level"`
+	ServiceFeeRate            float64 `json:"service_fee_rate"`
+	Province                  string  `json:"province"`
+	City                      string  `json:"city"`
+	District                  string  `json:"district"`
+	CreatedAt                 string  `json:"created_at"`
+	UpdatedAt                 string  `json:"updated_at"`
 }
 
 type AdminActivityFilter struct {
@@ -260,11 +263,12 @@ type AdminActivityFilter struct {
 // AdminOrganizerDetail 管理后台入驻申请详情
 type AdminOrganizerDetail struct {
 	models.Organizer
-	UserName   string           `json:"user_name"`
-	UserAvatar string           `json:"user_avatar"`
-	UserMobile string           `json:"user_mobile"`
-	TagIDs     []int64          `json:"tag_ids"`
-	Tags       []ContentTagItem `json:"tags"`
+	UserName               string                         `json:"user_name"`
+	UserAvatar             string                         `json:"user_avatar"`
+	UserMobile             string                         `json:"user_mobile"`
+	TagIDs                 []int64                        `json:"tag_ids"`
+	Tags                   []ContentTagItem               `json:"tags"`
+	PendingProfileRevision *OrganizerVenueProfileRevision `json:"pending_profile_revision,omitempty"`
 }
 
 // AdminAuditOrganizerRequest 审核入驻申请
