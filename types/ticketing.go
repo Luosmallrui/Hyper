@@ -170,6 +170,19 @@ type OrganizerSubscriptionSummary struct {
 	TodaySubscriptions int64 `json:"today_subscriptions"`
 }
 
+// OrganizerFollowerItem is an audience member of the organizer's public
+// storefront or fixed venue. Mobile is always masked before it is returned.
+type OrganizerFollowerItem struct {
+	UserID      int64     `json:"user_id"`
+	Nickname    string    `json:"nickname"`
+	Avatar      string    `json:"avatar"`
+	Signature   string    `json:"signature"`
+	Mobile      string    `json:"mobile"`
+	UserStatus  int8      `json:"user_status"`
+	TargetTypes []string  `json:"target_types"`
+	FollowedAt  time.Time `json:"followed_at"`
+}
+
 type VenueListItem struct {
 	ID               int64            `json:"id"`
 	ActivityID       int64            `json:"activity_id,omitempty"`

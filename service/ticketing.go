@@ -49,6 +49,7 @@ type ITicketingService interface {
 	MarkOrganizerMessageRead(ctx context.Context, userID, messageID int64) error
 	MarkAllOrganizerMessagesRead(ctx context.Context, userID int64) (*types.OrganizerReadAllResponse, error)
 	GetOrganizerSubscriptionSummary(ctx context.Context, userID int64) (*types.OrganizerSubscriptionSummary, error)
+	ListOrganizerFollowers(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.OrganizerFollowerItem], error)
 	ListVenues(ctx context.Context, userID int64, keyword string, tagIDs []int64, page, size int) (*types.PageResponse[types.VenueListItem], error)
 	GetVenueDetail(ctx context.Context, userID, venueID int64) (*types.VenueDetailResponse, error)
 	ListVenueNotes(ctx context.Context, userID, venueID int64, cursor int64, pageSize int) (*types.VenueNotesResponse, error)
@@ -872,6 +873,92 @@ func (s *TicketingService) GetOrganizerSubscriptionSummary(ctx context.Context, 
 		return nil, err
 	}
 	return resp, nil
+}
+
+// ListOrganizerFollowers returns followers of the organizer storefront. It
+// merges legacy user-follow relations with organizer/venue content follows so
+// old Mini Program clients and current entity-based clients see one audience.
+func (s *TicketingService) ListOrganizerFollowers(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[types.OrganizerFollowerItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	page, size = normalizePage(page, size)
+	contentTargetSQL := "cf.target_type = ?"
+	contentArgs := []any{models.ContentFollowTargetOrganizer}
+	if org.Type == models.OrganizerTypeVenue {
+		contentTargetSQL = "cf.target_type IN (?, ?)"
+		contentArgs = append(contentArgs, models.ContentFollowTargetVenue)
+	}
+	sourceSQL := `
+		SELECT cf.user_id, cf.target_type, cf.created_at AS followed_at
+		FROM content_follows cf
+		WHERE cf.target_id = ? AND ` + contentTargetSQL + `
+		UNION ALL
+		SELECT uf.follower_id AS user_id, 'user' AS target_type, uf.updated_at AS followed_at
+		FROM user_follow uf
+		WHERE uf.followee_id = ? AND uf.status = 1`
+	sourceArgs := make([]any, 0, len(contentArgs)+2)
+	sourceArgs = append(sourceArgs, org.ID)
+	sourceArgs = append(sourceArgs, contentArgs...)
+	sourceArgs = append(sourceArgs, org.UserID)
+
+	base := s.DB.WithContext(ctx).Table("("+sourceSQL+") AS f", sourceArgs...).
+		Joins("JOIN users u ON u.id = f.user_id").
+		Where("f.user_id <> ?", org.UserID)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("u.nickname LIKE ? OR u.mobile LIKE ?", like, like)
+	}
+
+	var total int64
+	countQuery := base.Session(&gorm.Session{}).Select("f.user_id").Group("f.user_id")
+	if err := s.DB.WithContext(ctx).Table("(?) AS organizer_followers", countQuery).Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	type followerRow struct {
+		UserID      int64
+		Nickname    string
+		Avatar      string
+		Signature   string
+		Mobile      string
+		UserStatus  int8
+		TargetTypes string
+		FollowedAt  time.Time
+	}
+	var rows []followerRow
+	if err := base.Select(`f.user_id, COALESCE(u.nickname, '') AS nickname, COALESCE(u.avatar, '') AS avatar,
+		COALESCE(u.motto, '') AS signature, COALESCE(u.mobile, '') AS mobile, u.status AS user_status,
+		GROUP_CONCAT(DISTINCT f.target_type ORDER BY f.target_type SEPARATOR ',') AS target_types,
+		MAX(f.followed_at) AS followed_at`).
+		Group("f.user_id, u.nickname, u.avatar, u.motto, u.mobile, u.status").
+		Order("followed_at DESC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	list := make([]types.OrganizerFollowerItem, 0, len(rows))
+	for _, row := range rows {
+		item := types.OrganizerFollowerItem{
+			UserID: row.UserID, Nickname: row.Nickname, Avatar: row.Avatar, Signature: row.Signature,
+			Mobile: maskOrganizerFollowerMobile(row.Mobile), UserStatus: row.UserStatus, FollowedAt: row.FollowedAt,
+		}
+		if row.TargetTypes != "" {
+			item.TargetTypes = strings.Split(row.TargetTypes, ",")
+		} else {
+			item.TargetTypes = []string{}
+		}
+		list = append(list, item)
+	}
+	return &types.PageResponse[types.OrganizerFollowerItem]{List: list, Total: total}, nil
+}
+
+func maskOrganizerFollowerMobile(mobile string) string {
+	mobile = strings.TrimSpace(mobile)
+	if len(mobile) != 11 {
+		return ""
+	}
+	return mobile[:3] + "****" + mobile[7:]
 }
 
 func (s *TicketingService) ListVenues(ctx context.Context, userID int64, keyword string, tagIDs []int64, page, size int) (*types.PageResponse[types.VenueListItem], error) {

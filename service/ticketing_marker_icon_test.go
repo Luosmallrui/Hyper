@@ -52,3 +52,12 @@ func TestOrganizerProfileResponseIncludesVenueContract(t *testing.T) {
 		}
 	}
 }
+
+func TestMaskOrganizerFollowerMobile(t *testing.T) {
+	if got := maskOrganizerFollowerMobile("13800138000"); got != "138****8000" {
+		t.Fatalf("unexpected mobile mask: %s", got)
+	}
+	if got := maskOrganizerFollowerMobile("invalid"); got != "" {
+		t.Fatalf("invalid mobile must not be exposed: %s", got)
+	}
+}

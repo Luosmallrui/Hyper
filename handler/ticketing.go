@@ -59,10 +59,13 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.GET("/withdraw-info", h.wrap(h.GetWithdrawInfo))
 		organizer.PUT("/withdraw-info", h.wrap(h.UpdateWithdrawInfo))
 		organizer.GET("/withdraws", h.wrap(h.ListOrganizerWithdraws))
+		// Compatibility route used by the PC organizer finance page.
+		organizer.GET("/bank/withdraw/flow/list", h.wrap(h.ListOrganizerWithdraws))
 		organizer.POST("/withdraws", h.wrap(h.CreateOrganizerWithdraw))
 		organizer.GET("/profile", h.wrap(h.GetOrganizerProfile))
 		organizer.PUT("/profile", h.wrap(h.UpdateOrganizerProfile))
 		organizer.GET("/subscription/summary", h.wrap(h.GetOrganizerSubscriptionSummary))
+		organizer.GET("/followers", h.wrap(h.ListOrganizerFollowers))
 		organizer.GET("/users/lookup", h.wrap(h.LookupOrganizerUser))
 		organizer.GET("/collections", h.wrap(h.ListOrganizerCollections))
 		organizer.GET("/collections/:id", h.wrap(h.GetOrganizerCollection))
@@ -263,7 +266,16 @@ func (h *Ticketing) ListOrganizerWithdraws(c *gin.Context) error {
 		v := int8(value)
 		status = &v
 	}
-	resp, err := h.TicketingService.ListOrganizerWithdraws(c.Request.Context(), currentUserID(c), status, queryInt(c, "page"), queryInt(c, "size"))
+	resp, err := h.TicketingService.ListOrganizerWithdraws(c.Request.Context(), currentUserID(c), status, page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerFollowers(c *gin.Context) error {
+	resp, err := h.TicketingService.ListOrganizerFollowers(c.Request.Context(), currentUserID(c), page(c), size(c), c.Query("keyword"))
 	if err != nil {
 		return err
 	}
@@ -1649,6 +1661,8 @@ func buildUploadKey(fileType string, header *multipart.FileHeader) (string, erro
 		"qualification_doc": true,
 		"avatar":            true,
 		"organizer_logo":    true,
+		"venue_cover":       true,
+		"venue_gallery":     true,
 		"collection_share":  true,
 		"post":              true,
 		"misc":              true,
