@@ -149,14 +149,16 @@ func (m *Map) getVenueMarkers(c *gin.Context, limit int, tagIDs []int64) ([]type
 	}
 
 	venueIDs := make([]int64, 0, len(venues))
+	venueOwnerIDs := make(map[int64]int64, len(venues))
 	for _, venue := range venues {
 		venueIDs = append(venueIDs, venue.ID)
+		venueOwnerIDs[venue.ID] = venue.UserID
 	}
 	tagMap, err := dao.LoadContentTags(c.Request.Context(), m.DB, models.ContentTagTargetVenue, venueIDs, false)
 	if err != nil {
 		return nil, err
 	}
-	followCounts, followed, err := dao.LoadContentFollowStats(c.Request.Context(), m.DB, models.ContentFollowTargetVenue, venueIDs, int64(currentUserID(c)))
+	followCounts, followed, err := dao.LoadContentFollowStatsExcludingOwners(c.Request.Context(), m.DB, models.ContentFollowTargetVenue, venueIDs, int64(currentUserID(c)), venueOwnerIDs)
 	if err != nil {
 		return nil, err
 	}

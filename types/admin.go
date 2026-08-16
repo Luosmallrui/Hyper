@@ -238,6 +238,7 @@ type AdminOrganizerItem struct {
 	RejectReason              string  `json:"reject_reason"`
 	AuditKind                 string  `json:"audit_kind"`
 	HasPendingProfileRevision bool    `json:"has_pending_profile_revision"`
+	PendingProfileStatus      int8    `json:"pending_profile_status"`
 	PendingProfileReason      string  `json:"pending_profile_reason,omitempty"`
 	Level                     string  `json:"level"`
 	ServiceFeeRate            float64 `json:"service_fee_rate"`
@@ -266,8 +267,10 @@ type AdminOrganizerDetail struct {
 	UserName               string                         `json:"user_name"`
 	UserAvatar             string                         `json:"user_avatar"`
 	UserMobile             string                         `json:"user_mobile"`
+	FollowerCount          int64                          `json:"follower_count"`
 	TagIDs                 []int64                        `json:"tag_ids"`
 	Tags                   []ContentTagItem               `json:"tags"`
+	VenueProfile           *OrganizerVenueProfileInput    `json:"venue_profile,omitempty"`
 	PendingProfileRevision *OrganizerVenueProfileRevision `json:"pending_profile_revision,omitempty"`
 }
 

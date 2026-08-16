@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/jwt"
 	"Hyper/types"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -209,6 +210,7 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 			RejectReason:              org.RejectReason,
 			AuditKind:                 "initial",
 			HasPendingProfileRevision: org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected,
+			PendingProfileStatus:      org.PendingProfileStatus,
 			PendingProfileReason:      org.PendingProfileReason,
 			Level:                     org.Level,
 			ServiceFeeRate:            org.ServiceFeeRate,
@@ -218,7 +220,7 @@ func (s *AdminService) GetOrganizerList(ctx context.Context, page, pageSize int,
 			CreatedAt:                 org.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:                 org.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
-		if org.Status == models.OrganizerStatusApproved && org.PendingProfileStatus == models.OrganizerStatusAuditing {
+		if org.Status == models.OrganizerStatusApproved && (org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected) {
 			item.AuditKind = "profile_revision"
 		}
 		if u, ok := userMap[int(org.UserID)]; ok {
@@ -258,12 +260,30 @@ func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64
 		return nil, err
 	}
 	detail := &types.AdminOrganizerDetail{Organizer: org}
+	followTargetType, err := resolveOrganizerFollowTarget(ctx, s.DB, org)
+	if err != nil {
+		return nil, err
+	}
+	followCounts, _, err := dao.LoadContentFollowStatsExcludingOwners(
+		ctx, s.DB, followTargetType, []int64{org.ID}, 0, map[int64]int64{org.ID: org.UserID},
+	)
+	if err != nil {
+		return nil, err
+	}
+	detail.FollowerCount = followCounts[org.ID]
 	if org.PendingProfileStatus == models.OrganizerStatusAuditing || org.PendingProfileStatus == models.OrganizerStatusRejected {
 		revision, err := decodeOrganizerVenueProfileRevision(org)
 		if err != nil {
 			return nil, err
 		}
 		detail.PendingProfileRevision = revision
+	}
+	if org.Type == models.OrganizerTypeVenue {
+		venueProfile, err := s.getAdminVenueProfile(ctx, org.ID)
+		if err != nil {
+			return nil, err
+		}
+		detail.VenueProfile = venueProfile
 	}
 	var user models.Users
 	if err := s.DB.WithContext(ctx).Where("id = ?", org.UserID).First(&user).Error; err == nil {
@@ -278,6 +298,97 @@ func (s *AdminService) GetOrganizerDetail(ctx context.Context, organizerID int64
 	detail.TagIDs = types.ContentTagIDs(tagMap[organizerID])
 	detail.Tags = types.BuildContentTagItems(tagMap[organizerID])
 	return detail, nil
+}
+
+// getAdminVenueProfile reads the canonical venue profile first. Historical
+// venues stored their public content on activities, so empty canonical fields
+// are filled from the latest visible legacy venue activity during migration.
+func (s *AdminService) getAdminVenueProfile(ctx context.Context, organizerID int64) (*types.OrganizerVenueProfileInput, error) {
+	profile := &types.OrganizerVenueProfileInput{Gallery: []string{}}
+	var stored models.OrganizerProfile
+	err := s.DB.WithContext(ctx).Where("organizer_id = ?", organizerID).First(&stored).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if err == nil {
+		profile.CoverImage = stored.CoverImage
+		profile.Description = stored.Description
+		profile.BusinessHours = stored.BusinessHours
+		profile.ContactName = stored.ContactName
+		profile.ServicePhone = stored.ServicePhone
+		profile.Address = stored.Address
+		profile.Latitude = stored.Latitude
+		profile.Longitude = stored.Longitude
+		profile.AverageSpend = stored.AverageSpend
+		if strings.TrimSpace(stored.Gallery) != "" {
+			if err := json.Unmarshal([]byte(stored.Gallery), &profile.Gallery); err != nil {
+				return nil, fmt.Errorf("场地图册数据损坏: %w", err)
+			}
+		}
+	}
+
+	if profile.CoverImage != "" && profile.Description != "" && profile.Address != "" && profile.Latitude != 0 && profile.Longitude != 0 && len(profile.Gallery) > 0 {
+		return profile, nil
+	}
+	var legacy models.Activity
+	err = s.DB.WithContext(ctx).
+		Where("organizer_id = ? AND type = ? AND status = ? AND is_hidden = 0", organizerID, models.ActivityTypeVenue, models.ActivityStatusOnline).
+		Order("id DESC").First(&legacy).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return profile, nil
+		}
+		return nil, err
+	}
+	fillAdminVenueProfileFromLegacy(profile, legacy)
+	return profile, nil
+}
+
+func fillAdminVenueProfileFromLegacy(profile *types.OrganizerVenueProfileInput, legacy models.Activity) {
+	if profile.CoverImage == "" {
+		profile.CoverImage = firstAdminNonEmpty(legacy.PosterList, legacy.PosterDetail, legacy.PosterWechat, legacy.PosterLong)
+	}
+	if profile.Description == "" {
+		profile.Description = legacy.Description
+	}
+	if profile.Address == "" {
+		profile.Address = legacy.Address
+	}
+	if profile.Latitude == 0 {
+		profile.Latitude = legacy.Latitude
+	}
+	if profile.Longitude == 0 {
+		profile.Longitude = legacy.Longitude
+	}
+	if len(profile.Gallery) == 0 {
+		profile.Gallery = uniqueAdminImageURLs(legacy.PosterDetail, legacy.PosterLong, legacy.PosterList, legacy.PosterWechat)
+	}
+}
+
+func firstAdminNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func uniqueAdminImageURLs(values ...string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, req types.AdminAuditOrganizerRequest) error {

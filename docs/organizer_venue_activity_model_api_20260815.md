@@ -144,13 +144,17 @@ PUT /api/v1/admin/organizers/:id/audit
   "status": 2,
   "audit_kind": "profile_revision",
   "has_pending_profile_revision": true,
+  "pending_profile_status": 1,
   "pending_profile_reason": ""
 }
 ```
 
 - `audit_kind = initial`：首次入驻审核，`status=1`。
-- `audit_kind = profile_revision`：已通过场地的资料二审，主办方 `status` 保持 `2`。
-- 详情接口返回 `pending_profile_revision` 供管理员比对新旧资料。
+- `audit_kind = profile_revision`：已通过场地的资料二审或其驳回态，主办方 `status` 保持 `2`。
+- `pending_profile_status = 1`：场地资料修改待审；`3`：场地资料修改已驳回；`0`：没有资料修改稿。
+- 详情接口同时返回当前线上 `venue_profile` 与修改稿 `pending_profile_revision`，供管理员比对新旧资料。
+- 对尚未完成资料迁移的存量场地，详情接口会以最近一条已公开旧场地活动补齐空的封面、海报图册、介绍和定位；新 `organizer_profiles` 中已有的字段始终优先。
+- 详情接口返回 `follower_count`：场地统计 `venue` 关注，普通活动组织者统计 `organizer` 关注；不计入商家本人关注自己的记录。
 
 审核请求不变：
 
@@ -277,7 +281,7 @@ GET /api/v1/organizer/followers?page=1&pageSize=20&keyword=小王
 Authorization: Bearer <access_token>
 ```
 
-返回当前登录主办方被关注的用户。接口合并历史用户关注 `user`、商家主页 `organizer`；固定场地额外合并场地卡片 `venue`，并按 `user_id` 去重。
+返回当前登录主办方实体被关注的用户：固定场地及仍保留已公开旧场地活动的存量商家查询场地卡片关注 `venue`，普通活动组织者查询商家主页关注 `organizer`。不混入个人账号的 `user_follow` 关系，并按 `user_id` 去重。
 
 ```json
 {
