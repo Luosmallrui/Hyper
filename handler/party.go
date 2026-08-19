@@ -86,7 +86,8 @@ func (pc *Merchant) GetPartyGoods(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "商家ID无效")
 	}
 	goods := make([]models.Product, 0)
-	if err := pc.DB.WithContext(c.Request.Context()).Where("party_id = ?", partyID).Find(&goods).Error; err != nil {
+	// 只返回上架商品（status: 0-下架, 1-上架）
+	if err := pc.DB.WithContext(c.Request.Context()).Where("party_id = ? AND status = ?", partyID, 1).Find(&goods).Error; err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"list": goods, "total": len(goods)})

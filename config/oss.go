@@ -7,6 +7,8 @@ type OssConfig struct {
 	Bucket           string `json:"bucket" yaml:"bucket"`
 	AccessKeyID      string `json:"ak" yaml:"ak"`
 	AccessKeySecret  string `json:"sk" yaml:"sk"`
+	// CDNBaseURL 可选：图片访问的 CDN 域名前缀，缺省保持线上现状
+	CDNBaseURL string `json:"cdn_base_url" yaml:"cdn_base_url"`
 }
 
 func ProvideOssConfig(cfg *Config) *OssConfig {

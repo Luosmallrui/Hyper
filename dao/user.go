@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	mysql "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -41,13 +42,28 @@ func (u *Users) GetOrCreateByOpenID(ctx context.Context, openid string) (*models
 func (u *Users) RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error) {
 	var user models.Users
 	// 查找或创建用户
-	err := u.Repo.Db.Where("mobile = ?", phone).First(&user).Error
+	err := u.Repo.Db.WithContext(ctx).Where("mobile = ?", phone).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// phone 不足 7 位时兜底，防止切片越界 panic
+		nickname := "用户"
+		if len(phone) > 7 {
+			nickname = fmt.Sprintf("用户%s", phone[7:])
+		} else if len(phone) > 0 {
+			nickname = fmt.Sprintf("用户%s", phone)
+		}
 		user = models.Users{
 			Mobile:   phone,
-			Nickname: fmt.Sprintf("用户%s", phone[7:]), // 默认昵称
+			Nickname: nickname, // 默认昵称
 		}
-		if err := u.Repo.Db.Create(&user).Error; err != nil {
+		if err := u.Repo.Db.WithContext(ctx).Create(&user).Error; err != nil {
+			// mobile 上有唯一索引 uk_mobile，并发注册时捕获 1062 冲突后重查
+			var me *mysql.MySQLError
+			if errors.As(err, &me) && me.Number == 1062 {
+				if qErr := u.Repo.Db.WithContext(ctx).Where("mobile = ?", phone).First(&user).Error; qErr != nil {
+					return nil, fmt.Errorf("查询用户失败: %w", qErr)
+				}
+				return &user, nil
+			}
 			return nil, fmt.Errorf("创建用户失败: %w", err)
 		}
 	} else if err != nil {

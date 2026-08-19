@@ -3,9 +3,13 @@ package dao
 import (
 	"Hyper/models"
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 )
+
+// ErrInsufficientBalance 扣减积分时余额不足（或账户不存在），更新未生效
+var ErrInsufficientBalance = errors.New("insufficient balance")
 
 type Point struct {
 	Repo[models.UserPoint]
@@ -47,16 +51,30 @@ func (p *Point) CreatePointLog(ctx context.Context, log *models.PointsLog) error
 }
 
 func (p *Point) UpdateBalance(ctx context.Context, userID uint64, amount int64) (int64, error) {
-	result := p.Db.WithContext(ctx).Model(&models.UserPoint{}).
-		Where("user_id = ?", userID).
-		Updates(map[string]interface{}{
-			// gorm.Expr 保证了并发下的原子加减，避免数据覆盖
-			"balance":      gorm.Expr("balance + ?", amount),
-			"total_earned": gorm.Expr("total_earned + ?", amount),
-		})
+	updates := map[string]interface{}{
+		// gorm.Expr 保证了并发下的原子加减，避免数据覆盖
+		"balance": gorm.Expr("balance + ?", amount),
+	}
+	db := p.Db.WithContext(ctx).Model(&models.UserPoint{}).Where("user_id = ?", userID)
+	if amount >= 0 {
+		// 入账累加总获取
+		updates["total_earned"] = gorm.Expr("total_earned + ?", amount)
+	} else {
+		// 扣减累加总消耗，且要求余额足够，防止扣成负数
+		updates["total_used"] = gorm.Expr("total_used + ?", -amount)
+		db = db.Where("balance + ? >= 0", amount)
+	}
+	result := db.Updates(updates)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	// 扣减场景下 0 行受影响说明余额不足或账户不存在，返回明确错误
+	if amount < 0 && result.RowsAffected == 0 {
+		return 0, ErrInsufficientBalance
+	}
 
 	// 返回受影响的行数，用于 Service 判断是否需要“自动开户”
-	return result.RowsAffected, result.Error
+	return result.RowsAffected, nil
 }
 
 // GetPendingStats 统计待入账数据

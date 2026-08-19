@@ -20,9 +20,13 @@ import (
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
+// defaultCDNBaseURL 维持线上现状的默认 CDN 域名（可在 oss.cdn_base_url 配置覆盖）
+const defaultCDNBaseURL = "https://cdn.hypercn.cn/"
+
 type OssService struct {
 	Client     *oss.Client
 	BucketName string
+	CDNBaseURL string
 	ImageRepo  *dao.Image
 }
 
@@ -127,7 +131,7 @@ func (s *OssService) UploadIcon(ctx context.Context, header *multipart.FileHeade
 		return nil, err
 	}
 
-	url := "https://cdn.hypercn.cn/" + objectKey
+	url := s.CDNBaseURL + objectKey
 	resp := &types.UploadImageResp{
 		ImageID: imageID,
 		Url:     url,
@@ -232,7 +236,7 @@ func (s *OssService) UploadImage(ctx context.Context, userID int, header *multip
 	if err != nil {
 		return nil, err
 	}
-	url := "https://cdn.hypercn.cn/" + objectKey
+	url := s.CDNBaseURL + objectKey
 	//tag := llm.GenNoteTag(ctx, url+"?x-oss-process=image/resize,w_100")
 	resp := &types.UploadImageResp{
 		ImageID:   imageID,
@@ -280,9 +284,19 @@ func NewOssService(cfg *config.OssConfig, imageRepo *dao.Image) IOssService {
 
 	client := oss.NewClient(ossCfg)
 
+	// CDN 域名可配置；缺省保持线上现状，并保证以 "/" 结尾
+	cdnBaseURL := cfg.CDNBaseURL
+	if cdnBaseURL == "" {
+		cdnBaseURL = defaultCDNBaseURL
+	}
+	if !strings.HasSuffix(cdnBaseURL, "/") {
+		cdnBaseURL += "/"
+	}
+
 	return &OssService{
 		Client:     client,
 		BucketName: cfg.Bucket,
+		CDNBaseURL: cdnBaseURL,
 		ImageRepo:  imageRepo,
 	}
 }
@@ -372,7 +386,7 @@ func (s *OssService) SignURL(
 	result, err := s.Client.Presign(ctx, &oss.PutObjectRequest{
 		Bucket: oss.Ptr(s.BucketName),
 		Key:    oss.Ptr(objectKey),
-	}, oss.PresignExpires(time.Duration(expireSeconds)))
+	}, oss.PresignExpires(time.Duration(expireSeconds)*time.Second))
 	if err != nil {
 		return "", err
 	}

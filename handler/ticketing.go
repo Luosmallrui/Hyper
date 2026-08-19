@@ -5,14 +5,17 @@ import (
 	"Hyper/dao"
 	"Hyper/middleware"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/pkg/response"
 	"Hyper/pkg/snowflake"
 	"Hyper/service"
 	"Hyper/types"
+	stdcontext "context"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -20,6 +23,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	mysql "github.com/go-sql-driver/mysql"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -155,7 +160,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 	{
 		verifier.GET("/activation-info", h.wrap(h.GetVerifierActivationInfo))
 		verifier.POST("/activate", auth, h.wrap(h.ActivateVerifier))
-		verifier.POST("/scan", h.wrap(h.ScanOrder))
+		verifier.POST("/scan", auth, h.wrap(h.ScanOrder))
 		verifier.POST("/confirm", auth, h.wrap(h.ConfirmVerify))
 		verifier.GET("/verified-list", auth, h.wrap(h.ListVerified))
 		verifier.GET("/orders/:order_no", auth, h.wrap(h.GetVerifierOrderDetail))
@@ -193,10 +198,45 @@ func (h *Ticketing) ListContentTags(c *gin.Context) error {
 func (h *Ticketing) wrap(fn func(*gin.Context) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := fn(c); err != nil {
-			response.Abort(c, http.StatusInternalServerError, err.Error())
-			return
+			if c.Writer.Written() {
+				log.L.Error("ticketing handler error after response written",
+					zap.String("path", c.Request.URL.Path), zap.Error(err))
+				return
+			}
+			// 已按业务语义构造的错误（含状态码与安全文案）直接透传
+			var be *response.BizError
+			if errors.As(err, &be) {
+				response.Abort(c, be.Code, be.Msg)
+				return
+			}
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				response.Abort(c, http.StatusNotFound, "资源不存在或已被删除")
+				return
+			}
+			if isTicketingSystemError(err) {
+				// 系统错误：记录细节，对外只给通用文案，避免泄露 DB/网络细节
+				log.L.Error("ticketing handler system error",
+					zap.String("path", c.Request.URL.Path), zap.Error(err))
+				response.Abort(c, http.StatusInternalServerError, "系统繁忙，请稍后重试")
+				return
+			}
+			// 业务错误：服务层返回的用户可读文案（如"库存不足"），按 4xx 返回
+			response.Abort(c, http.StatusBadRequest, err.Error())
 		}
 	}
+}
+
+// isTicketingSystemError 识别数据库/网络等基础设施错误，避免把内部细节透传给客户端。
+func isTicketingSystemError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return errors.Is(err, stdcontext.DeadlineExceeded) || errors.Is(err, gorm.ErrInvalidDB)
 }
 
 func (h *Ticketing) GetOrganizerInfo(c *gin.Context) error {

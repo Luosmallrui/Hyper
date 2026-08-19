@@ -8,11 +8,14 @@ import (
 	"Hyper/pkg/utils"
 	"Hyper/types"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/dysmsapi"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -250,19 +253,28 @@ func (s *UserService) BatchGetUserInfo(ctx context.Context, uids []uint64) map[u
 		keys[i] = fmt.Sprintf("user:info:%d", id)
 	}
 
-	cacheRes, _ := s.Redis.MGet(ctx, keys...).Result()
+	cacheRes, mgetErr := s.Redis.MGet(ctx, keys...).Result()
 
 	missingIds := make([]uint64, 0)
-	for i, val := range cacheRes {
-		if val != nil {
-			var info types.UserProfile
-			_ = json.Unmarshal([]byte(val.(string)), &info)
-			if info.UserHashID == "" && info.UserID > 0 {
-				info.UserHashID = s.userHashID(info.UserID)
+	if mgetErr != nil {
+		// 缓存查询失败时全部视为 miss 走 DB 回源，避免用户信息静默丢失
+		missingIds = append(missingIds, uids...)
+	} else {
+		for i, val := range cacheRes {
+			if val != nil {
+				var info types.UserProfile
+				str, ok := val.(string)
+				if !ok || json.Unmarshal([]byte(str), &info) != nil {
+					missingIds = append(missingIds, uids[i])
+					continue
+				}
+				if info.UserHashID == "" && info.UserID > 0 {
+					info.UserHashID = s.userHashID(info.UserID)
+				}
+				result[uids[i]] = info
+			} else {
+				missingIds = append(missingIds, uids[i])
 			}
-			result[uids[i]] = info
-		} else {
-			missingIds = append(missingIds, uids[i])
 		}
 	}
 
@@ -297,16 +309,65 @@ func (s *UserService) userHashID(userID uint64) string {
 	return utils.GenHashID(s.Config.Jwt.Secret, int(userID))
 }
 
-// Modify send sms code 模拟发送短信验证码
+// SendVerifyCode 发送绑定手机号短信验证码。
+// 固定验证码 222444 仅在 dev 环境生效（联调用后门）；其他环境走阿里云短信真实发送。
 func (s *UserService) SendVerifyCode(ctx context.Context, mobile string) error {
-	//先定一个验证码，
-	code := "222444"
-	//存入redis
-	err := s.Redis.Set(ctx, "sms:bind"+mobile, code, 5*time.Minute).Err()
-	if err != nil {
+	code := generateSmsCode(6)
+	if s.Config != nil && s.Config.App != nil && s.Config.App.Env == "dev" {
+		code = "222444"
+	}
+	// 存入redis
+	if err := s.Redis.Set(ctx, "sms:bind"+mobile, code, 5*time.Minute).Err(); err != nil {
 		return err
 	}
-	println("模拟发送短信验证码，验证码为：", code)
+	if code == "222444" {
+		println("模拟发送短信验证码，验证码为：", code)
+		return nil
+	}
+	if err := s.sendSmsCode(mobile, code); err != nil {
+		// 发送失败时清除已写入的验证码，避免用户收到错误码或脏数据
+		s.Redis.Del(ctx, "sms:bind"+mobile)
+		return err
+	}
+	return nil
+}
+
+// generateSmsCode 生成指定长度的数字验证码
+func generateSmsCode(length int) string {
+	const digits = "0123456789"
+	code := make([]byte, length)
+	for i := range code {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(digits))))
+		code[i] = digits[n.Int64()]
+	}
+	return string(code)
+}
+
+// sendSmsCode 通过阿里云短信服务发送验证码（与 SMSService 使用同一套凭证）
+func (s *UserService) sendSmsCode(mobile string, code string) error {
+	client, err := dysmsapi.NewClientWithAccessKey(
+		"cn-chengdu",
+		s.Config.Oss.AccessKeyID,
+		s.Config.Oss.AccessKeySecret,
+	)
+	if err != nil {
+		return fmt.Errorf("创建SMS客户端失败: %w", err)
+	}
+
+	request := dysmsapi.CreateSendSmsRequest()
+	request.Scheme = "https"
+	request.PhoneNumbers = mobile
+	request.SignName = "四川骇铂尔科技"
+	request.TemplateCode = "SMS_499105975"
+	request.TemplateParam = fmt.Sprintf(`{"code":"%s"}`, code)
+
+	response, err := client.SendSms(request)
+	if err != nil {
+		return fmt.Errorf("发送短信失败: %w", err)
+	}
+	if response.Code != "OK" {
+		return fmt.Errorf("短信发送失败: %s", response.Message)
+	}
 	return nil
 }
 
@@ -317,14 +378,27 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 		return errors.New("验证码已过期或未发送")
 	}
 	if cachedCode != inputCode {
+		// 验证码失败次数限制：5 次后作废，需重新获取
+		failKey := "sms:bind_fail" + mobile
+		fails, _ := s.Redis.Incr(ctx, failKey).Result()
+		if fails == 1 {
+			s.Redis.Expire(ctx, failKey, 5*time.Minute)
+		}
+		if fails >= 5 {
+			s.Redis.Del(ctx, "sms:bind"+mobile, failKey)
+			return errors.New("验证码错误次数过多，请重新获取")
+		}
 		return errors.New("验证码错误")
 	}
 
 	existUser, err := s.UsersRepo.FindByMobile(ctx, mobile)
-	if err == nil {
-		if int(existUser.Id) != UserId {
-			return errors.New("该手机号已被绑定")
+	if err != nil {
+		// DB 出错（非记录不存在）时不得跳过手机号已绑定检查
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("查询手机号绑定状态失败: %w", err)
 		}
+	} else if existUser != nil && int(existUser.Id) != UserId {
+		return errors.New("该手机号已被绑定")
 	}
 	err = s.UsersRepo.UpdateById(ctx, int64(UserId), map[string]any{
 		"mobile":     mobile,
@@ -332,7 +406,7 @@ func (s *UserService) UpdateMobileWithSms(ctx context.Context, mobile string, Us
 	})
 
 	if err == nil {
-		s.Redis.Del(ctx, "sms:bind"+mobile)
+		s.Redis.Del(ctx, "sms:bind"+mobile, "sms:bind_fail"+mobile)
 	}
 	return err
 

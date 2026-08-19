@@ -26,6 +26,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	redisClient := client.NewRedisClient(cfg)
 	weChatService := &service.WeChatService{
 		Config: cfg,
+		Redis:  redisClient,
 	}
 	userService := &service.UserService{
 		Config:        cfg,

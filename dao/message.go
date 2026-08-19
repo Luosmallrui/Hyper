@@ -15,11 +15,7 @@ func NewMessageDAO(db *gorm.DB) *MessageDAO {
 }
 
 func (d *MessageDAO) Save(msg *models.ImSingleMessage) error {
-	//table := "im_single_messages"
-	//if msg.SessionType == 2 {
-	//	table = "im_group_messages"
-	//}
-	return d.db.Create(msg).Error
+	return d.SaveSingle(msg)
 }
 
 // 保存单聊消息（im_single_messages）

@@ -4,13 +4,17 @@ import (
 	"Hyper/pkg/socket"
 	"context"
 	"log"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 )
 
 type handle func(ctx context.Context, client socket.IClient, data []byte)
 
-var handlers map[string]handle
+var (
+	handlers     map[string]handle
+	handlersOnce sync.Once
+)
 
 type Handler struct {
 	Redis *redis.Client
@@ -27,9 +31,8 @@ func (h *Handler) init() {
 
 func (h *Handler) Call(ctx context.Context, client socket.IClient, event string, data []byte) {
 
-	if handlers == nil {
-		h.init()
-	}
+	// 懒初始化注册表，sync.Once 保证并发安全
+	handlersOnce.Do(h.init)
 
 	if call, ok := handlers[event]; ok {
 		call(ctx, client, data)

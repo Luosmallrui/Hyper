@@ -20,7 +20,8 @@ var ProviderSet = wire.NewSet(
 	wire.Struct(new(NoteService), "*"),
 	wire.Bind(new(INoteService), new(*NoteService)),
 
-	wire.Struct(new(MessageService), "*"),
+	// dmCache* 为非导出的进程内缓存字段，不能用 "*" 让 wire 注入，需显式列出导出字段
+	wire.Struct(new(MessageService), "MessageDao", "UserService", "GroupMemberDAO", "GroupDAO", "MqProducer", "Redis", "DB", "NoteDAO"),
 	wire.Bind(new(IMessageService), new(*MessageService)),
 
 	wire.Struct(new(MerchantService), "*"),

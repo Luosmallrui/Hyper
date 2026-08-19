@@ -1,4 +1,4 @@
-package handler
+package rpc
 
 import (
 	"Hyper/pkg/log"
@@ -28,15 +28,14 @@ func (s *PushServiceImpl) PushToClient(
 	req *push.PushRequest,
 ) (*push.PushResponse, error) {
 
-	// trace 前缀：一条消息贯穿全链路
+	// trace 前缀：一条消息贯穿全链路（不打印 payload，避免聊天内容落日志）
 	trace := fmt.Sprintf(
-		"[PUSH msg=%s uid=%d cid=%d event=%s]",
-		req.Payload, //q 如果太长，下面会优化
+		"[PUSH uid=%d cid=%d event=%s]",
 		req.Uid,
 		req.Cid,
 		req.Event,
 	)
-	log.L.Info("enter PushToClient", zap.Any("trace", trace))
+	log.L.Debug("enter PushToClient", zap.Any("trace", trace))
 
 	ch := socket.Session.Chat
 	if ch == nil {
@@ -133,6 +132,10 @@ func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.Batch
 		log.L.Error("ch is nil")
 		return &push.PushResponse{Success: false, Msg: "chat channel not initialized"}, nil
 	}
+	// 没有目标客户端时直接返回，避免无谓的解析和查库
+	if len(req.Cids) == 0 {
+		return &push.PushResponse{Success: false, Msg: "success:0, fail:0"}, nil
+	}
 	if req.Event != "chat" {
 		return s.batchPushEvent(ch, req)
 	}
@@ -180,8 +183,8 @@ func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.Batch
 	// 3. 循环推送给不同的 CID
 	successCount := 0
 	failCount := 0
-	var user types.UserProfile
-	_ = s.Db.WithContext(ctx).Table("users").Select("avatar", "nickname").Where("id = ?", m.SenderID).Take(&user).Error
+	// 发送者信息走带 Redis 缓存的批量查询，避免推送热路径每条消息都裸查 users 表
+	user := s.BatchGetUserInfo(ctx, []uint64{uint64(m.SenderID)})[uint64(m.SenderID)]
 	for _, cid := range req.Cids {
 		client, ok := ch.Client(cid)
 		if !ok {
@@ -198,7 +201,7 @@ func (s *PushServiceImpl) BatchPushToClient(ctx context.Context, req *push.Batch
 			NickName: user.Nickname,
 			Avatar:   user.Avatar,
 		}
-		log.L.Info("push res", zap.Any("res", res))
+		log.L.Debug("push res", zap.Any("res", res))
 
 		// 执行写入
 		if err := client.Write(res); err != nil {

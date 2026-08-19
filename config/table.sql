@@ -998,3 +998,33 @@ INSERT IGNORE INTO `refund_reasons` (`id`, `reason`, `sort`) VALUES
     (1, '行程冲突', 1),
     (2, '重复购买', 2),
     (3, '其他原因', 99);
+
+-- 笔记点赞记录（2026-08-20 补充：历史遗留表，若线上已存在只需执行下方 ALTER 加唯一索引）
+CREATE TABLE IF NOT EXISTS `note_likes`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `note_id`    bigint unsigned NOT NULL COMMENT '笔记ID',
+    `user_id`    bigint unsigned NOT NULL COMMENT '用户ID',
+    `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1:已点赞 0:已取消',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_note_user` (`note_id`, `user_id`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='笔记点赞记录表';
+
+-- 笔记收藏记录
+CREATE TABLE IF NOT EXISTS `note_collections`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `note_id`    bigint unsigned NOT NULL COMMENT '笔记ID',
+    `user_id`    bigint unsigned NOT NULL COMMENT '用户ID',
+    `status`     tinyint         NOT NULL DEFAULT 1 COMMENT '1:已收藏 0:已取消',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uk_note_user` (`note_id`, `user_id`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='笔记收藏记录表';

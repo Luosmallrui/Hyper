@@ -124,10 +124,10 @@ type CountGroupMember struct {
 	Count   int `gorm:"column:count;"`
 }
 
-func (g *GroupMember) CountGroupMemberNum(ids []int) ([]*CountGroupMember, error) {
+func (g *GroupMember) CountGroupMemberNum(ctx context.Context, ids []int) ([]*CountGroupMember, error) {
 
 	var items []*CountGroupMember
-	err := g.Repo.Model(context.TODO()).Select("group_id,count(*) as count").Where("group_id in ? and is_quit = 0", ids).Group("group_id").Scan(&items).Error
+	err := g.Repo.Model(ctx).Select("group_id,count(*) as count").Where("group_id in ? and is_quit = 0", ids).Group("group_id").Scan(&items).Error
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +135,10 @@ func (g *GroupMember) CountGroupMemberNum(ids []int) ([]*CountGroupMember, error
 	return items, nil
 }
 
-func (g *GroupMember) CheckUserGroup(ids []int, userId int) ([]int, error) {
+func (g *GroupMember) CheckUserGroup(ctx context.Context, ids []int, userId int) ([]int, error) {
 	items := make([]int, 0)
 
-	err := g.Repo.Model(context.TODO()).Select("group_id").Where("group_id in ? and user_id = ? and is_quit = 0", ids, userId).Scan(&items).Error
+	err := g.Repo.Model(ctx).Select("group_id").Where("group_id in ? and user_id = ? and is_quit = 0", ids, userId).Scan(&items).Error
 	if err != nil {
 		return nil, err
 	}

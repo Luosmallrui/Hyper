@@ -12,21 +12,19 @@ func GenerateOutTradeNo(prefix string, orderID int64) string {
 	return fmt.Sprintf("%s%s%d", prefix, now, orderID)
 }
 
-// GenerateOrderSn 生成你喜欢的格式：ORD + 20260124153005 + 8899 + 123
+// GenerateOrderSn 生成订单号：时间(14位) + 用户ID后4位 + 6位随机数
+// 结果示例: 202601241530058899123456（纯数字字符串，长度可变，向后兼容）
 func GenerateOrderSn(userId int) string {
 	// 1. 获取当前时间 (14位: YYYYMMDDHHMMSS)
-	// 如果觉得长，可以用 "060102150405" 缩减到 12 位
 	now := time.Now().Format("20060102150405")
 
 	// 2. 取用户ID后4位 (不足4位补0)
 	// 这样可以确保同一个用户的订单在数据库物理分布上更趋近，利于分库分表
 	userSuffix := fmt.Sprintf("%04d", userId%10000)
 
-	// 3. 生成3位随机数
-	// rand.IntN(900) + 100 产生 100-999
-	randomNum := rand.IntN(900) + 100
+	// 3. 生成6位随机数，避免同秒同用户并发下单撞号
+	randomNum := rand.IntN(1000000)
 
 	// 4. 拼接并返回
-	// 结果示例: ORD202601241530058899123
-	return fmt.Sprintf("%s%s%d", now, userSuffix, randomNum)
+	return fmt.Sprintf("%s%s%06d", now, userSuffix, randomNum)
 }

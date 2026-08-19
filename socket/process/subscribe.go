@@ -80,7 +80,9 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 	}
 
 	// 2) 抢占处理锁：抢不到说明其他进程/协程正在处理 -> 返回 error（不要 Ack，让 MQ 重试）
-	ok, err := m.Redis.SetNX(ctx, lockKey, 1, 2*time.Minute).Result()
+	// TTL 取 5 分钟：需要覆盖“入库+会话更新+缓存”的最坏耗时；处理过长超过 TTL 时锁会过期，
+	// 其他消费者可能并发重入，但关键路径均有幂等兜底（入库去重、doneKey），可接受
+	ok, err := m.Redis.SetNX(ctx, lockKey, 1, 5*time.Minute).Result()
 	if err != nil {
 		return err
 	}
@@ -224,7 +226,11 @@ func (m *MessageSubscribe) handleMessage(ctx context.Context, msgs *rmq_client.M
 		}
 		// 6) 推送异步
 		go func(copyMsg types.Message, members []string) {
-			m.dispatchToGroup(ctx, &copyMsg, members)
+			// MQ 消费 ctx 会随 Ack/重试被取消，推送改用独立 background ctx（与单聊一致），
+			// 群聊扇出大，超时放宽到 30s
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			m.dispatchToGroup(bgCtx, &copyMsg, members)
 		}(imMsg, memberUIDs)
 
 	default:
@@ -475,8 +481,7 @@ func (m *MessageSubscribe) GetUserRoute(ctx context.Context, uid int) (map[strin
 	// 1. 一键获取该用户所有的 clientId 和对应的 serverId
 	// Key: im:user:location:100 -> { "c1": "sid_A", "c2": "sid_A", "c3": "sid_B" }
 	results, err := m.Redis.HGetAll(ctx, fmt.Sprintf("im:user:location:%d", uid)).Result()
-	//测试
-	log.L.Info("[DEBUG] HGetAll route raw",
+	log.L.Debug("HGetAll route raw",
 		zap.Int("uid", uid),
 		zap.Int("count", len(results)),
 		zap.Any("raw", results),
@@ -497,27 +502,69 @@ func (m *MessageSubscribe) GetUserRoute(ctx context.Context, uid int) (map[strin
 }
 
 func (m *MessageSubscribe) dispatchToGroup(ctx context.Context, msg *types.Message, members []string) {
-	const maxFanout = 32
-	sem := make(chan struct{}, maxFanout)
-	var wg sync.WaitGroup
-
+	// 批量获取所有成员路由：一次 pipeline 往返，避免 500 人群产生 500 次 HGetAll 往返
+	pipe := m.Redis.Pipeline()
+	type memberRoute struct {
+		uid int
+		cmd *redis.MapStringStringCmd
+	}
+	routes := make([]memberRoute, 0, len(members))
 	for _, uidStr := range members {
 		uid, err := strconv.Atoi(uidStr)
-		if err != nil {
+		if err != nil || uid == 0 {
 			continue
 		}
-
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(receiver int) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			m.doBatchPush(ctx, int(msg.SenderID), msg, receiver)
-		}(uid)
+		routes = append(routes, memberRoute{
+			uid: uid,
+			cmd: pipe.HGetAll(ctx, fmt.Sprintf("im:user:location:%d", uid)),
+		})
+	}
+	if len(routes) == 0 {
+		return
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		log.L.Error("[PUSH] batch get group routes failed", zap.Error(err), zap.Int64("group_id", msg.TargetID))
 	}
 
-	wg.Wait()
+	// 按目标 server 聚合 cid，每台 server 只发一次 BatchPush
+	serverCids := make(map[string][]int64)
+	for _, r := range routes {
+		result, err := r.cmd.Result()
+		if err != nil {
+			if !errors.Is(err, redis.Nil) {
+				log.L.Error("[PUSH] get member route failed", zap.Error(err), zap.Int("uid", r.uid))
+			}
+			continue
+		}
+		for cidStr, sid := range result {
+			cid, err := strconv.ParseInt(cidStr, 10, 64)
+			if err != nil {
+				continue
+			}
+			serverCids[sid] = append(serverCids[sid], cid)
+		}
+	}
+	if len(serverCids) == 0 {
+		return
+	}
+
+	payload, _ := json.Marshal(msg)
+	for sid, cids := range serverCids {
+		cli, err := m.getRpcClient(sid)
+		if err != nil {
+			log.L.Error("获取 RPC 客户端失败", zap.String("sid", sid), zap.Error(err))
+			continue
+		}
+		// 注：BatchPush 服务端按 Cids 逐个投递，不使用 Uid 字段
+		if _, err := cli.BatchPushToClient(ctx, &push.BatchPushRequest{
+			Cids:    cids,
+			Uid:     0,
+			Payload: string(payload),
+			Event:   "chat",
+		}); err != nil {
+			log.L.Error("群聊批量推送失败", zap.Error(err), zap.String("sid", sid), zap.Int("count", len(cids)))
+		}
+	}
 }
 
 func (m *MessageSubscribe) updateCacheGroup(ctx context.Context, msg *types.Message, members []string) error {

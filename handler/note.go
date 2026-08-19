@@ -40,9 +40,11 @@ type Note struct {
 func (n *Note) RegisterRouter(r gin.IRouter) {
 	authorize := middleware.Auth([]byte(n.Config.Jwt.Secret))
 	optionalAuth := middleware.OptionalAuth([]byte(n.Config.Jwt.Secret))
+	// /gen 会全表扫描并逐条发 MQ，仅限管理端触发
+	adminAuth := middleware.AdminAuth([]byte(n.Config.Jwt.Secret))
 	g := r.Group("/v1/note")
 
-	g.GET("/gen", authorize, context.Wrap(n.Gen))
+	g.GET("/gen", adminAuth, context.Wrap(n.Gen))
 	g.POST("/upload", authorize, context.Wrap(n.UploadImage))
 	g.GET("/upload/:image_id/tags", authorize, context.Wrap(n.GetUploadImageTags))
 	g.POST("/create", authorize, context.Wrap(n.CreateNote))
@@ -305,6 +307,19 @@ func imageTagError(status int) string {
 	return ""
 }
 
+// maxNotePageSize 列表接口单页上限，超出 silently cap，避免超大 pageSize 拖垮查询
+const maxNotePageSize = 100
+
+func capNotePageSize(size int) int {
+	if size <= 0 {
+		return types.DefaultPageSize
+	}
+	if size > maxNotePageSize {
+		return maxNotePageSize
+	}
+	return size
+}
+
 func (n *Note) ListNote(c *gin.Context) error {
 	userId := c.GetInt("user_id")
 
@@ -316,6 +331,7 @@ func (n *Note) ListNote(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
+	req.PageSize = capNotePageSize(req.PageSize)
 	var resp types.ListNotesRep
 	var err error
 	if req.SearchType == "follow" {
@@ -367,6 +383,7 @@ func (n *Note) ListFollowedNotes(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
+	req.PageSize = capNotePageSize(req.PageSize)
 
 	rep, err := n.NoteService.GetFollowedPosts(c.Request.Context(), userID, req.Cursor, req.PageSize)
 	if err != nil {
@@ -399,6 +416,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
+	req.PageSize = capNotePageSize(req.PageSize)
 	// 仅当未提供 status 参数时，默认查询公开状态
 	if c.Query("status") == "" {
 		req.Status = types.NoteStatusDefaultQuery
@@ -468,6 +486,7 @@ func (n *Note) GetMyCollections(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
+	req.PageSize = capNotePageSize(req.PageSize)
 
 	limit := req.PageSize
 	offset := (req.Page - 1) * req.PageSize
@@ -502,6 +521,7 @@ func (n *Note) GetMyLikes(c *gin.Context) error {
 	if req.PageSize == 0 {
 		req.PageSize = types.DefaultPageSize
 	}
+	req.PageSize = capNotePageSize(req.PageSize)
 	notes, total, err := n.LikeService.GetUserLikes(c.Request.Context(), uint64(userID), req.PageSize, (req.Page-1)*req.PageSize)
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())

@@ -31,12 +31,9 @@ func NewRegistry(cfg *config.NacosConfig) registry.Registry {
 		ServerConfigs: sc,
 	})
 	if err != nil {
-		log.L.Info("Nacos 无法连接: ", zap.Error(err))
+		log.L.Fatal("Nacos 无法连接: ", zap.Error(err))
 	}
 	r := nacosreg.NewNacosRegistry(cli)
-	if err != nil {
-		log.L.Fatal("err", zap.Error(err))
-	}
 	log.L.Info("nacos registry created")
 	return r
 }

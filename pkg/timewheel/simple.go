@@ -1,6 +1,7 @@
 package timewheel
 
 import (
+	"sync/atomic"
 	"time"
 
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -18,7 +19,7 @@ type entry[T any] struct {
 type SimpleTimeWheel[T any] struct {
 	interval  time.Duration                           // 时间轮转动间隔
 	ticker    *time.Ticker                            // 定时器
-	tickIndex int                                     // 当前刻度
+	tickIndex atomic.Int64                            // 当前刻度
 	slot      []cmap.ConcurrentMap[string, *entry[T]] // 时间轮槽位
 	indicator cmap.ConcurrentMap[string, int]         // 任务索引
 	onTick    SimpleHandler[T]                        // 任务处理函数
@@ -79,12 +80,13 @@ func (t *SimpleTimeWheel[T]) run() {
 			t.ticker.Stop()
 			return
 		case <-t.ticker.C:
-			tickIndex := t.tickIndex
+			tickIndex := int(t.tickIndex.Load())
 
-			t.tickIndex++
-			if t.tickIndex >= len(t.slot) {
-				t.tickIndex = 0
+			next := tickIndex + 1
+			if next >= len(t.slot) {
+				next = 0
 			}
+			t.tickIndex.Store(int64(next))
 
 			slot := t.slot[tickIndex]
 			for item := range slot.IterBuffered() {
@@ -108,7 +110,11 @@ func (t *SimpleTimeWheel[T]) run() {
 
 // Add 添加任务
 func (t *SimpleTimeWheel[T]) Add(key string, value T, delay time.Duration) {
-	t.taskChan <- &entry[T]{key: key, value: value, expire: time.Now().Add(delay).Unix()}
+	// Stop 之后 Start 循环已退出，此时直接丢弃任务，避免向无人消费的 taskChan 写入导致永久阻塞
+	select {
+	case t.taskChan <- &entry[T]{key: key, value: value, expire: time.Now().Add(delay).Unix()}:
+	case <-t.quitChan:
+	}
 }
 
 func (t *SimpleTimeWheel[T]) Remove(key string) {
@@ -125,5 +131,5 @@ func (t *SimpleTimeWheel[T]) getCircleAndSlot(e *entry[T]) int {
 		remainingTime = 0
 	}
 
-	return (t.tickIndex + remainingTime/int(t.interval.Seconds())) % len(t.slot)
+	return (int(t.tickIndex.Load()) + remainingTime/int(t.interval.Seconds())) % len(t.slot)
 }

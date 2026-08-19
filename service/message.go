@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
@@ -29,12 +30,25 @@ type MessageService struct {
 	Redis          *redis.Client
 	DB             *gorm.DB
 	NoteDAO        *dao.NoteDAO
+
+	// 私信平台开关的短 TTL 进程内缓存，避免每条消息都查 platform_setting 表
+	dmCacheMu      sync.Mutex
+	dmCacheExpires time.Time
+	dmCacheEnabled bool
+	dmCacheSvcUID  int64
 }
 
 var (
 	ErrGroupNotFound         = errors.New("群不存在或已解散")
 	ErrNotGroupMember        = errors.New("你不在群内或已退群")
 	ErrDirectMessageDisabled = errors.New("平台已关闭私信功能")
+)
+
+const (
+	// sendMessageTimeout 约束 SendMessage 全链路（DB 校验/卡片补全/MQ 发送）
+	sendMessageTimeout = 10 * time.Second
+	// dmSettingsCacheTTL 私信开关进程内缓存的有效期
+	dmSettingsCacheTTL = 30 * time.Second
 )
 
 var _ IMessageService = (*MessageService)(nil)
@@ -343,8 +357,12 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	if err := normalizeMessagePayload(msg); err != nil {
 		return err
 	}
+	// SendMessage 没有请求级 ctx（由 ws/内部调用触发），但不能裸用
+	// context.Background()：DB 校验/卡片补全/MQ Send 任一环节挂死都会永久阻塞。
+	ctx, cancel := context.WithTimeout(context.Background(), sendMessageTimeout)
+	defer cancel()
 	if msg.SessionType == types.SessionTypeSingle {
-		allowed, err := s.directMessageAllowed(context.Background(), msg.SenderID, msg.TargetID)
+		allowed, err := s.directMessageAllowed(ctx, msg.SenderID, msg.TargetID)
 		if err != nil {
 			return err
 		}
@@ -386,7 +404,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		uid := int(msg.SenderID) // 发送者ID
 
 		// 3.1) 查群成员记录：是否成员/是否退群/角色/个人禁言
-		m, err := s.GroupMemberDAO.FindByUserId(context.Background(), gid, uid)
+		m, err := s.GroupMemberDAO.FindByUserId(ctx, gid, uid)
 		if err != nil || m.IsQuit == 1 {
 			return fmt.Errorf("你不在群内或已退群")
 		}
@@ -397,7 +415,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		}
 
 		// 3.3) 群全员禁言：只禁普通成员(role=3)，群主/管理员仍可发言
-		g, err := s.GroupDAO.FindByID(context.Background(), gid)
+		g, err := s.GroupDAO.FindByID(ctx, gid)
 		if err != nil {
 			return fmt.Errorf("群不存在")
 		}
@@ -411,12 +429,12 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 
 	// 5) 卡片消息：转发帖子卡片（服务端补全卡片信息，防止前端伪造）
 	if msg.MsgType == types.MsgTypeCard {
-		if err := s.fillNoteForwardCard(context.Background(), msg); err != nil {
+		if err := s.fillNoteForwardCard(ctx, msg); err != nil {
 			return err
 		}
 	}
 	if msg.MsgType == types.MsgTypeActivity {
-		if err := s.fillActivityCard(context.Background(), msg); err != nil {
+		if err := s.fillActivityCard(ctx, msg); err != nil {
 			return err
 		}
 	}
@@ -432,7 +450,7 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 		Body:  body,
 	}
 
-	_, err = s.MqProducer.Send(context.Background(), mqMsg)
+	_, err = s.MqProducer.Send(ctx, mqMsg)
 	if err != nil {
 		return err
 	}
@@ -440,10 +458,22 @@ func (s *MessageService) SendMessage(msg *types.Message) error {
 	return nil
 }
 
-// directMessageAllowed reads the platform switch at send time so configuration
-// changes are effective immediately. The configured customer-service account
-// remains available when ordinary user DMs are closed.
+// directMessageAllowed reads the platform switch with a short in-process TTL
+// cache (30s) so per-message sends do not hit platform_setting every time;
+// configuration changes take effect within the TTL. The configured
+// customer-service account remains available when ordinary user DMs are closed.
 func (s *MessageService) directMessageAllowed(ctx context.Context, senderID, targetID int64) (bool, error) {
+	s.dmCacheMu.Lock()
+	if time.Now().Before(s.dmCacheExpires) {
+		enabled, serviceUserID := s.dmCacheEnabled, s.dmCacheSvcUID
+		s.dmCacheMu.Unlock()
+		if enabled {
+			return true, nil
+		}
+		return serviceUserID > 0 && (senderID == serviceUserID || targetID == serviceUserID), nil
+	}
+	s.dmCacheMu.Unlock()
+
 	var settings []models.PlatformSetting
 	if err := s.DB.WithContext(ctx).Where("setting_key IN ?", []string{"direct_message_enabled", "customer_service_user_id"}).Find(&settings).Error; err != nil {
 		return false, err
@@ -452,10 +482,18 @@ func (s *MessageService) directMessageAllowed(ctx context.Context, senderID, tar
 	for _, setting := range settings {
 		values[setting.Key] = setting.Value
 	}
-	if platformBoolEnabled(values["direct_message_enabled"], true) {
+	enabled := platformBoolEnabled(values["direct_message_enabled"], true)
+	serviceUserID, _ := strconv.ParseInt(values["customer_service_user_id"], 10, 64)
+
+	s.dmCacheMu.Lock()
+	s.dmCacheEnabled = enabled
+	s.dmCacheSvcUID = serviceUserID
+	s.dmCacheExpires = time.Now().Add(dmSettingsCacheTTL)
+	s.dmCacheMu.Unlock()
+
+	if enabled {
 		return true, nil
 	}
-	serviceUserID, _ := strconv.ParseInt(values["customer_service_user_id"], 10, 64)
 	return serviceUserID > 0 && (senderID == serviceUserID || targetID == serviceUserID), nil
 }
 
@@ -506,6 +544,11 @@ func (s *MessageService) generateSessionID(uid1, uid2 int64) string {
 	return fmt.Sprintf("%d_%d", uid2, uid1)
 }
 
+// GetSessionHash 用 FNV-1a 64bit 作为会话唯一键。
+// 兼容性说明：该值已落库为历史消息的 session_hash，任何算法调整都会让
+// 既有会话失效，因此【禁止修改】。需注意 FNV-1a 64bit 非加密哈希，理论
+// 上存在碰撞导致串话的风险（64 位空间下概率极低）；如需根治，应通过新增
+// 字段/迁移方案而不是改动此函数。
 func GetSessionHash(uid1, uid2 int64) int64 {
 	// 1. 保证 uid 顺序（从小到大），确保 A_B 和 B_A 生成的哈希一致
 	var rawID string

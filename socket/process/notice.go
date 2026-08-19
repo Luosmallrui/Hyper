@@ -33,7 +33,9 @@ func (m *NoticeSubscribe) Setup(ctx context.Context) error {
 func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.MessageView) error {
 	var event types.SystemMessage
 	if err := json.Unmarshal(msgs.GetBody(), &event); err != nil {
+		// 消息体解析失败，重试无意义，直接返回 nil（上层 Ack）而不是用零值继续推送
 		log.L.Error("unmarshal msg error", zap.Error(err))
+		return nil
 	}
 
 	switch event.Type {
@@ -41,12 +43,14 @@ func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.Mes
 		var data types.FollowPayload
 		if err := json.Unmarshal(event.Data, &data); err != nil {
 			log.L.Error("unmarshal msg error", zap.Error(err))
+			return nil
 		}
 		m.handleFollowNotice(ctx, &data)
 	case "platform_message":
 		var data types.PlatformMessagePayload
 		if err := json.Unmarshal(event.Data, &data); err != nil {
 			log.L.Error("unmarshal platform message error", zap.Error(err))
+			return nil
 		}
 		m.handlePlatformMessage(ctx, &data)
 	}

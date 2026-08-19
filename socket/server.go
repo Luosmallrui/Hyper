@@ -63,8 +63,15 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 
 	// 延时启动守护协程
 	time.AfterFunc(3*time.Second, func() {
-		app.Coroutine.Start(eg, groupCtx)
+		if err := app.Coroutine.Start(eg, groupCtx); err != nil {
+			// MQ 消费者启动失败：记录日志并自我发送 SIGTERM 走优雅退出，交由进程管理器重启
+			log.L.Error("mq consumer start failed", zap.Error(err))
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		}
 	})
+	server.InitServerId(app.Config.Server.Websocket)
 	log.L.Info("server_id", zap.String("server_id", server.GetServerId()))
 	log.L.Info("server Pid", zap.Any("server_pid", os.Getpid()))
 	log.L.Info("server Version", zap.Any("Websocket Listen Port ", app.Config.Server.Websocket))

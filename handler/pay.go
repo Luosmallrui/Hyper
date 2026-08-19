@@ -6,7 +6,6 @@ import (
 	"Hyper/pkg/context"
 	"Hyper/pkg/log"
 	"Hyper/pkg/response"
-	utilBase "Hyper/pkg/utils"
 	"Hyper/service"
 	"Hyper/types"
 	base "context"
@@ -47,7 +46,7 @@ func (p *Pay) RegisterRouter(r gin.IRouter) {
 		pay.POST("/refund/:refund_no/sync", authorize, context.Wrap(p.SyncRefund))
 		pay.POST("/refund-notify", context.Wrap(p.RefundNotify))
 
-		pay.GET("/query/:out_trade_no", context.Wrap(p.QueryOrder))
+		pay.GET("/query/:out_trade_no", authorize, context.Wrap(p.QueryOrder))
 		pay.GET("/receipt", authorize, context.Wrap(p.GetOrderReceipt))
 		pay.GET("/detail", authorize, context.Wrap(p.Detail))
 	}
@@ -90,7 +89,7 @@ func (p *Pay) Detail(c *gin.Context) error {
 		return response.NewError(400, "订单号不能为空")
 	}
 
-	resp, err := p.PayService.OrderDetail(c, OrderSN)
+	resp, err := p.PayService.OrderDetail(c, OrderSN, c.GetInt("user_id"))
 	if err != nil {
 		return response.NewError(500, err.Error())
 	}
@@ -167,9 +166,6 @@ func (p *Pay) Prepay(c *gin.Context) error {
 	}
 
 	userId := c.GetInt("user_id")
-	if req.OutTradeNo == "" {
-		req.OutTradeNo = utilBase.GenerateOrderSn(userId)
-	}
 	openId := c.GetString("openid")
 	req.UserId = userId
 	req.Openid = openId

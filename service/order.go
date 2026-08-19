@@ -13,6 +13,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type OrderService struct {
@@ -142,6 +143,13 @@ func (f *OrderService) AddViewers(ctx context.Context, UserId int, req types.Cre
 		viewerType, err := GetAgeTypeByIDCard(req.IDCard)
 		if err != nil {
 			return err // 已经包含 http code 前缀
+		}
+
+		// 锁住所属用户行，串行化同一用户的并发新增，防止观演人数量检查与插入之间出现竞态超限
+		var user models.Users
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").Where("id = ?", UserId).First(&user).Error; err != nil {
+			return errors.New(fmt.Sprintf("%d:添加失败", http.StatusInternalServerError))
 		}
 
 		var count int64

@@ -74,6 +74,10 @@ func GenNoteTag(ctx context.Context, ossURL string) []string {
 		log.L.Error("failed to gen tag", zap.Error(err))
 		return make([]string, 0)
 	}
+	if len(completion.Choices) == 0 {
+		log.L.Error("failed to gen tag: llm returned no choices")
+		return make([]string, 0)
+	}
 	Content := completion.Choices[0].Message.Content
 	log.L.Info("gen tag", zap.String("tag", Content), zap.Duration("gen time", time.Since(startTime)))
 	return ParseTags(Content)
@@ -133,6 +137,10 @@ func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs 
 	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		log.L.Error("failed to gen tag", zap.Error(err))
+		return ""
+	}
+	if len(completion.Choices) == 0 {
+		log.L.Error("failed to classify note: llm returned no choices")
 		return ""
 	}
 	Content := completion.Choices[0].Message.Content

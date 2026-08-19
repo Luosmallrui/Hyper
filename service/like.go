@@ -3,16 +3,18 @@ package service
 import (
 	"Hyper/dao"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/types"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cloudwego/kitex/tool/internal_pkg/log"
+	"time"
+
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"time"
 )
 
 const (
@@ -61,6 +63,14 @@ func (s *LikeService) Like(ctx context.Context, userID uint64, noteID uint64) er
 		return errors.New("笔记不存在")
 	}
 
+	// Redis 分布式锁（与 LikeNote 的模式对齐），防止并发双击计数翻倍
+	lockKey := fmt.Sprintf("lock:like:%d:%d", userID, noteID)
+	lock, err := s.Redis.SetNX(ctx, lockKey, 1, 5*time.Second).Result()
+	if err != nil || !lock {
+		return errors.New("操作太频繁,请稍后重试")
+	}
+	defer s.Redis.Del(ctx, lockKey)
+
 	// 检查用户是否已经点赞过
 	isLiked, err := s.LikeDAO.IsLiked(ctx, noteID, userID)
 	if err != nil {
@@ -71,15 +81,8 @@ func (s *LikeService) Like(ctx context.Context, userID uint64, noteID uint64) er
 		return nil
 	}
 
-	// 设置点赞状态为已点赞
-	if err := s.LikeDAO.SetStatus(ctx, noteID, userID, 1); err != nil {
-		return err
-	}
-	// 计数 +1（只有在之前未点赞时才增加）
-	if err := s.StatsDAO.IncrLikeCount(ctx, noteID, 1); err != nil {
-		return err
-	}
-	return nil
+	// 状态迁移与计数更新在同一事务中完成（内部加行锁，并发下只迁移一次）
+	return s.createLikeRecord(ctx, userID, noteID)
 }
 
 func (s *LikeService) Unlike(ctx context.Context, userID uint64, noteID uint64) error {
@@ -92,6 +95,14 @@ func (s *LikeService) Unlike(ctx context.Context, userID uint64, noteID uint64) 
 		return errors.New("笔记不存在")
 	}
 
+	// Redis 分布式锁（与 LikeNote 的模式对齐），防止并发双击计数翻倍
+	lockKey := fmt.Sprintf("lock:like:%d:%d", userID, noteID)
+	lock, err := s.Redis.SetNX(ctx, lockKey, 1, 5*time.Second).Result()
+	if err != nil || !lock {
+		return errors.New("操作太频繁,请稍后重试")
+	}
+	defer s.Redis.Del(ctx, lockKey)
+
 	// 检查用户是否已经点赞
 	isLiked, err := s.LikeDAO.IsLiked(ctx, noteID, userID)
 	if err != nil {
@@ -102,15 +113,8 @@ func (s *LikeService) Unlike(ctx context.Context, userID uint64, noteID uint64) 
 		return nil
 	}
 
-	// 设置点赞状态为未点赞
-	if err := s.LikeDAO.SetStatus(ctx, noteID, userID, 0); err != nil {
-		return err
-	}
-	// 计数 -1（只有在之前已点赞时才减少）
-	if err := s.StatsDAO.IncrLikeCount(ctx, noteID, -1); err != nil {
-		return err
-	}
-	return nil
+	// 删除记录与计数更新在同一事务中完成
+	return s.deleteLikeRecord(ctx, userID, noteID)
 }
 
 func (s *LikeService) IsLiked(ctx context.Context, userID uint64, noteID uint64) (bool, error) {
@@ -326,7 +330,7 @@ func (s *LikeService) updateRedisAfterLike(ctx context.Context, userID, noteID u
 
 	// 执行 Pipeline (即使失败也不影响业务,只是缓存不一致)
 	if _, err := pipe.Exec(ctx); err != nil {
-		log.Error("更新Redis缓存失败", "error", err, "userID", userID, "noteID", noteID)
+		log.L.Error("更新Redis缓存失败", zap.Error(err), zap.Uint64("userID", userID), zap.Uint64("noteID", noteID))
 	}
 }
 

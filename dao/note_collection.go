@@ -42,25 +42,13 @@ func (d *NoteCollectionDAO) GetByNoteUser(ctx context.Context, noteID uint64, us
 }
 
 // SetStatus 设置收藏状态，不存在则创建
+// 使用 ON DUPLICATE KEY UPDATE 保证原子性，依赖 note_collections 的 uk(note_id, user_id) 唯一键
 func (d *NoteCollectionDAO) SetStatus(ctx context.Context, noteID uint64, userID uint64, status uint8) error {
-	return d.Db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var item models.NoteCollection
-		err := tx.Where("note_id = ? AND user_id = ?", noteID, int(userID)).Limit(1).Find(&item).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = nil
-		}
-		if err != nil {
-			return err
-		}
-		if item.ID == 0 {
-			item = models.NoteCollection{NoteID: noteID, UserID: int(userID), Status: status}
-			if err := tx.Create(&item).Error; err != nil {
-				return err
-			}
-			return nil
-		}
-		return tx.Model(&models.NoteCollection{}).Where("id = ?", item.ID).Update("status", status).Error
-	})
+	return d.Db.WithContext(ctx).Exec(
+		"INSERT INTO note_collections (note_id, user_id, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) "+
+			"ON DUPLICATE KEY UPDATE status = VALUES(status), updated_at = NOW()",
+		noteID, int(userID), status,
+	).Error
 }
 
 // IsCollected 是否已收藏（status=1）

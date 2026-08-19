@@ -88,7 +88,8 @@ func (d *NoteDAO) ListNodeByChannel(ctx context.Context, cursor int64, limit int
 
 func (d *NoteDAO) ListAllNote(ctx context.Context) (notes []*models.Note, err error) {
 	db := d.Db.WithContext(ctx).Model(&models.Note{})
-	err = db.Order("created_at DESC").Find(&notes).Error
+	// 防御性上限，避免全表扫描把整张表捞进内存
+	err = db.Order("created_at DESC").Limit(10000).Find(&notes).Error
 	return notes, err
 }
 
@@ -180,9 +181,11 @@ func (d *NoteDAO) ListNodeByUserIDs(ctx context.Context, userIDs []int, cursor i
 	query := d.Db.WithContext(ctx).Model(&models.Note{}).Scopes(publicNoteScope).Where("user_id IN ?", userIDs)
 
 	if cursor > 0 {
-		query = query.Where("id < ?", cursor)
+		// 游标为 CreatedAt.UnixNano()，与 ListNode 等列表的游标语义保持一致
+		cursorTime := time.Unix(0, cursor)
+		query = query.Where("created_at < ?", cursorTime)
 	}
-	err := query.Order("id DESC").Limit(limit).Find(&nodes).Error
+	err := query.Order("created_at DESC").Limit(limit).Find(&nodes).Error
 	return nodes, err
 }
 

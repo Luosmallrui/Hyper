@@ -6,6 +6,8 @@ import (
 	"Hyper/pkg/server"
 	"context"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 type HealthSubscribe struct {
@@ -34,7 +36,7 @@ func (s *HealthSubscribe) Setup(ctx context.Context) error {
 			return nil
 		case <-timer.C:
 			if err := s.storage.Set(ctx, server.GetServerId(), time.Now().Unix()); err != nil {
-				//log.Std().Error(fmt.Sprintf("Websocket HealthSubscribe Report Err: %s", err.Error()))
+				log.L.Error("Websocket HealthSubscribe Report Err", zap.Error(err))
 			}
 		}
 	}

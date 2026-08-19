@@ -29,7 +29,7 @@ func cancelExpiredOrders(db *gorm.DB, expireMinutes int) {
 	deadline := time.Now().Add(-time.Duration(expireMinutes) * time.Minute)
 
 	var orderSns []string
-	if err := db.Raw("SELECT order_sn FROM orders WHERE status = 10 AND created_at < ?", deadline).
+	if err := db.Raw("SELECT order_sn FROM orders WHERE status = 10 AND created_at < ? LIMIT 500", deadline).
 		Scan(&orderSns).Error; err != nil {
 		log.L.Error("查询过期订单失败", zap.Error(err))
 		return
@@ -55,7 +55,9 @@ func cancelExpiredOrders(db *gorm.DB, expireMinutes int) {
 			}
 
 			// 更新支付流水状态为已关闭(4)
-			tx.Exec("UPDATE pay_records SET pay_status = 4 WHERE order_sn = ? AND pay_status = 0", orderSn)
+			if err := tx.Exec("UPDATE pay_records SET pay_status = 4 WHERE order_sn = ? AND pay_status = 0", orderSn).Error; err != nil {
+				return err
+			}
 
 			log.L.Info("已取消超时订单", zap.String("order_sn", orderSn))
 			return nil
@@ -68,8 +70,9 @@ func cancelExpiredOrders(db *gorm.DB, expireMinutes int) {
 
 func cancelExpiredTicketOrders(db *gorm.DB) {
 	var orders []models.TicketOrder
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := db.
 		Where("status = ? AND actual_price > 0 AND expire_time <= ?", models.TicketOrderStatusPending, time.Now()).
+		Limit(500).
 		Find(&orders).Error; err != nil {
 		log.L.Error("查询过期票务订单失败", zap.Error(err))
 		return
@@ -97,7 +100,9 @@ func cancelExpiredTicketOrders(db *gorm.DB) {
 			}).Error; err != nil {
 				return err
 			}
-			tx.Model(&models.PayRecord{}).Where("order_sn = ? AND pay_status = 0", locked.OrderNo).Update("pay_status", 4)
+			if err := tx.Model(&models.PayRecord{}).Where("order_sn = ? AND pay_status = 0", locked.OrderNo).Update("pay_status", 4).Error; err != nil {
+				return err
+			}
 			return nil
 		})
 		if err != nil {

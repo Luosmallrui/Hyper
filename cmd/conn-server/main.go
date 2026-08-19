@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 
 	"github.com/cloudwego/kitex/pkg/rpcinfo"
 	"github.com/cloudwego/kitex/server"
@@ -31,16 +32,15 @@ func main() {
 
 	cliApp := &cli.App{
 		Name: "conn-server",
+		// 默认 Action 与 serve 子命令走同一条启动路径，保证两种方式都启动 Kitex RPC
 		Action: func(ctx *cli.Context) error {
-			rpcPort := cfg.Server.Rpc
-			go startKitexRPC(rpcPort, cfg.Nacos, conn.Db, conn.Redis)
-			return s.Run(ctx, conn)
+			return run(ctx, cfg, conn)
 		},
 		Commands: []*cli.Command{
 			{
 				Name: "serve",
 				Action: func(ctx *cli.Context) error {
-					return s.Run(ctx, conn)
+					return run(ctx, cfg, conn)
 				},
 			},
 		},
@@ -51,8 +51,21 @@ func main() {
 	}
 }
 
-func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *redis.Client) {
-	h := &handler.PushServiceImpl{Db: Db, Redis: redis}
+func run(ctx *cli.Context, cfg *config.Config, conn *s.AppProvider) error {
+	go func() {
+		// RPC 服务退出属于致命故障：记日志后自我发送 SIGTERM，走主流程的优雅退出
+		if err := startKitexRPC(cfg.Server.Rpc, cfg.Nacos, conn.Db, conn.Redis); err != nil {
+			log.L.Error("kitex rpc server exited", zap.Error(err))
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+			}
+		}
+	}()
+	return s.Run(ctx, conn)
+}
+
+func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *redis.Client) error {
+	h := &rpc.PushServiceImpl{Db: Db, Redis: redis}
 
 	listenAddr := &net.TCPAddr{IP: net.IPv4zero, Port: rpcPort}
 
@@ -71,6 +84,7 @@ func startKitexRPC(rpcPort int, cfg *config.NacosConfig, Db *gorm.DB, redis *red
 	log.L.Info("[RPC] Kitex Server starting", zap.String("listen", listenAddr.String()))
 
 	if err := svr.Run(); err != nil {
-		log.L.Fatal("failed to start rpc server", zap.Error(err))
+		return fmt.Errorf("failed to start rpc server: %w", err)
 	}
+	return nil
 }

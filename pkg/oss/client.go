@@ -8,7 +8,13 @@ import (
 )
 
 func GetOssClient(conf *config.Config) (*oss.Client, error) {
-	provider := credentials.NewEnvironmentVariableCredentialsProvider()
+	// 优先使用配置文件中的 AK/SK，未配置时回退到环境变量
+	var provider credentials.CredentialsProvider
+	if conf.Oss.AccessKeyID != "" && conf.Oss.AccessKeySecret != "" {
+		provider = credentials.NewStaticCredentialsProvider(conf.Oss.AccessKeyID, conf.Oss.AccessKeySecret)
+	} else {
+		provider = credentials.NewEnvironmentVariableCredentialsProvider()
+	}
 	cfg := oss.LoadDefaultConfig().WithCredentialsProvider(provider).
 		WithEndpoint(conf.Oss.Endpoint).WithRegion(conf.Oss.Region)
 	client := oss.NewClient(cfg)

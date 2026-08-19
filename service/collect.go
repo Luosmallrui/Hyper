@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var _ ICollectService = (*CollectService)(nil)
@@ -50,18 +53,54 @@ func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint
 		return errors.New("笔记不存在")
 	}
 
-	isCollected, err := s.CollectionDAO.IsCollected(ctx, noteID, userID)
-	if err != nil {
-		return err
+	// Redis 分布式锁（与点赞 LikeNote 的模式对齐），防止并发双击计数翻倍
+	lockKey := fmt.Sprintf("lock:collect:%d:%d", userID, noteID)
+	lock, err := s.Redis.SetNX(ctx, lockKey, 1, 5*time.Second).Result()
+	if err != nil || !lock {
+		return errors.New("操作太频繁,请稍后重试")
 	}
-	if isCollected {
-		return nil
-	}
+	defer s.Redis.Del(ctx, lockKey)
 
-	if err := s.CollectionDAO.SetStatus(ctx, noteID, userID, 1); err != nil {
-		return err
-	}
-	if err := s.StatsDAO.IncrCollCount(ctx, noteID, 1); err != nil {
+	// 状态迁移与计数更新放进同一事务（行锁保证并发下只迁移一次）
+	err = s.CollectionDAO.Db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var item models.NoteCollection
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("note_id = ? AND user_id = ?", noteID, int(userID)).
+			First(&item).Error
+		switch {
+		case errors.Is(findErr, gorm.ErrRecordNotFound):
+			item = models.NoteCollection{NoteID: noteID, UserID: int(userID), Status: 1, CreatedAt: time.Now()}
+			if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
+		case findErr != nil:
+			return findErr
+		case item.Status == 1:
+			// 已收藏，幂等返回，不重复增加计数
+			return nil
+		default:
+			if err := tx.Model(&models.NoteCollection{}).Where("id = ?", item.ID).Update("status", 1).Error; err != nil {
+				return err
+			}
+		}
+
+		result := tx.Model(&models.NoteStats{}).
+			Where("note_id = ?", noteID).
+			UpdateColumn("coll_count", gorm.Expr("coll_count + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return tx.Create(&models.NoteStats{
+				NoteID:    noteID,
+				CollCount: 1,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}).Error
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	s.invalidateStatsCache(ctx, noteID)
@@ -77,18 +116,41 @@ func (s *CollectService) Uncollect(ctx context.Context, userID uint64, noteID ui
 		return errors.New("笔记不存在")
 	}
 
-	isCollected, err := s.CollectionDAO.IsCollected(ctx, noteID, userID)
-	if err != nil {
-		return err
+	// Redis 分布式锁（与点赞 LikeNote 的模式对齐），防止并发双击计数翻倍
+	lockKey := fmt.Sprintf("lock:collect:%d:%d", userID, noteID)
+	lock, err := s.Redis.SetNX(ctx, lockKey, 1, 5*time.Second).Result()
+	if err != nil || !lock {
+		return errors.New("操作太频繁,请稍后重试")
 	}
-	if !isCollected {
-		return nil
-	}
+	defer s.Redis.Del(ctx, lockKey)
 
-	if err := s.CollectionDAO.SetStatus(ctx, noteID, userID, 0); err != nil {
-		return err
-	}
-	if err := s.StatsDAO.IncrCollCount(ctx, noteID, -1); err != nil {
+	// 状态迁移与计数更新放进同一事务（行锁保证并发下只迁移一次）
+	err = s.CollectionDAO.Db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var item models.NoteCollection
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("note_id = ? AND user_id = ?", noteID, int(userID)).
+			First(&item).Error
+		switch {
+		case errors.Is(findErr, gorm.ErrRecordNotFound):
+			// 没有收藏记录，幂等返回
+			return nil
+		case findErr != nil:
+			return findErr
+		case item.Status != 1:
+			// 已是未收藏状态，幂等返回，不重复扣减计数
+			return nil
+		default:
+			if err := tx.Model(&models.NoteCollection{}).Where("id = ?", item.ID).Update("status", 0).Error; err != nil {
+				return err
+			}
+		}
+
+		return tx.Model(&models.NoteStats{}).
+			Where("note_id = ? AND coll_count > 0", noteID).
+			UpdateColumn("coll_count", gorm.Expr("coll_count - 1")).
+			Error
+	})
+	if err != nil {
 		return err
 	}
 	s.invalidateStatsCache(ctx, noteID)

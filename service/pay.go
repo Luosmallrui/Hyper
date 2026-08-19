@@ -29,12 +29,12 @@ type PayService struct {
 	Config *config.Config
 }
 
-func (p *PayService) OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error) {
+func (p *PayService) OrderDetail(ctx context.Context, OrderId string, userId int) (*types.OrderDetail, error) {
 	var resq types.OrderDetail
 	var order models.Order
 	var orderItems models.OrderItem
 
-	err := p.DB.WithContext(ctx).Where("order_sn = ?", OrderId).First(&order).Error
+	err := p.DB.WithContext(ctx).Where("order_sn = ? AND user_id = ?", OrderId, userId).First(&order).Error
 	if err != nil {
 		return nil, fmt.Errorf("获取订单失败: %w", err)
 	}
@@ -71,7 +71,7 @@ type IPayService interface {
 	ProcessRefundNotify(ctx context.Context, refund *refunddomestic.Refund) error
 	PreWeChatPay(ctx context.Context, weChatClient *core.Client, req types.PrepayRequest) (types.PrepayWithRequestPaymentResponse, error)
 	GetOrderReceipt(ctx context.Context, orderSn string, userId int) (*types.OrderReceiptResponse, error)
-	OrderDetail(ctx context.Context, OrderId string) (*types.OrderDetail, error)
+	OrderDetail(ctx context.Context, OrderId string, userId int) (*types.OrderDetail, error)
 }
 
 func (p *PayService) PreWeChatPay(
@@ -109,26 +109,24 @@ func (p *PayService) PreWeChatPay(
 			return fmt.Errorf("商品不存在或已下架")
 		}
 
-		// 服务端金额校验：确保前端传的金额 = 商品单价 × 数量
-		//expectedAmount := int64(product.Price) * int64(req.Quantity)
-		//if req.Amount != expectedAmount {
-		//	return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
-		//}
+		// 服务端金额校验：确保前端传的金额 = 商品单价 × 数量（单位均为分，商品支付无折扣/优惠券逻辑）
+		expectedAmount := int64(product.Price) * int64(req.Quantity)
+		if req.Amount != expectedAmount {
+			return fmt.Errorf("金额不匹配: 期望 %d, 实际 %d", expectedAmount, req.Amount)
+		}
 
-		// 幂等检查：同一个用户对同一个商品，如果已有未支付订单，直接复用
+		// 幂等检查：同一用户 5 分钟内的同商品未支付订单直接复用，避免重复点击重复扣库存
 		var existingOrder models.Order
-		if err := tx.Where("user_id = ? AND status = 10 AND order_sn LIKE ?",
-			req.UserId, fmt.Sprintf("%%_%d", req.UserId)).
+		if err := tx.Where("user_id = ? AND status = 10 AND created_at > ?",
+			req.UserId, time.Now().Add(-5*time.Minute)).
+			Order("id desc").
 			First(&existingOrder).Error; err == nil && existingOrder.ID > 0 {
-			// 检查是否超过5分钟，超过则不算幂等
-			if time.Since(existingOrder.CreatedAt) < 5*time.Minute {
-				// 查找对应的 order item 确认是同一商品
-				var existingItem models.OrderItem
-				if err := tx.Where("order_sn = ? AND product_id = ?", existingOrder.OrderSn, req.ProductId).
-					First(&existingItem).Error; err == nil {
-					orderSn = existingOrder.OrderSn
-					return nil // 复用已有订单
-				}
+			// 查找对应的 order item 确认是同一商品
+			var existingItem models.OrderItem
+			if err := tx.Where("order_sn = ? AND product_id = ?", existingOrder.OrderSn, req.ProductId).
+				First(&existingItem).Error; err == nil {
+				orderSn = existingOrder.OrderSn
+				return nil // 复用已有订单
 			}
 		}
 
@@ -202,6 +200,11 @@ func (p *PayService) PreWeChatPay(
 	wxResp, _, err := svc.PrepayWithRequestPayment(ctx, prepayReq)
 	if err != nil {
 		return respData, fmt.Errorf("wechat prepay failed: %w", err)
+	}
+	if wxResp == nil || wxResp.PrepayId == nil || wxResp.Appid == nil ||
+		wxResp.TimeStamp == nil || wxResp.NonceStr == nil || wxResp.Package == nil ||
+		wxResp.SignType == nil || wxResp.PaySign == nil {
+		return respData, fmt.Errorf("wechat prepay response incomplete")
 	}
 
 	// 3. 更新支付流水（写入 prepay_id）
@@ -306,6 +309,11 @@ func (p *PayService) prepayTicketOrder(
 	if err != nil {
 		return respData, fmt.Errorf("wechat prepay failed: %w", err)
 	}
+	if wxResp == nil || wxResp.PrepayId == nil || wxResp.Appid == nil ||
+		wxResp.TimeStamp == nil || wxResp.NonceStr == nil || wxResp.Package == nil ||
+		wxResp.SignType == nil || wxResp.PaySign == nil {
+		return respData, fmt.Errorf("wechat prepay response incomplete")
+	}
 
 	if err := p.DB.WithContext(ctx).
 		Model(&models.PayRecord{}).
@@ -328,6 +336,10 @@ func (p *PayService) prepayTicketOrder(
 
 func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payments.Transaction) error {
 	// 获取微信的订单号和支付状态
+	if notify == nil || notify.OutTradeNo == nil || notify.TransactionId == nil ||
+		notify.TradeState == nil || notify.TradeType == nil {
+		return fmt.Errorf("支付回调参数不完整")
+	}
 	orderSn := *notify.OutTradeNo
 	transactionId := *notify.TransactionId
 	tradeState := *notify.TradeState
@@ -356,6 +368,19 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		if record.PayStatus == 2 { // 2 代表已支付
 			log.L.Info("订单已处理过，跳过", zap.String("order_sn", orderSn))
 			return nil
+		}
+
+		// 校验微信实付金额与下单金额一致，不一致拒绝入账（返回错误让微信重试，便于核查）
+		if notify.Amount == nil || notify.Amount.Total == nil {
+			log.L.Error("支付回调缺少金额信息，拒绝入账", zap.String("order_sn", orderSn))
+			return fmt.Errorf("支付回调缺少金额信息")
+		}
+		if uint64(*notify.Amount.Total) != record.AmountTotal {
+			log.L.Error("支付回调金额与订单金额不一致，拒绝入账",
+				zap.String("order_sn", orderSn),
+				zap.Int64("wechat_total", *notify.Amount.Total),
+				zap.Uint64("order_amount", record.AmountTotal))
+			return fmt.Errorf("支付回调金额与订单金额不一致")
 		}
 
 		// 2. 更新支付流水表

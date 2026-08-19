@@ -14,7 +14,7 @@ func NewDB(conf *config.Config) *gorm.DB {
 	dsn := conf.MySQL.Dsn()
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.L.Error("failed to connect database", zap.Error(err))
+		log.L.Fatal("failed to connect database", zap.Error(err))
 	}
 	log.L.Info("connect database success")
 	return db

@@ -11,6 +11,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 var _ IWeChatService = (*WeChatService)(nil)
@@ -99,7 +103,14 @@ func (w *WeChatService) CheckTextSecurity(ctx context.Context, content, openID, 
 
 type WeChatService struct {
 	Config *config.Config
+	Redis  *redis.Client
 }
+
+// wechatHTTPClient 调用微信开放接口统一使用带超时的 http.Client，避免请求无限挂起
+var wechatHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+// accessTokenGroup 单flight：并发刷新 access_token 时只放行一次真实请求，避免互踢已缓存 token
+var accessTokenGroup singleflight.Group
 
 func (w *WeChatService) Code2Session(ctx context.Context, code string) (*types.WxLoginResponse, error) {
 	url := fmt.Sprintf(
@@ -108,7 +119,11 @@ func (w *WeChatService) Code2Session(ctx context.Context, code string) (*types.W
 		w.Config.App.AppSecret,
 		code,
 	)
-	resp, err := http.Get(url)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := wechatHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -127,13 +142,57 @@ func (w *WeChatService) Code2Session(ctx context.Context, code string) (*types.W
 }
 
 func (w *WeChatService) GetAccessToken() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cacheKey := "wechat:access_token:" + w.Config.App.AppID
+	if w.Redis != nil {
+		if token, err := w.Redis.Get(ctx, cacheKey).Result(); err == nil && token != "" {
+			return token, nil
+		}
+	}
+	// 单flight：并发刷新只放行一次真实请求，避免频繁调用 token 接口互踢
+	v, err, _ := accessTokenGroup.Do(cacheKey, func() (any, error) {
+		// 拿到刷新权后再查一次缓存，可能已被其他协程/节点刷新
+		if w.Redis != nil {
+			if token, err := w.Redis.Get(ctx, cacheKey).Result(); err == nil && token != "" {
+				return token, nil
+			}
+		}
+		token, expiresIn, err := w.fetchAccessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		if w.Redis != nil {
+			// TTL 比微信有效期短 5 分钟，防止用到临界过期 token
+			ttl := time.Duration(expiresIn)*time.Second - 5*time.Minute
+			if ttl < time.Minute {
+				ttl = time.Minute
+			}
+			if err := w.Redis.Set(ctx, cacheKey, token, ttl).Err(); err != nil {
+				return "", fmt.Errorf("缓存 access_token 失败: %w", err)
+			}
+		}
+		return token, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
+
+// fetchAccessToken 向微信请求新的 access_token，返回 token 与有效期（秒）
+func (w *WeChatService) fetchAccessToken(ctx context.Context) (string, int, error) {
 	appID := w.Config.App.AppID
 	appSecret := w.Config.App.AppSecret
 	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", appID, appSecret)
 
-	resp, err := http.Get(url)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
+	}
+	resp, err := wechatHTTPClient.Do(httpReq)
+	if err != nil {
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 
@@ -144,16 +203,16 @@ func (w *WeChatService) GetAccessToken() (string, error) {
 		ErrMsg      string `json:"errmsg"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if tokenResp.ErrCode != 0 {
-		return "", fmt.Errorf("微信 access_token 获取失败: %d %s", tokenResp.ErrCode, tokenResp.ErrMsg)
+		return "", 0, fmt.Errorf("微信 access_token 获取失败: %d %s", tokenResp.ErrCode, tokenResp.ErrMsg)
 	}
 	if tokenResp.AccessToken == "" {
-		return "", errors.New("微信 access_token 为空")
+		return "", 0, errors.New("微信 access_token 为空")
 	}
 
-	return tokenResp.AccessToken, nil
+	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
 }
 
 func (w *WeChatService) GetUserPhoneNumber(code string) (string, error) {
@@ -169,7 +228,13 @@ func (w *WeChatService) GetUserPhoneNumber(code string) (string, error) {
 		"code": code,
 	})
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
+	// 签名无 ctx（兼容现有调用方），通过 http.Client 超时兜底
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := wechatHTTPClient.Do(httpReq)
 	if err != nil {
 		return "", err
 	}
@@ -192,11 +257,17 @@ func (w *WeChatService) GenerateUnlimitedQRCode(ctx context.Context, scene, page
 	if err != nil {
 		return nil, err
 	}
+	// env_version 可通过 app.qr_code_env_version 配置（develop/trial/release）；
+	// 缺省 "trial" 以保持线上现状，小程序正式发布后应配置为 release
+	envVersion := "trial"
+	if w.Config != nil && w.Config.App != nil && w.Config.App.QRCodeEnvVersion != "" {
+		envVersion = w.Config.App.QRCodeEnvVersion
+	}
 	body, err := json.Marshal(map[string]any{
 		"scene":       scene,
 		"page":        page,
 		"check_path":  false,
-		"env_version": "trial",
+		"env_version": envVersion,
 		"width":       430,
 		"auto_color":  true,
 		"is_hyaline":  false,

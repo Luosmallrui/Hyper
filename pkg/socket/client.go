@@ -39,7 +39,7 @@ type Client struct {
 	conn     IConn                // 客户端连接
 	cid      int64                // 客户端ID/客户端唯一标识
 	uid      int                  // 用户ID
-	lastTime int64                // 客户端最后心跳时间/心跳检测
+	lastTime atomic.Int64         // 客户端最后心跳时间/心跳检测
 	closed   int32                // 客户端是否关闭连接
 	channel  IChannel             // 渠道分组
 	storage  IStorage             // 缓存服务
@@ -77,14 +77,14 @@ func NewClient(conn IConn, option *ClientOption, event IEvent) error {
 	}
 
 	client := &Client{
-		conn:     conn,
-		uid:      option.Uid,
-		lastTime: time.Now().Unix(),
-		channel:  option.Channel,
-		storage:  option.Storage,
-		outChan:  make(chan *ClientResponse, option.Buffer),
-		event:    event,
+		conn:    conn,
+		uid:     option.Uid,
+		channel: option.Channel,
+		storage: option.Storage,
+		outChan: make(chan *ClientResponse, option.Buffer),
+		event:   event,
 	}
+	client.lastTime.Store(time.Now().Unix())
 
 	if option.IdGenerator != nil {
 		client.cid = option.IdGenerator.IdGen()
@@ -98,7 +98,6 @@ func NewClient(conn IConn, option *ClientOption, event IEvent) error {
 
 		// 用户id 和 机器id绑定
 		err := client.storage.Bind(context.Background(), server.GetServerId(), client.channel.Name(), client.cid, client.uid)
-		fmt.Println(server.GetServerId(), client.channel.Name(), client.cid, client.uid)
 		if err != nil {
 			log.Println("[ERROR] bind client err: ", err.Error())
 			return err
@@ -165,7 +164,16 @@ func (c *Client) Write(data *ClientResponse) error {
 	if data.IsAck && data.Ackid == "" {
 		data.Ackid = strings.ReplaceAll(uuid.New().String(), "-", "")
 	}
-	c.outChan <- data
+
+	// outChan 缓冲满说明客户端消费过慢，阻塞等待会级联堵死所有推送方，
+	// 这里直接断开慢客户端，由客户端重连恢复
+	select {
+	case c.outChan <- data:
+	default:
+		log.Printf("[WARN] [%s-%d-%d] client outChan full(len=%d), close slow client \n", c.channel.Name(), c.cid, c.uid, len(c.outChan))
+		go c.Close(1008, "slow consumer")
+		return fmt.Errorf("client outChan is full")
+	}
 
 	return nil
 }
@@ -180,7 +188,7 @@ func (c *Client) loopAccept() {
 			break
 		}
 
-		c.lastTime = time.Now().Unix()
+		c.lastTime.Store(time.Now().Unix())
 
 		c.handleMessage(data)
 	}
@@ -266,7 +274,6 @@ func (c *Client) hookClose(code int, text string) error {
 func (c *Client) handleMessage(data []byte) {
 
 	event, err := c.validate(data)
-	fmt.Println("event: ", string(data), 55)
 	if err != nil {
 		log.Printf("[ERROR] validate err: %s \n", err.Error())
 		return

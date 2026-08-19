@@ -1,8 +1,17 @@
 package adapter
 
 import (
-	"github.com/gorilla/websocket"
 	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	// wsWriteTimeout 单次写操作超时，防止慢客户端阻塞推送协程
+	wsWriteTimeout = 10 * time.Second
+	// wsReadLimit 单条消息最大体积，防止超大消息耗尽内存
+	wsReadLimit = 1 << 20 // 1MB
 )
 
 // WsAdapter Websocket 适配器
@@ -25,6 +34,8 @@ func NewWsAdapter(w http.ResponseWriter, r *http.Request) (*WsAdapter, error) {
 		return nil, err
 	}
 
+	conn.SetReadLimit(wsReadLimit)
+
 	return &WsAdapter{conn: conn}, nil
 }
 
@@ -38,6 +49,9 @@ func (w *WsAdapter) Read() ([]byte, error) {
 }
 
 func (w *WsAdapter) Write(bytes []byte) error {
+	if err := w.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout)); err != nil {
+		return err
+	}
 	return w.conn.WriteMessage(websocket.TextMessage, bytes)
 }
 

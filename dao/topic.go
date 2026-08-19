@@ -65,9 +65,6 @@ func (d *Topic) FindTopicByName(ctx context.Context, name string) (*models.Topic
 	}
 	return topic, err
 }
-func (d *Topic) Transaction(ctx context.Context, f func(tx *gorm.DB) error) interface{} {
-	return d.Db.WithContext(ctx).Transaction(f)
-}
 
 // CreateNoteTopic - 创建笔记与话题的关联
 func (d *NoteTopic) CreateNoteTopic(ctx context.Context, noteTopic *models.NoteTopic) error {

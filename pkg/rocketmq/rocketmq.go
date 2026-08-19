@@ -4,7 +4,6 @@ import (
 	"Hyper/config"
 	"Hyper/pkg/log"
 	"Hyper/types"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,12 +30,14 @@ func init() {
 }
 
 func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
+	if len(cfg.NameServer) == 0 {
+		log.L.Fatal("rocketmq nameserver is empty")
+	}
 	dir, _ := os.Getwd()
 	logPath := filepath.Join(dir, "logs")
 
 	_ = os.MkdirAll(logPath, 0755)
 
-	fmt.Println("log path:", logPath)
 	os.Setenv("rmq.client.logRoot", logPath)
 	os.Setenv("mq.consoleAppender.enabled", "true")
 	os.Setenv("rmq.client.logRoot", logPath)
@@ -56,17 +57,19 @@ func InitProducer(cfg *config.RocketMQConfig) rmq_client.Producer {
 		types.NoteImageTagTopic,
 	))
 	if err != nil {
-		log.L.Info("Failed to create producer", zap.Error(err))
+		log.L.Fatal("Failed to create producer", zap.Error(err))
 	}
-	err = p.Start()
-	if err != nil {
-		log.L.Info("Failed to start producer", zap.Error(err))
+	if err := p.Start(); err != nil {
+		log.L.Fatal("Failed to start producer", zap.Error(err))
 	}
 	return p
 }
 
 func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	//os.Setenv("mq.consoleAppender.enabled", "true")
+	if len(cfg.NameServer) == 0 {
+		log.L.Fatal("rocketmq nameserver is empty")
+	}
 	dir, _ := os.Getwd()
 	logPath := filepath.Join(dir, "logs") // 结果类似 /Users/name/project/logs
 
@@ -80,7 +83,6 @@ func InitConsumer(cfg *config.RocketMQConfig) rmq_client.SimpleConsumer {
 	os.Setenv("rocketmq.client.logRoot", logPath)
 	rmq_client.EnableSsl = false
 	rmq_client.ResetLogger()
-	fmt.Println(cfg.NameServer[0], 55)
 	rmqConfig := &rmq_client.Config{Endpoint: cfg.NameServer[0], ConsumerGroup: cfg.Consumer.Group}
 	if cfg.Ak != "" && cfg.Sk != "" {
 		rmqConfig.Credentials = &credentials.SessionCredentials{AccessKey: cfg.Ak, AccessSecret: cfg.Sk}

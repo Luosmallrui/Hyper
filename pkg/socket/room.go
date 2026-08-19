@@ -66,7 +66,11 @@ func (r *RoomStorage) Insert(groupId int32, clientId int64, timestamp int64) err
 	}
 
 	entity.mutex.Lock()
-	entity.items[clientId] = timestamp
+	// 与 Delete 的时间戳语义对齐：已有更新的记录时，忽略过期的 Insert，
+	// 防止乱序到达的旧事件覆盖新状态
+	if existing, exists := entity.items[clientId]; !exists || existing <= timestamp {
+		entity.items[clientId] = timestamp
+	}
 	entity.mutex.Unlock()
 
 	return nil
@@ -93,7 +97,10 @@ func (r *RoomStorage) BatchInsert(groupId int32, clientIds []int64, timestamp in
 
 		entity.mutex.Lock()
 		for _, id := range clientIds {
-			entity.items[id] = timestamp
+			// 与 Delete 的时间戳语义对齐：忽略比现有记录更旧的 Insert
+			if existing, exists := entity.items[id]; !exists || existing <= timestamp {
+				entity.items[id] = timestamp
+			}
 		}
 
 		entity.mutex.Unlock()

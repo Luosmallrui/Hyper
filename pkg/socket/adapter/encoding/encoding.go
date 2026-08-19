@@ -37,7 +37,10 @@ func NewEncode(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	buffer := buf.Bytes()
+	// buf.Bytes() 返回的是 buffer 内部切片，Reset 并放回 pool 后会污染已返回的数据，
+	// 因此返回前必须拷贝一份
+	buffer := make([]byte, buf.Len())
+	copy(buffer, buf.Bytes())
 	buf.Reset()
 	bufferPool.Put(buf)
 

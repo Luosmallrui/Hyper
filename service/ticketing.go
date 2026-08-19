@@ -3154,7 +3154,7 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 	expireTime := time.Now().Add(15 * time.Minute)
 	result := &types.CreateTicketOrderResponse{OrderNo: orderNo}
 	qrContent := "TICKET:" + orderNo + ":" + randomHex(8)
-	qrURL, err := s.generateTicketQRCodeURL(ctx, orderNo, qrContent)
+	qrURL, qrObjectKey, err := s.generateTicketQRCodeURL(ctx, orderNo, qrContent)
 	if err != nil {
 		return nil, err
 	}
@@ -3298,7 +3298,20 @@ func (s *TicketingService) CreateTicketOrder(ctx context.Context, userID int64, 
 		result.Viewers = orderViewerItems(orderViewers, false)
 		return nil
 	})
-	return result, err
+	if err != nil {
+		// 事务失败时已上传的二维码成为孤儿对象，尽力清理；
+		// 用独立 ctx，避免请求 ctx 已取消导致清理失败。
+		if qrObjectKey != "" && s.OssService != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if delErr := s.OssService.Delete(cleanupCtx, qrObjectKey); delErr != nil {
+				log.L.Warn("cleanup orphan ticket qrcode failed",
+					zap.String("order_no", orderNo), zap.String("object_key", qrObjectKey), zap.Error(delErr))
+			}
+			cancel()
+		}
+		return nil, err
+	}
+	return result, nil
 }
 
 func isActivityPublic(activity models.Activity) bool {
@@ -3461,25 +3474,25 @@ func (s *TicketingService) GetTicketOrderDetail(ctx context.Context, userID int6
 	return s.buildOrderDetail(ctx, order)
 }
 
-func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo, content string) (string, error) {
+func (s *TicketingService) generateTicketQRCodeURL(ctx context.Context, orderNo, content string) (string, string, error) {
 	if s.OssService == nil {
-		return "", errors.New("OSS 服务未初始化")
+		return "", "", errors.New("OSS 服务未初始化")
 	}
 	qr, err := qrcode.New(content, qrcode.High)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	qr.ForegroundColor = color.RGBA{R: 32, G: 18, B: 54, A: 255}
 	qr.BackgroundColor = color.RGBA{R: 248, G: 252, B: 255, A: 255}
 	png, err := qr.PNG(640)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	objectKey := fmt.Sprintf("ticket/qrcode/%s/%s.png", time.Now().Format("2006/01/02"), orderNo)
 	if err := s.OssService.UploadRaw(ctx, bytes.NewReader(png), objectKey); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return "https://cdn.hypercn.cn/" + objectKey, nil
+	return "https://cdn.hypercn.cn/" + objectKey, objectKey, nil
 }
 
 func (s *TicketingService) ListTicketOrders(ctx context.Context, userID int64, status *int8, refundStatus string, page, size int) (*types.PageResponse[types.TicketOrderListItem], error) {
@@ -4856,6 +4869,14 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 		var order models.TicketOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", req.OrderNo).First(&order).Error; err != nil {
 			return err
+		}
+		// 核销员只能核销所属主办方的活动订单
+		var activity models.Activity
+		if err := tx.Select("organizer_id").First(&activity, order.ActivityID).Error; err != nil {
+			return err
+		}
+		if verifier.OrganizerID != activity.OrganizerID {
+			return errors.New("该订单不属于当前核销员所属主办方")
 		}
 		if order.Status != models.TicketOrderStatusUsable {
 			return errors.New("订单不可核销")

@@ -67,11 +67,14 @@ func (c *Server) binds(servers *SubServers) {
 }
 
 // Start 启动服务
-func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
+// 初始化或启动消费者失败时返回 error，由调用方决定进程去留（不要在这里 log.Fatal 杀死进程）
+func (c *Server) Start(eg *errgroup.Group, ctx context.Context) error {
+	var startErr error
 	once.Do(func() {
 		for _, process := range c.items {
 			if err := process.Init(); err != nil {
-				log.L.Fatal("注册 Topic 失败", zap.Error(err))
+				startErr = fmt.Errorf("注册 Topic 失败: %w", err)
+				return
 			}
 		}
 
@@ -83,7 +86,8 @@ func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 		}
 
 		if err := c.MqConsumer.Start(); err != nil {
-			log.L.Fatal("Failed to start consumer", zap.Error(err))
+			startErr = fmt.Errorf("failed to start consumer: %w", err)
+			return
 		}
 
 		eg.Go(func() error {
@@ -102,7 +106,20 @@ func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 					case <-ctx.Done():
 						return nil
 					default:
-						mvs, _ := c.MqConsumer.Receive(ctx, maxMessageNum, invisibleDuration)
+						mvs, err := c.MqConsumer.Receive(ctx, maxMessageNum, invisibleDuration)
+						if err != nil {
+							if ctx.Err() != nil {
+								return nil // 正常退出
+							}
+							// Receive 失败不能热自旋，记日志并退避后重试
+							log.L.Error("receive message error", zap.Error(err))
+							select {
+							case <-ctx.Done():
+								return nil
+							case <-time.After(time.Second):
+							}
+							continue
+						}
 						for _, mv := range mvs {
 							if mv == nil {
 								continue
@@ -121,6 +138,7 @@ func (c *Server) Start(eg *errgroup.Group, ctx context.Context) {
 			})
 		}
 	})
+	return startErr
 }
 
 // 建议提取一个简单的处理函数，保持代码整洁

@@ -88,7 +88,7 @@ func (d *Comment) GetRootCommentCount(ctx context.Context, noteID uint64) (int64
 	var count int64
 	err := d.Db.WithContext(ctx).
 		Model(&models.Comment{}).
-		Where("note_id = ? ", noteID).
+		Where("note_id = ? AND root_id = 0 AND status = 1", noteID).
 		Count(&count).Error
 	return count, err
 }
@@ -105,25 +105,16 @@ func (d *Comment) GetLatestReplies(ctx context.Context, rootID uint64, limit int
 }
 
 // BatchGetLatestReplies 批量获取多个评论的最新回复
+// 逐 root_id 查询并 LIMIT，避免把全部回复捞进内存再截断
 func (d *Comment) BatchGetLatestReplies(ctx context.Context, rootIDs []uint64, limit int) (map[uint64][]*models.Comment, error) {
-	var replies []*models.Comment
-	err := d.Db.WithContext(ctx).
-		Where("root_id IN ? AND status = 1", rootIDs).
-		Order("root_id, created_at DESC").
-		Find(&replies).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	// 分组
-	result := make(map[uint64][]*models.Comment)
-	for _, reply := range replies {
-		if result[reply.RootID] == nil {
-			result[reply.RootID] = make([]*models.Comment, 0)
+	result := make(map[uint64][]*models.Comment, len(rootIDs))
+	for _, rootID := range rootIDs {
+		replies, err := d.GetLatestReplies(ctx, rootID, limit)
+		if err != nil {
+			return nil, err
 		}
-		if len(result[reply.RootID]) < limit {
-			result[reply.RootID] = append(result[reply.RootID], reply)
+		if len(replies) > 0 {
+			result[rootID] = replies
 		}
 	}
 

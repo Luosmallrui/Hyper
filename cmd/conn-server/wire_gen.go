@@ -73,6 +73,7 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 	users := dao.NewUsers(db)
 	weChatService := &service.WeChatService{
 		Config: cfg,
+		Redis:  redisClient,
 	}
 	userService := &service.UserService{
 		Config:        cfg,

@@ -3,11 +3,14 @@ package cache
 import (
 	"Hyper/models"
 	"Hyper/pkg/jsonutil"
+	"Hyper/pkg/log"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 const lastMessageCacheKey = "im:message:last_message"
@@ -42,7 +45,11 @@ func (m *MessageStorage) BatchGet(ctx context.Context, userId uint64, convs []mo
 		pipe.HGet(ctx, lastMessageCacheKey, field)
 	}
 
-	cmds, _ := pipe.Exec(ctx)
+	cmds, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		// 缓存失败不影响主流程，降级为部分/无缓存数据
+		log.L.Warn("BatchGet last message cache pipeline error", zap.Error(err))
+	}
 	for i, cmd := range cmds {
 		val, err := cmd.(*redis.StringCmd).Result()
 		if err == nil {

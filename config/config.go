@@ -36,7 +36,7 @@ func New(filename string) *Config {
 	}
 
 	var conf Config
-	if yaml.Unmarshal(content, &conf) != nil {
+	if err := yaml.Unmarshal(content, &conf); err != nil {
 		panic(fmt.Sprintf("解析 config.yaml 读取错误: %v", err))
 	}
 

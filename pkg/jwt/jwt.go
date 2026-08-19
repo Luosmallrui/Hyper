@@ -3,7 +3,6 @@ package jwt
 import (
 	"Hyper/pkg/log"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -55,7 +54,6 @@ func GenerateToken(secret []byte, userID uint, openid string, tokenType string, 
 
 func ParseToken(secret []byte, expectedType string, tokenStr string) (*Claims, error) {
 
-	fmt.Println(string(secret), tokenStr, expectedType, 55)
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
@@ -64,7 +62,6 @@ func ParseToken(secret []byte, expectedType string, tokenStr string) (*Claims, e
 	})
 
 	if err != nil {
-		fmt.Println(err, 66)
 		return nil, err
 	}
 
@@ -72,7 +69,7 @@ func ParseToken(secret []byte, expectedType string, tokenStr string) (*Claims, e
 	if !ok || !token.Valid {
 		return nil, jwt.ErrTokenInvalidClaims
 	}
-	log.L.Info("token parsed", zap.Any("claims", claims))
+	log.L.Debug("token parsed", zap.Any("claims", claims))
 
 	if claims.Type != expectedType {
 		return nil, errors.New("invalid token type")

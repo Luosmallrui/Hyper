@@ -3,6 +3,7 @@ package service
 import (
 	"Hyper/dao"
 	"Hyper/models"
+	"Hyper/pkg/log"
 	"Hyper/pkg/snowflake"
 	"Hyper/types"
 	"context"
@@ -13,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/kitex/tool/internal_pkg/log"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -109,7 +110,7 @@ func (s *NoteService) enrichNotes(ctx context.Context, userIDs, noteIDs []uint64
 		defer wg.Done()
 		stats, err := s.LikeService.BatchGetNoteStats(ctx, noteIDs)
 		if err != nil {
-			log.Error("批量获取统计数据失败", "error", err)
+			log.L.Error("批量获取统计数据失败", zap.Error(err))
 			return
 		}
 		mu.Lock()
@@ -124,7 +125,7 @@ func (s *NoteService) enrichNotes(ctx context.Context, userIDs, noteIDs []uint64
 		}
 		status, err := s.LikeService.BatchCheckLikeStatus(ctx, currentUserID, noteIDs)
 		if err != nil {
-			log.Error("批量获取点赞状态失败", "error", err)
+			log.L.Error("批量获取点赞状态失败", zap.Error(err))
 			return
 		}
 		mu.Lock()
@@ -224,8 +225,56 @@ func (s *NoteService) getTopicsByIDs(ctx context.Context, ids []int64) ([]types.
 	return topics, nil
 }
 
+// prefetchNoteTopics 批量预取列表中全部笔记的话题，一次回源后按笔记分发，
+// 避免 noteToDTO 内逐条 getTopicsByIDs 造成的 N+1 Redis/DB 访问。
+func (s *NoteService) prefetchNoteTopics(ctx context.Context, notes []*models.Note, count int) map[uint64][]types.Topic {
+	result := make(map[uint64][]types.Topic, count)
+	if count <= 0 {
+		return result
+	}
+
+	parsed := make(map[uint64][]int64, count)
+	allIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for i := 0; i < count; i++ {
+		var topicIDs []int64
+		_ = jsonUnmarshalOr(notes[i].TopicIDs, &topicIDs, make([]int64, 0))
+		parsed[notes[i].ID] = topicIDs
+		for _, id := range topicIDs {
+			if _, dup := seen[id]; !dup {
+				seen[id] = struct{}{}
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+	if len(allIDs) == 0 {
+		return result
+	}
+
+	topics, err := s.getTopicsByIDs(ctx, allIDs)
+	if err != nil {
+		// 与 noteToDTO 原有行为一致：话题加载失败不阻断列表，返回空话题
+		return result
+	}
+	byID := make(map[int64]types.Topic, len(topics))
+	for _, t := range topics {
+		byID[int64(t.ID)] = t
+	}
+	for _, note := range notes[:count] {
+		items := make([]types.Topic, 0, len(parsed[note.ID]))
+		for _, id := range parsed[note.ID] {
+			if t, ok := byID[id]; ok {
+				items = append(items, t)
+			}
+		}
+		result[note.ID] = items
+	}
+	return result
+}
+
 // noteToDTO 将 models.Note 转为 types.Notes，附带关联数据
-func (s *NoteService) noteToDTO(ctx context.Context, note *models.Note, enrich *noteEnrichment, currentUserID int) *types.Notes {
+// topics 由调用方批量预取（见 prefetchNoteTopics），避免列表路径 N+1 查询
+func (s *NoteService) noteToDTO(ctx context.Context, note *models.Note, enrich *noteEnrichment, currentUserID int, topics []types.Topic) *types.Notes {
 	stats := enrich.getStats(note.ID)
 
 	dto := &types.Notes{
@@ -253,9 +302,10 @@ func (s *NoteService) noteToDTO(ctx context.Context, note *models.Note, enrich *
 		dto.Nickname = user.Nickname
 	}
 
-	var topicIDs []int64
-	_ = jsonUnmarshalOr(note.TopicIDs, &topicIDs, make([]int64, 0))
-	topics, _ := s.getTopicsByIDs(ctx, topicIDs)
+	if topics == nil {
+		// 保持原有 API 契约：无话题时返回空数组而不是 null
+		topics = make([]types.Topic, 0)
+	}
 	_ = jsonUnmarshalOr(note.Location, &dto.Location, types.Location{})
 	dto.TopicIDs = topics
 	dto.MediaData = parseFirstMedia(note.MediaData)
@@ -352,9 +402,10 @@ func (s *NoteService) buildListNotesRep(ctx context.Context, notes []*models.Not
 
 	userIDs, noteIDs := collectIDs(notes, displayCount)
 	enrich := s.enrichNotes(ctx, userIDs, noteIDs, currentUserID)
+	topicMap := s.prefetchNoteTopics(ctx, notes, displayCount)
 
 	for i := 0; i < displayCount; i++ {
-		rep.Notes = append(rep.Notes, s.noteToDTO(ctx, notes[i], enrich, int(currentUserID)))
+		rep.Notes = append(rep.Notes, s.noteToDTO(ctx, notes[i], enrich, int(currentUserID), topicMap[notes[i].ID]))
 	}
 
 	if displayCount > 0 {
@@ -730,33 +781,6 @@ func (s *NoteService) getCommentPreview(ctx context.Context, noteID uint64, curr
 	}, nil
 }
 
-func (s *NoteService) checkNoteVisible(ctx context.Context, note *models.Note, currentUserID uint64) error {
-	if note.Status != 1 && currentUserID != note.UserID {
-		return errors.New("笔记审核中或已下架")
-	}
-
-	switch note.VisibleConf {
-	case 1: // 公开
-		return nil
-	case 2: // 粉丝可见
-		if currentUserID == 0 {
-			return errors.New("请先登录")
-		}
-		if currentUserID == note.UserID {
-			return nil
-		}
-		isFollower, err := s.FollowService.CheckFollowStatus(ctx, currentUserID, note.UserID)
-		if err != nil || !isFollower {
-			return errors.New("仅粉丝可见")
-		}
-	case 3: // 自己可见
-		if currentUserID != note.UserID {
-			return errors.New("仅作者本人可见")
-		}
-	}
-	return nil
-}
-
 func (s *NoteService) buildNoteDetail(
 	ctx context.Context,
 	note *models.Note,
@@ -799,7 +823,7 @@ func (s *NoteService) buildNoteDetail(
 	}
 	var topicIDs []int64
 	_ = jsonUnmarshalOr(note.TopicIDs, &topicIDs, make([]int64, 0))
-	topics, _ := s.getTopicsByIDs(context.Background(), topicIDs)
+	topics, _ := s.getTopicsByIDs(ctx, topicIDs)
 	detail.TopicIDs = topics
 	_ = jsonUnmarshalOr(note.Location, &detail.Location, types.Location{})
 	_ = jsonUnmarshalOr(note.MediaData, &detail.MediaData, make([]types.NoteMedia, 0))

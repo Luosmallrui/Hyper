@@ -95,12 +95,15 @@ func (u *User) GetUserNote(c *gin.Context) error {
 		userId,
 		req.UserId,
 	)
-	avatar, nickName, err := u.UserService.GetUserAvatar(c.Request.Context(), int64(req.UserId))
-	notes.Avatar = avatar
-	notes.Nickname = nickName
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())
 	}
+	avatar, nickName, err := u.UserService.GetUserAvatar(c.Request.Context(), int64(req.UserId))
+	if err != nil {
+		return response.NewError(http.StatusInternalServerError, err.Error())
+	}
+	notes.Avatar = avatar
+	notes.Nickname = nickName
 	response.Success(c, notes)
 	return nil
 }

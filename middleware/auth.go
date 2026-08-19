@@ -20,8 +20,6 @@ func Auth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, "缺少 Authorization")
 			return
 		}
-		log.L.Info("auth header", zap.String("authHeader", authHeader))
-
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			response.Abort(c, http.StatusUnauthorized, "Authorization 格式错误")
@@ -33,7 +31,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, err.Error())
 			return
 		}
-		if time.Until(claims.ExpiresAt.Time) < 20 {
+		if claims.ExpiresAt != nil && time.Until(claims.ExpiresAt.Time) < 20*time.Minute {
 			newToken, _ := jwt.GenerateToken(
 				secret,
 				claims.UserID,
@@ -43,7 +41,7 @@ func Auth(secret []byte) gin.HandlerFunc {
 			)
 			c.Header("X-New-Access-Token", newToken)
 		}
-		log.L.Info("claims", zap.Any("claims", claims))
+		log.L.Debug("claims", zap.Any("claims", claims))
 		c.Set("user_id", int(claims.UserID))
 		c.Set("openid", claims.OpenID)
 
@@ -71,7 +69,7 @@ func OptionalAuth(secret []byte) gin.HandlerFunc {
 			response.Abort(c, http.StatusUnauthorized, err.Error())
 			return
 		}
-		if time.Until(claims.ExpiresAt.Time) < 20 {
+		if claims.ExpiresAt != nil && time.Until(claims.ExpiresAt.Time) < 20*time.Minute {
 			newToken, _ := jwt.GenerateToken(secret, claims.UserID, claims.OpenID, "access", 60*time.Second)
 			c.Header("X-New-Access-Token", newToken)
 		}

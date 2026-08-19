@@ -82,8 +82,12 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 		return err
 	}
 
-	// 发送 MQ 通知
+	// 发送 MQ 通知。注意：不能沿用请求级 ctx，HTTP 返回后 ctx 会被取消，
+	// 导致通知静默丢失；这里使用独立的带超时后台 ctx（同时约束 MQ 发送）。
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		// 查询关注者信息
 		follower, err := s.UserDAO.FindById(ctx, followerID)
 		if err != nil {

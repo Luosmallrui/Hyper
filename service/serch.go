@@ -123,8 +123,11 @@ func (s *SearchService) GlobalSerch(ctx context.Context, req types.GlobalSearchR
 
 	if req.Type == 0 || req.Type == 2 {
 		g.Go(func() error {
+			// 可见性语义与 dao/note.go publicNoteScope 对齐：只排除软删除，
+			// 且必须是公开（visible_conf=1）的笔记；原 status=0 会让审核通过
+			// 的笔记搜不到、被隐藏的笔记反而搜到。
 			db := s.DB.WithContext(ctx).Model(&models.Note{}).
-				Where("(title LIKE ? OR content LIKE ?) AND status = 0 ", keyword, keyword)
+				Where("(title LIKE ? OR content LIKE ?) AND status <> -1 AND visible_conf = 1", keyword, keyword)
 			if req.NoteCursor > 0 {
 				db = db.Where("id < ?", req.NoteCursor)
 			}

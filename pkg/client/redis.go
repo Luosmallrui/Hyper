@@ -5,6 +5,7 @@ import (
 	"Hyper/pkg/log"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -12,11 +13,12 @@ import (
 
 func NewRedisClient(conf *config.Config) *redis.Client {
 	client := redis.NewClient(&redis.Options{
-		Addr:        fmt.Sprintf("%s:%d", conf.Redis.Address, conf.Redis.Port),
-		Password:    conf.Redis.Password,
-		Username:    conf.Redis.Username,
-		DB:          conf.Redis.Database,
-		ReadTimeout: 0,
+		Addr:         fmt.Sprintf("%s:%d", conf.Redis.Address, conf.Redis.Port),
+		Password:     conf.Redis.Password,
+		Username:     conf.Redis.Username,
+		DB:           conf.Redis.Database,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
 	})
 	if _, err := client.Ping(context.TODO()).Result(); err != nil {
 		log.L.Fatal("connect redis error", zap.Error(err))

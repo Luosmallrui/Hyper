@@ -35,18 +35,29 @@ var (
 	serverId string
 )
 
-func init() {
+// InitServerId 使用配置端口初始化服务唯一ID，应在服务启动早期调用。
+// 未调用时 GetServerId 会以默认端口 8083 延迟初始化（保持历史行为）。
+func InitServerId(port int) {
 	once.Do(func() {
-		ip, err := getLocalIP() // 获取本机内网 IP
-		if err != nil {
-			log.L.Fatal("get local ip", zap.Error(err))
-		}
-		// 最终 sid 格式为: 192.168.1.10:8083
-		serverId = fmt.Sprintf("%s:%d", ip, 8083)
+		serverId = buildServerId(port)
 	})
 }
+
 func GetServerId() string {
+	once.Do(func() {
+		serverId = buildServerId(8083)
+	})
 	return serverId
+}
+
+func buildServerId(port int) string {
+	ip, err := getLocalIP() // 获取本机内网 IP
+	if err != nil {
+		log.L.Error("get local ip", zap.Error(err))
+		return fmt.Sprintf("unknown:%d", port)
+	}
+	// 最终 sid 格式为: 192.168.1.10:8083
+	return fmt.Sprintf("%s:%d", ip, port)
 }
 
 func getLocalIP() (string, error) {
@@ -104,8 +115,12 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 设置 CORS 头
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*") // 允许所有来源
+		// 设置 CORS 头；回显请求 Origin，避免与 Allow-Credentials:true 冲突
+		origin := c.GetHeader("Origin")
+		if origin == "" {
+			origin = "*"
+		}
+		c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Content-Length, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -129,6 +144,8 @@ func Run(ctx *cli.Context, app *AppProvider) error {
 	c := make(chan os.Signal, 1)
 	// 终止的信号 服务要停止了
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT)
+
+	InitServerId(app.Config.Server.Http)
 
 	log.L.Info("server starting", zap.String("serverId", serverId),
 		zap.Int("port", app.Config.Server.Http),

@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -29,8 +28,9 @@ func (s *Sequence) Name(id int, isUserId bool) string {
 }
 
 // Set 初始化发号器
+// 不设置 TTL：INCR 发号 key 过期会导致序列回退，产生重复时序ID
 func (s *Sequence) Set(ctx context.Context, id int, isUserId bool, value int64) error {
-	return s.redis.SetEx(ctx, s.Name(id, isUserId), value, 12*time.Hour).Err()
+	return s.redis.Set(ctx, s.Name(id, isUserId), value, 0).Err()
 }
 
 // Get 获取消息时序ID

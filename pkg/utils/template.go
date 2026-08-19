@@ -6,7 +6,10 @@ import (
 )
 
 func RenderTemplate(text []byte, data any) (string, error) {
-	tmpl, _ := template.New("tmpl").Parse(string(text))
+	tmpl, err := template.New("tmpl").Parse(string(text))
+	if err != nil {
+		return "", err
+	}
 
 	var body bytes.Buffer
 	if err := tmpl.Execute(&body, data); err != nil {

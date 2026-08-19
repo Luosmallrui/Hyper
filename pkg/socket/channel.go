@@ -41,7 +41,7 @@ func (c *Channel) Name() string {
 
 // Count 获取客户端连接数
 func (c *Channel) Count() int64 {
-	return c.count
+	return atomic.LoadInt64(&c.count)
 }
 
 // Client 获取客户端
@@ -97,6 +97,9 @@ func (c *Channel) Start(ctx context.Context) error {
 }
 
 func (c *Channel) consume(worker *pool.Pool, data *SenderContent, fn func(data *SenderContent, value *Client)) {
+	// 说明：fn 内部的 Client.Write 为非阻塞写入（缓冲满会断开慢客户端），
+	// 单个任务耗时有界，因此 worker.Go 满员时短暂阻塞主循环属于正常背压，
+	// 不会出现队头无限阻塞导致 Channel.Write 大面积超时丢消息。
 	worker.Go(func() {
 
 		//如果需要广播
@@ -106,7 +109,14 @@ func (c *Channel) consume(worker *pool.Pool, data *SenderContent, fn func(data *
 			//
 			//1 client1
 			//2 client2
+			excluded := make(map[int64]struct{}, len(data.exclude))
+			for _, cid := range data.exclude {
+				excluded[cid] = struct{}{}
+			}
 			c.node.IterCb(func(_ string, client *Client) {
+				if _, ok := excluded[client.cid]; ok {
+					return // 命中排除列表，跳过
+				}
 				fn(data, client) // 执行并发 塞到管道的逻辑
 			})
 			return

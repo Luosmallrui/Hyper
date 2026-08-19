@@ -94,8 +94,8 @@ func (d *UserFollowDAO) GetFollowingFeed(ctx context.Context, userID uint64, cur
 		Where("uf.follower_id = ? AND uf.status = 1", userID)
 
 	if cursor > 0 {
-		// 纳秒转 time.Time
-		cursorTime := time.Unix(0, cursor)
+		// 秒级 Unix 时间戳转 time.Time（service 下发的 cursor 是 FollowTime.Unix()，单位秒）
+		cursorTime := time.Unix(cursor, 0)
 		db = db.Where("uf.created_at < ?", cursorTime)
 	}
 

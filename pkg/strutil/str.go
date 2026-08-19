@@ -1,7 +1,8 @@
 package strutil
 
 import (
-	"fmt"
+	crand "crypto/rand"
+	"math/big"
 	"math/rand"
 	"path"
 	"strings"
@@ -10,14 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// GenValidateCode 生成数字验证码
+// GenValidateCode 生成数字验证码（使用 crypto/rand，避免可预测）
 func GenValidateCode(length int) string {
-	numeric := [10]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	newRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	var sb strings.Builder
+	max := big.NewInt(10)
 	for i := 0; i < length; i++ {
-		_, _ = fmt.Fprintf(&sb, "%d", numeric[newRand.Intn(10)])
+		n, err := crand.Int(crand.Reader, max)
+		if err != nil {
+			// crypto/rand 失败时退化为时间戳尾数，保证不 panic
+			sb.WriteByte(byte('0' + time.Now().UnixNano()%10))
+			continue
+		}
+		sb.WriteByte(byte('0' + n.Int64()))
 	}
 	return sb.String()
 }

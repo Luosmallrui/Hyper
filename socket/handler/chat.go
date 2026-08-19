@@ -19,9 +19,6 @@ type ChatChannel struct {
 
 // Conn 初始化连接
 func (ch *ChatChannel) Conn(c *gin.Context) error {
-	token := c.Request.Header.Get("Authorization")
-
-	log.L.Info("Attempting WebSocket connection with token ", zap.String("token", token))
 	conn, err := adapter.NewWsAdapter(c.Writer, c.Request)
 	if err != nil {
 		log.L.Error("WebSocket connection error", zap.Error(err))
@@ -29,13 +26,18 @@ func (ch *ChatChannel) Conn(c *gin.Context) error {
 	}
 	userID, err := context.GetUserID(c)
 	if err != nil {
-		log.L.Error("WebSocket connection error", zap.Error(err))
+		log.L.Error("WebSocket get user id error", zap.Error(err))
+		_ = conn.Close() // Upgrade 已成功，错误路径必须关闭连接，避免泄漏
 		return err
 	}
-	log.L.Info("Connected WebSocket connection with token",
-		zap.String("token", token), zap.Any("user_id", userID))
+	log.L.Info("WebSocket connected", zap.Any("user_id", userID))
 
-	return ch.NewClient(int(userID), conn)
+	if err := ch.NewClient(int(userID), conn); err != nil {
+		log.L.Error("WebSocket init client error", zap.Error(err))
+		_ = conn.Close()
+		return err
+	}
+	return nil
 }
 
 func (ch *ChatChannel) NewClient(uid int, conn socket.IConn) error {

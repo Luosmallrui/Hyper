@@ -41,9 +41,9 @@ func (r *RoomStorage) BatchAdd(ctx context.Context, opts []*RoomOption) error {
 	pipeline := r.redis.Pipeline()
 	for _, opt := range opts {
 		key := r.name(opt)
-		if err := pipeline.SAdd(ctx, key, opt.Cid).Err(); err == nil {
-			pipeline.Expire(ctx, key, time.Hour*24*7)
-		}
+		// 管道内命令在 Exec 前不会执行，Err() 恒为 nil，直接入队即可
+		pipeline.SAdd(ctx, key, opt.Cid)
+		pipeline.Expire(ctx, key, time.Hour*24*7)
 	}
 
 	_, err := pipeline.Exec(ctx)

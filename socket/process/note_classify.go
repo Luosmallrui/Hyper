@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"go.uber.org/zap"
@@ -50,7 +51,10 @@ func (m *NoteClassifySubscribe) handleNoteClassify(ctx context.Context, mv *rmq_
 	}
 	tagsSlice, tagsMap := buildChannelMap(channels.Channels)
 
-	label := llm.ClassifyMultiImageNote(ctx, note.Title, note.Content, noteImageURLs(note.MediaData), tagsSlice)
+	// LLM 调用加超时，避免模型侧长时间无响应占住消费协程（与 note_image_tag.go 对齐）
+	llmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	label := llm.ClassifyMultiImageNote(llmCtx, note.Title, note.Content, noteImageURLs(note.MediaData), tagsSlice)
+	cancel()
 	labelID, ok := tagsMap[label]
 	if !ok || labelID == 0 {
 		// 分类失败/不匹配：不重试，避免无意义计费

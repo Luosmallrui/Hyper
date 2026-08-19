@@ -54,11 +54,11 @@ func FormatDatetime(t time.Time) string {
 func IsDateTimeFormat(datetime string) bool {
 	_, err := time.Parse(DatetimeFormat, datetime)
 
-	return err != nil
+	return err == nil
 }
 
 func IsDateFormat(date string) bool {
-	_, err := time.Parse(DatetimeFormat, date)
+	_, err := time.Parse(DateFormat, date)
 
-	return err != nil
+	return err == nil
 }
