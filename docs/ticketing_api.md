@@ -2475,11 +2475,15 @@ POST /api/v1/verifier/scan
   "data": {
     "success": true,
     "order": {
+		"order_no": "T2026053114300012ab34cd",
+		"activity_id": 10,
       "activity_name": "周末电音派对",
+		"poster_list": "https://cdn.hypercn.cn/ticketing/poster_list/example.png",
       "ticket_spec_name": "早鸟票",
       "quantity": 1,
       "buyer_name_masked": "罗**",
-      "buyer_id_card_masked": "5001**********0817"
+		"buyer_id_card_masked": "5001**********0817",
+		"buyer_phone_masked": "138****5678"
     }
   }
 }
@@ -2512,7 +2516,7 @@ POST /api/v1/verifier/scan
 
 ```http
 POST /api/v1/verifier/confirm
-X-Verifier-Id: <verifier_id>
+Authorization: Bearer <verifier_user_access_token>
 ```
 
 请求：
@@ -2523,14 +2527,52 @@ X-Verifier-Id: <verifier_id>
 }
 ```
 
-说明：当前版本先用 `X-Verifier-Id` 传核销员 ID，后续可以替换为独立核销员 token。
+后端按登录用户解析已激活的核销员身份；不再接收或信任 `X-Verifier-Id`。核销记录会写入该已绑定核销员，确保个人、主办方和管理端三个列表可一致追溯。
 
 ### 已核销列表
 
 ```http
 GET /api/v1/verifier/verified-list?page=1&size=10
-X-Verifier-Id: <verifier_id>
+Authorization: Bearer <verifier_user_access_token>
 ```
+
+后端按登录用户名下全部核销员身份查询历史核销记录，不按日期截断，也不再依赖 `X-Verifier-Id`。同一人重新绑定、停用后重新启用时，旧 `verifier_id` 写入的核销记录仍会返回。订单、活动或票种已被物理删除时，仍保留核销记录，名称分别回退为“活动已删除”或“票种已删除”。响应中的每个 `list` 项固定返回 `order_no`、`activity_id`、`activity_name`、`poster_list`、`ticket_spec_name`、`quantity`、`buyer_name_masked`、`buyer_id_card_masked`、`buyer_phone_masked`、`verified_at`。空列表返回 `200` 与 `data.list: []`；未绑定或未激活时返回 `403`，不会伪装成空列表。
+
+### 主办方全量核销记录
+
+```http
+GET /api/v1/organizer/verification-records?page=1&size=20&verifier_id=&activity_id=&keyword=&start_date=&end_date=
+Authorization: Bearer <organizer_access_token>
+```
+
+仅返回当前主办方名下所有核销员的记录，不会返回其他商家数据。可按核销员、活动、订单号/活动名/核销员姓名或手机号、核销时间筛选。每项额外包含 `id`、`verifier_id`、`verifier_name`、`verifier_phone_masked`、`organizer_id`、`organizer_name`，用于区分不同核销员。
+
+管理端全局核销记录继续使用：
+
+```http
+GET /api/v1/admin/verification-records?page=1&pageSize=20&organizer_id=&keyword=
+Authorization: Bearer <admin_access_token>
+```
+
+该接口可查询任意商家的任意核销记录，`organizer_id` 为空时即为全平台视图。
+
+### 核销员订单详情
+
+购票用户订单接口 `GET /api/v1/order/:order_no` 仅允许订单本人读取。主办方应使用已有接口：
+
+```http
+GET /api/v1/organizer/orders/:order_no
+Authorization: Bearer <organizer_access_token>
+```
+
+已激活核销员使用：
+
+```http
+GET /api/v1/verifier/orders/:order_no
+Authorization: Bearer <verifier_user_access_token>
+```
+
+后端校验核销员已激活，且订单活动归属该核销员所属主办方；不属于时返回 `404`。
 
 ---
 
@@ -2567,4 +2609,4 @@ X-Verifier-Id: <verifier_id>
 - 新票务订单使用 `ticket_orders`，旧商品订单仍使用 `orders/products/pay`。
 - 微信支付已支持通过 `/api/v1/pay/prepay` + `order_no` 支付 `ticket_orders`。
 - 微信退款已支持通过 `/api/v1/pay/refund/:refund_no/approve` 发起，回调地址为 `/api/v1/pay/refund-notify`。
-- 核销员当前临时使用 `X-Verifier-Id`，后续可升级为独立核销员 token。
+- 核销员使用普通用户登录 token；后端从绑定关系解析核销员身份，不允许前端指定核销员 ID。

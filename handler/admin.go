@@ -1662,8 +1662,8 @@ func (a *Admin) GetPublicSystemConfig(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(500, "读取公开系统配置失败")
 	}
-	// The cache is intentionally short so configuration changes become visible promptly.
-	c.Header("Cache-Control", "public, max-age=300")
+	// The direct-message switch is expected to take effect immediately.
+	c.Header("Cache-Control", "no-store")
 	directMessageEnabled := true
 	if config.DirectMessageEnabled != nil {
 		directMessageEnabled = *config.DirectMessageEnabled
@@ -1673,7 +1673,7 @@ func (a *Admin) GetPublicSystemConfig(c *gin.Context) error {
 }
 
 func (a *Admin) UpdateSystemConfig(c *gin.Context) error {
-	var req types.AdminSystemConfig
+	var req types.AdminSystemConfigUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return response.NewError(400, "参数格式错误")
 	}

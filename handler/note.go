@@ -441,6 +441,7 @@ func (n *Note) GetMyNotes(c *gin.Context) error {
 		_ = json.Unmarshal([]byte(note.MediaData), &k.MediaData)
 		res = append(res, k)
 	}
+	n.NoteService.EnrichNoteCards(c.Request.Context(), res, uint64(userID))
 
 	response.Success(c, types.GetMyNotesResponse{
 		Notes: res,
@@ -475,6 +476,7 @@ func (n *Note) GetMyCollections(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
 	}
+	n.NoteService.EnrichNoteCards(c.Request.Context(), notes, uint64(userID))
 
 	response.Success(c, types.GetMyCollectionsResponse{
 		Notes: notes,
@@ -504,6 +506,7 @@ func (n *Note) GetMyLikes(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, "查询失败: "+err.Error())
 	}
+	n.NoteService.EnrichNoteCards(c.Request.Context(), notes, uint64(userID))
 	response.Success(c, types.GetMyLikesResponse{Notes: notes, Total: int(total)})
 	return nil
 }

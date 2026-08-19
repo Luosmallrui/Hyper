@@ -277,7 +277,7 @@ Authorization: Bearer <admin_access_token>
 | 功能 | 方法 | 路径 |
 |---|---|---|
 | 核销员列表 | GET | `/verifiers?keyword=&organizer_id=` |
-| 核销记录 | GET | `/verification-records?keyword=&organizer_id=` |
+| 核销记录 | GET | `/verification-records?keyword=&organizer_id=`，全平台记录；传 `organizer_id` 限定商家 |
 
 ## 动态管理
 

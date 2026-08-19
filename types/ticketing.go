@@ -643,6 +643,7 @@ type TicketOrderDetailResponse struct {
 	Activity         struct {
 		ID           int64     `json:"id"`
 		Name         string    `json:"name"`
+		Address      string    `json:"address"`
 		StartTime    time.Time `json:"start_time"`
 		EndTime      time.Time `json:"end_time"`
 		PosterList   string    `json:"poster_list"`
@@ -727,31 +728,41 @@ type RejectRefundRequest struct {
 }
 
 type OrganizerOrderListItem struct {
-	OrderNo        string            `json:"order_no"`
-	Status         int8              `json:"status"`
-	TotalPrice     int64             `json:"total_price"`
-	ActualPrice    int64             `json:"actual_price"`
-	PointsAmount   int64             `json:"points_amount"`
-	PointsDiscount int64             `json:"points_discount"`
-	Quantity       int               `json:"quantity"`
-	UserID         int64             `json:"user_id"`
-	UserName       string            `json:"user_name"`
-	UserMobile     string            `json:"user_mobile"`
-	UserAvatar     string            `json:"user_avatar"`
-	BuyerName      string            `json:"buyer_name"`
-	BuyerIDCard    string            `json:"buyer_id_card"`
-	Viewers        []OrderViewerItem `json:"viewers,omitempty"`
-	ActivityID     int64             `json:"activity_id"`
-	ActivityName   string            `json:"activity_name"`
-	TicketSpecID   int64             `json:"ticket_spec_id"`
-	TicketSpecName string            `json:"ticket_spec_name"`
-	PayMethod      string            `json:"pay_method"`
-	SalesChannel   string            `json:"sales_channel"`
-	PayTime        *time.Time        `json:"pay_time"`
-	CreatedAt      time.Time         `json:"created_at"`
-	ExpireTime     time.Time         `json:"expire_time"`
-	WithdrawStatus string            `json:"withdraw_status"`
-	WithdrawAmount int64             `json:"withdraw_amount"`
+	OrderNo          string            `json:"order_no"`
+	Status           int8              `json:"status"`
+	TotalPrice       int64             `json:"total_price"`
+	ActualPrice      int64             `json:"actual_price"`
+	PointsAmount     int64             `json:"points_amount"`
+	PointsDiscount   int64             `json:"points_discount"`
+	Quantity         int               `json:"quantity"`
+	UserID           int64             `json:"user_id"`
+	UserName         string            `json:"user_name"`
+	UserMobile       string            `json:"user_mobile"`
+	BuyerPhoneMasked string            `json:"buyer_phone_masked"`
+	UserAvatar       string            `json:"user_avatar"`
+	BuyerName        string            `json:"buyer_name"`
+	BuyerIDCard      string            `json:"buyer_id_card"`
+	Viewers          []OrderViewerItem `json:"viewers,omitempty"`
+	ActivityID       int64             `json:"activity_id"`
+	ActivityName     string            `json:"activity_name"`
+	PosterList       string            `json:"poster_list"`
+	TicketSpecID     int64             `json:"ticket_spec_id"`
+	TicketSpecName   string            `json:"ticket_spec_name"`
+	PayMethod        string            `json:"pay_method"`
+	SalesChannel     string            `json:"sales_channel"`
+	PayTime          *time.Time        `json:"pay_time"`
+	VerifiedAt       *time.Time        `json:"verified_at,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	ExpireTime       time.Time         `json:"expire_time"`
+	WithdrawStatus   string            `json:"withdraw_status"`
+	WithdrawAmount   int64             `json:"withdraw_amount"`
+}
+
+// OrganizerVerifierItem adds aggregate verification data to the existing
+// verifier payload without changing the verifier's persisted model.
+type OrganizerVerifierItem struct {
+	models.Verifier
+	VerifiedCount int64 `json:"verified_count"`
 }
 
 type OrganizerOrderDetailResponse struct {
@@ -913,11 +924,15 @@ type ScanOrderRequest struct {
 type ScanOrderResponse struct {
 	Success bool `json:"success"`
 	Order   *struct {
+		OrderNo           string            `json:"order_no"`
+		ActivityID        int64             `json:"activity_id"`
 		ActivityName      string            `json:"activity_name"`
+		PosterList        string            `json:"poster_list"`
 		TicketSpecName    string            `json:"ticket_spec_name"`
 		Quantity          int               `json:"quantity"`
 		BuyerNameMasked   string            `json:"buyer_name_masked"`
 		BuyerIDCardMasked string            `json:"buyer_id_card_masked"`
+		BuyerPhoneMasked  string            `json:"buyer_phone_masked"`
 		Viewers           []OrderViewerItem `json:"viewers,omitempty"`
 	} `json:"order,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
@@ -928,12 +943,34 @@ type ConfirmVerifyRequest struct {
 }
 
 type VerifiedListItem struct {
+	ID                int64     `json:"id"`
+	OrderNo           string    `json:"order_no"`
+	ActivityID        int64     `json:"activity_id"`
 	ActivityName      string    `json:"activity_name"`
+	PosterList        string    `json:"poster_list"`
 	TicketSpecName    string    `json:"ticket_spec_name"`
 	Quantity          int       `json:"quantity"`
+	VerifierID        int64     `json:"verifier_id"`
+	VerifierName      string    `json:"verifier_name"`
+	VerifierPhone     string    `json:"verifier_phone_masked"`
+	OrganizerID       int64     `json:"organizer_id"`
+	OrganizerName     string    `json:"organizer_name"`
 	BuyerNameMasked   string    `json:"buyer_name_masked"`
 	BuyerIDCardMasked string    `json:"buyer_id_card_masked"`
+	BuyerPhoneMasked  string    `json:"buyer_phone_masked"`
 	VerifiedAt        time.Time `json:"verified_at"`
+}
+
+// VerificationRecordFilter is shared by organizer verification history. The
+// verifier endpoint deliberately ignores organizer-wide filter fields.
+type VerificationRecordFilter struct {
+	VerifierID int64
+	ActivityID int64
+	Keyword    string
+	StartDate  string
+	EndDate    string
+	Page       int
+	Size       int
 }
 
 type ActivityStatisticsResponse struct {

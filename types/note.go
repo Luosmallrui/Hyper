@@ -24,7 +24,7 @@ const (
 
 // Note 笔记主表：存储核心文字和状态
 type Note struct {
-	ID       int64    `gorm:"primaryKey" json:"id"`           // 雪花算法ID
+	ID       int64    `gorm:"primaryKey" json:"id,string"`    // 雪花算法ID
 	UserID   int64    `gorm:"index" json:"user_id"`           // 作者ID
 	Title    string   `gorm:"type:varchar(100)" json:"title"` // 标题
 	Content  string   `gorm:"type:text" json:"content"`       // 正文内容
@@ -33,9 +33,16 @@ type Note struct {
 
 	MediaData []NoteMedia `gorm:"type:json" json:"media_data"`
 
-	Type        int `json:"type"`         // 1-图文, 2-视频
-	Status      int `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
-	VisibleConf int `json:"visible_conf"` // 1-公开, 2-粉丝可见, 3-自己可见
+	Type         int    `json:"type"`         // 1-图文, 2-视频
+	Status       int    `json:"status"`       // 0-审核中, 1-公开, 2-私密, 3-违规
+	VisibleConf  int    `json:"visible_conf"` // 1-公开, 2-粉丝可见, 3-自己可见
+	Nickname     string `json:"nickname"`
+	Avatar       string `json:"avatar"`
+	LikeCount    int64  `json:"like_count"`
+	CollCount    int64  `json:"coll_count"`
+	CommentCount int64  `json:"comment_count"`
+	ShareCount   int64  `json:"share_count"`
+	IsLiked      bool   `json:"is_liked"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

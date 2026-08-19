@@ -341,10 +341,10 @@ Page({
 
 ## 10. 当前仍保留的临时点
 
-核销订单相关接口当前仍使用：
+核销订单相关接口使用登录用户身份：
 
 ```http
-X-Verifier-Id: <verifier_id>
+Authorization: Bearer <verifier_user_access_token>
 ```
 
 例如：
@@ -354,4 +354,4 @@ POST /api/v1/verifier/confirm
 GET /api/v1/verifier/verified-list
 ```
 
-后续可以继续升级为“通过登录用户 `user_id` 查询已绑定的核销员身份”，从而去掉 `X-Verifier-Id`。
+后端通过登录用户 `user_id` 查询已绑定的激活核销员身份，不再需要 `X-Verifier-Id`。

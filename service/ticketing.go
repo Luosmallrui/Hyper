@@ -111,7 +111,8 @@ type ITicketingService interface {
 	GetRefundDetail(ctx context.Context, userID int64, refundNo string) (*types.RefundDetailResponse, error)
 	RejectRefund(ctx context.Context, userID int64, refundNo string, req types.RejectRefundRequest) error
 	CancelRefund(ctx context.Context, userID int64, refundNo string) error
-	ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.Verifier], error)
+	ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.OrganizerVerifierItem], error)
+	GetVerifierOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error)
 	AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error
 	UpdateVerifierStatus(ctx context.Context, userID, verifierID int64, status int8) error
 	DeleteVerifier(ctx context.Context, userID, verifierID int64) error
@@ -121,6 +122,9 @@ type ITicketingService interface {
 	ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error)
 	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error
 	ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
+	ListVerifiedByUser(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
+	ListOrganizerVerificationRecords(ctx context.Context, userID int64, filter types.VerificationRecordFilter) (*types.PageResponse[types.VerifiedListItem], error)
+	ResolveBoundVerifierID(ctx context.Context, userID int64) (int64, error)
 	ListViewers(ctx context.Context, userID int64) (*types.PageResponse[types.ViewerItem], error)
 	CreateViewer(ctx context.Context, userID int64, req types.CreateViewerReq) (int64, error)
 	UpdateViewer(ctx context.Context, userID, viewerID int64, req types.UpdateViewerReq) error
@@ -2283,22 +2287,29 @@ func (s *TicketingService) SaveActivityStep(ctx context.Context, userID int64, r
 	if err != nil {
 		return 0, err
 	}
-	// A venue organizer has one reviewed, fixed public address. Events it
-	// publishes inherit that address instead of creating a second venue.
+	// Venue organizers inherit their reviewed venue address unless the activity
+	// creator explicitly chose another event location in step 2. The organizer
+	// profile itself remains fixed and is never changed by this request.
 	if org.Type == models.OrganizerTypeVenue && activityType == models.ActivityTypeParty {
-		var profile models.OrganizerProfile
-		if err := s.DB.WithContext(ctx).Where("organizer_id = ?", org.ID).First(&profile).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return 0, errors.New("场地固定资料未完善，暂不能发布活动")
+		if hasExplicitActivityLocation(req) {
+			if err := validateExplicitActivityLocation(req); err != nil {
+				return 0, err
 			}
-			return 0, err
+		} else {
+			var profile models.OrganizerProfile
+			if err := s.DB.WithContext(ctx).Where("organizer_id = ?", org.ID).First(&profile).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return 0, errors.New("场地固定资料未完善，暂不能发布活动")
+				}
+				return 0, err
+			}
+			updates["province"] = org.Province
+			updates["city"] = org.City
+			updates["district"] = org.District
+			updates["address"] = profile.Address
+			updates["latitude"] = profile.Latitude
+			updates["longitude"] = profile.Longitude
 		}
-		updates["province"] = org.Province
-		updates["city"] = org.City
-		updates["district"] = org.District
-		updates["address"] = profile.Address
-		updates["latitude"] = profile.Latitude
-		updates["longitude"] = profile.Longitude
 	}
 	if activityType == models.ActivityTypeVenue && !wasVenue {
 		startTime, endTime := venueValidityWindow(time.Now())
@@ -3835,6 +3846,7 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 		Joins("JOIN activities a ON a.id = o.activity_id").
 		Joins("JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
 		Joins("LEFT JOIN users u ON u.id = o.user_id").
+		Joins("LEFT JOIN (SELECT order_id, MAX(verified_at) AS verified_at FROM verification_records GROUP BY order_id) vr ON vr.order_id = o.id").
 		Where("a.organizer_id = ?", org.ID)
 	if activityID > 0 {
 		query = query.Where("o.activity_id = ?", activityID)
@@ -3904,11 +3916,13 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 		BuyerIDCard    string
 		ActivityID     int64
 		ActivityName   string
+		PosterList     string
 		TicketSpecID   int64
 		TicketSpecName string
 		PayMethod      string
 		SalesChannel   string
 		PayTime        *time.Time
+		VerifiedAt     *time.Time
 		CreatedAt      time.Time
 		ExpireTime     time.Time
 	}
@@ -3929,11 +3943,13 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 			o.buyer_id_card,
 			o.activity_id,
 			a.name AS activity_name,
+			COALESCE(NULLIF(a.poster_list, ''), NULLIF(a.poster_detail, ''), NULLIF(a.poster_wechat, ''), NULLIF(a.poster_long, '')) AS poster_list,
 			o.ticket_spec_id,
 			ts.name AS ticket_spec_name,
 			o.pay_method,
 			o.sales_channel,
 			o.pay_time,
+			vr.verified_at,
 			o.created_at,
 			o.expire_time
 		`).
@@ -3962,31 +3978,34 @@ func (s *TicketingService) ListOrganizerOrders(ctx context.Context, userID int64
 	for _, row := range rows {
 		withdraw := withdrawAmounts[row.ID]
 		list = append(list, types.OrganizerOrderListItem{
-			OrderNo:        row.OrderNo,
-			Status:         row.Status,
-			TotalPrice:     row.TotalPrice,
-			ActualPrice:    row.ActualPrice,
-			PointsAmount:   row.PointsAmount,
-			PointsDiscount: row.PointsDiscount,
-			Quantity:       row.Quantity,
-			UserID:         row.UserID,
-			UserName:       row.UserName,
-			UserMobile:     maskPhone(row.UserMobile),
-			UserAvatar:     row.UserAvatar,
-			BuyerName:      row.BuyerName,
-			BuyerIDCard:    maskIDCard(row.BuyerIDCard),
-			Viewers:        orderViewerItems(viewersByOrderNo[row.OrderNo], false),
-			ActivityID:     row.ActivityID,
-			ActivityName:   row.ActivityName,
-			TicketSpecID:   row.TicketSpecID,
-			TicketSpecName: row.TicketSpecName,
-			PayMethod:      row.PayMethod,
-			SalesChannel:   row.SalesChannel,
-			PayTime:        row.PayTime,
-			CreatedAt:      row.CreatedAt,
-			ExpireTime:     row.ExpireTime,
-			WithdrawStatus: withdrawStatusForOrder(row.Status, withdraw),
-			WithdrawAmount: withdraw.PendingAmount + withdraw.SettledAmount,
+			OrderNo:          row.OrderNo,
+			Status:           row.Status,
+			TotalPrice:       row.TotalPrice,
+			ActualPrice:      row.ActualPrice,
+			PointsAmount:     row.PointsAmount,
+			PointsDiscount:   row.PointsDiscount,
+			Quantity:         row.Quantity,
+			UserID:           row.UserID,
+			UserName:         row.UserName,
+			UserMobile:       maskPhone(row.UserMobile),
+			BuyerPhoneMasked: maskPhone(row.UserMobile),
+			UserAvatar:       row.UserAvatar,
+			BuyerName:        row.BuyerName,
+			BuyerIDCard:      maskIDCard(row.BuyerIDCard),
+			Viewers:          orderViewerItems(viewersByOrderNo[row.OrderNo], false),
+			ActivityID:       row.ActivityID,
+			ActivityName:     row.ActivityName,
+			PosterList:       row.PosterList,
+			TicketSpecID:     row.TicketSpecID,
+			TicketSpecName:   row.TicketSpecName,
+			PayMethod:        row.PayMethod,
+			SalesChannel:     row.SalesChannel,
+			PayTime:          row.PayTime,
+			VerifiedAt:       row.VerifiedAt,
+			CreatedAt:        row.CreatedAt,
+			ExpireTime:       row.ExpireTime,
+			WithdrawStatus:   withdrawStatusForOrder(row.Status, withdraw),
+			WithdrawAmount:   withdraw.PendingAmount + withdraw.SettledAmount,
 		})
 	}
 	return &types.PageResponse[types.OrganizerOrderListItem]{List: list, Total: total}, nil
@@ -4245,6 +4264,37 @@ func (s *TicketingService) GetOrganizerOrderDetail(ctx context.Context, userID i
 		resp.UserMobile = maskPhone(user.Mobile)
 		resp.UserAvatar = user.Avatar
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// GetVerifierOrderDetail only grants an activated verifier access to orders
+// under its own organizer. User-facing /order/:order_no remains purchaser-only.
+func (s *TicketingService) GetVerifierOrderDetail(ctx context.Context, userID int64, orderNo string) (*types.OrganizerOrderDetailResponse, error) {
+	var verifier models.Verifier
+	if err := s.DB.WithContext(ctx).Where("user_id = ? AND status = ?", userID, models.VerifierStatusActive).Order("id DESC").First(&verifier).Error; err != nil {
+		return nil, err
+	}
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Table("ticket_orders o").
+		Select("o.*").
+		Joins("JOIN activities a ON a.id = o.activity_id").
+		Where("o.order_no = ? AND a.organizer_id = ?", orderNo, verifier.OrganizerID).
+		First(&order).Error; err != nil {
+		return nil, err
+	}
+	detail, err := s.buildOrderDetail(ctx, order)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.OrganizerOrderDetailResponse{TicketOrderDetailResponse: *detail, UserID: order.UserID}
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("id = ?", order.UserID).First(&user).Error; err == nil {
+		resp.UserName = user.Nickname
+		resp.UserMobile = maskPhone(user.Mobile)
+		resp.UserAvatar = user.Avatar
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	return resp, nil
@@ -4542,7 +4592,7 @@ func (s *TicketingService) CancelRefund(ctx context.Context, userID int64, refun
 	})
 }
 
-func (s *TicketingService) ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[models.Verifier], error) {
+func (s *TicketingService) ListVerifiers(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.OrganizerVerifierItem], error) {
 	org, err := s.findOrganizerByUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -4554,8 +4604,33 @@ func (s *TicketingService) ListVerifiers(ctx context.Context, userID int64, page
 		return nil, err
 	}
 	var list []models.Verifier
-	err = query.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error
-	return &types.PageResponse[models.Verifier]{List: list, Total: total}, err
+	if err := query.Order("id desc").Offset((page - 1) * size).Limit(size).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	verifierIDs := make([]int64, 0, len(list))
+	for _, verifier := range list {
+		verifierIDs = append(verifierIDs, verifier.ID)
+	}
+	verifiedCounts := make(map[int64]int64, len(verifierIDs))
+	if len(verifierIDs) > 0 {
+		var rows []struct {
+			VerifierID    int64
+			VerifiedCount int64
+		}
+		if err := s.DB.WithContext(ctx).Model(&models.VerificationRecord{}).
+			Select("verifier_id, COUNT(*) AS verified_count").Where("verifier_id IN ?", verifierIDs).
+			Group("verifier_id").Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			verifiedCounts[row.VerifierID] = row.VerifiedCount
+		}
+	}
+	items := make([]types.OrganizerVerifierItem, 0, len(list))
+	for _, verifier := range list {
+		items = append(items, types.OrganizerVerifierItem{Verifier: verifier, VerifiedCount: verifiedCounts[verifier.ID]})
+	}
+	return &types.PageResponse[types.OrganizerVerifierItem]{List: items, Total: total}, nil
 }
 
 func (s *TicketingService) AddVerifier(ctx context.Context, userID int64, req types.VerifierRequest) error {
@@ -4739,19 +4814,29 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	}
 	var spec models.TicketSpec
 	_ = s.DB.WithContext(ctx).First(&spec, order.TicketSpecID).Error
+	var buyer models.Users
+	_ = s.DB.WithContext(ctx).Select("mobile").First(&buyer, order.UserID).Error
 	item := struct {
+		OrderNo           string                  `json:"order_no"`
+		ActivityID        int64                   `json:"activity_id"`
 		ActivityName      string                  `json:"activity_name"`
+		PosterList        string                  `json:"poster_list"`
 		TicketSpecName    string                  `json:"ticket_spec_name"`
 		Quantity          int                     `json:"quantity"`
 		BuyerNameMasked   string                  `json:"buyer_name_masked"`
 		BuyerIDCardMasked string                  `json:"buyer_id_card_masked"`
+		BuyerPhoneMasked  string                  `json:"buyer_phone_masked"`
 		Viewers           []types.OrderViewerItem `json:"viewers,omitempty"`
 	}{
+		OrderNo:           order.OrderNo,
+		ActivityID:        order.ActivityID,
 		ActivityName:      activity.Name,
+		PosterList:        firstNonEmpty(activity.PosterList, activity.PosterDetail, activity.PosterWechat, activity.PosterLong),
 		TicketSpecName:    spec.Name,
 		Quantity:          order.Quantity,
 		BuyerNameMasked:   maskName(order.BuyerName),
 		BuyerIDCardMasked: maskIDCard(order.BuyerIDCard),
+		BuyerPhoneMasked:  maskPhone(buyer.Mobile),
 	}
 	if viewers, err := s.orderViewers(ctx, order.ID); err == nil {
 		item.Viewers = orderViewerItems(viewers, false)
@@ -4795,40 +4880,141 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 }
 
 func (s *TicketingService) ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error) {
-	page, size = normalizePage(page, size)
+	if verifierID <= 0 {
+		return nil, errors.New("核销员身份未识别")
+	}
+	return s.listVerified(ctx, "vr.verifier_id = ?", verifierID, types.VerificationRecordFilter{Page: page, Size: size})
+}
+
+// ListVerifiedByUser returns records from every verifier identity bound to the
+// same logged-in user. A verifier may be disabled and bound again later, which
+// creates another verifier row but must not make earlier verification history
+// disappear from that user's history.
+func (s *TicketingService) ListVerifiedByUser(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error) {
+	if _, err := s.ResolveBoundVerifierID(ctx, userID); err != nil {
+		return nil, err
+	}
+	return s.listVerified(ctx, "v.user_id = ?", userID, types.VerificationRecordFilter{Page: page, Size: size})
+}
+
+// ListOrganizerVerificationRecords returns every verification performed for
+// the current organizer, regardless of which of its verifiers performed it.
+func (s *TicketingService) ListOrganizerVerificationRecords(ctx context.Context, userID int64, filter types.VerificationRecordFilter) (*types.PageResponse[types.VerifiedListItem], error) {
+	org, err := s.findOrganizerByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.listVerified(ctx, "v.organizer_id = ?", org.ID, filter)
+}
+
+func (s *TicketingService) listVerified(ctx context.Context, condition string, conditionValue any, filter types.VerificationRecordFilter) (*types.PageResponse[types.VerifiedListItem], error) {
+	page, size := normalizePage(filter.Page, filter.Size)
 	var total int64
 	base := s.DB.WithContext(ctx).Table("verification_records vr").
-		Joins("JOIN ticket_orders o ON o.id = vr.order_id").
-		Joins("JOIN activities a ON a.id = vr.activity_id").
-		Joins("JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
-		Where("vr.verifier_id = ?", verifierID)
+		Joins("LEFT JOIN verifiers v ON v.id = vr.verifier_id").
+		Joins("LEFT JOIN organizers og ON og.id = v.organizer_id").
+		Joins("LEFT JOIN ticket_orders o ON o.id = vr.order_id").
+		Joins("LEFT JOIN activities a ON a.id = vr.activity_id").
+		Joins("LEFT JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
+		Joins("LEFT JOIN users u ON u.id = o.user_id").
+		Where(condition, conditionValue)
+	if filter.VerifierID > 0 {
+		base = base.Where("vr.verifier_id = ?", filter.VerifierID)
+	}
+	if filter.ActivityID > 0 {
+		base = base.Where("vr.activity_id = ?", filter.ActivityID)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.Where("o.order_no LIKE ? OR a.name LIKE ? OR v.name LIKE ? OR v.phone LIKE ?", like, like, like, like)
+	}
+	if startDate := strings.TrimSpace(filter.StartDate); startDate != "" {
+		start, err := parseDateStart(startDate)
+		if err != nil {
+			return nil, errors.New("start_date 格式错误")
+		}
+		base = base.Where("vr.verified_at >= ?", start)
+	}
+	if endDate := strings.TrimSpace(filter.EndDate); endDate != "" {
+		end, err := parseDateEnd(endDate)
+		if err != nil {
+			return nil, errors.New("end_date 格式错误")
+		}
+		base = base.Where("vr.verified_at < ?", end)
+	}
 	if err := base.Count(&total).Error; err != nil {
 		return nil, err
 	}
 	var rows []struct {
+		ID             int64
+		OrderNo        string
+		ActivityID     int64
 		ActivityName   string
+		PosterList     string
 		TicketSpecName string
 		Quantity       int
+		VerifierID     int64
+		VerifierName   string
+		VerifierPhone  string
+		OrganizerID    int64
+		OrganizerName  string
 		BuyerName      string
 		BuyerIDCard    string
+		BuyerPhone     string
 		VerifiedAt     time.Time
 	}
-	if err := base.Select("a.name AS activity_name, ts.name AS ticket_spec_name, o.quantity, o.buyer_name, o.buyer_id_card, vr.verified_at").
+	if err := base.Select(`vr.id, COALESCE(o.order_no, '') AS order_no, vr.activity_id,
+		COALESCE(NULLIF(a.name, ''), '活动已删除') AS activity_name,
+		COALESCE(NULLIF(a.poster_list, ''), NULLIF(a.poster_detail, ''), NULLIF(a.poster_wechat, ''), NULLIF(a.poster_long, '')) AS poster_list,
+		COALESCE(NULLIF(ts.name, ''), '票种已删除') AS ticket_spec_name,
+		COALESCE(o.quantity, 0) AS quantity, COALESCE(o.buyer_name, '') AS buyer_name,
+		COALESCE(o.buyer_id_card, '') AS buyer_id_card, COALESCE(u.mobile, '') AS buyer_phone,
+		vr.verifier_id, COALESCE(v.name, '') AS verifier_name, COALESCE(v.phone, '') AS verifier_phone,
+		COALESCE(v.organizer_id, 0) AS organizer_id, COALESCE(og.name, '') AS organizer_name, vr.verified_at`).
 		Order("vr.id desc").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	list := make([]types.VerifiedListItem, 0, len(rows))
 	for _, r := range rows {
 		list = append(list, types.VerifiedListItem{
+			ID:                r.ID,
+			OrderNo:           r.OrderNo,
+			ActivityID:        r.ActivityID,
 			ActivityName:      r.ActivityName,
+			PosterList:        r.PosterList,
 			TicketSpecName:    r.TicketSpecName,
 			Quantity:          r.Quantity,
+			VerifierID:        r.VerifierID,
+			VerifierName:      r.VerifierName,
+			VerifierPhone:     maskPhone(r.VerifierPhone),
+			OrganizerID:       r.OrganizerID,
+			OrganizerName:     r.OrganizerName,
 			BuyerNameMasked:   maskName(r.BuyerName),
 			BuyerIDCardMasked: maskIDCard(r.BuyerIDCard),
+			BuyerPhoneMasked:  maskPhone(r.BuyerPhone),
 			VerifiedAt:        r.VerifiedAt,
 		})
 	}
 	return &types.PageResponse[types.VerifiedListItem]{List: list, Total: total}, nil
+}
+
+// ResolveBoundVerifierID derives the verifier identity from the authenticated
+// Mini Program user. This avoids silently querying verifier_id=0 when an old
+// client loses its X-Verifier-Id header after a restart.
+func (s *TicketingService) ResolveBoundVerifierID(ctx context.Context, userID int64) (int64, error) {
+	if userID <= 0 {
+		return 0, errors.New("请先登录核销员账号")
+	}
+	var verifier models.Verifier
+	if err := s.DB.WithContext(ctx).
+		Where("user_id = ? AND status = ?", userID, models.VerifierStatusActive).
+		Order("id DESC").First(&verifier).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("当前账号不是已激活核销员")
+		}
+		return 0, err
+	}
+	return verifier.ID, nil
 }
 
 func (s *TicketingService) ListViewers(ctx context.Context, userID int64) (*types.PageResponse[types.ViewerItem], error) {
@@ -5303,11 +5489,19 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		resp.Activity.IsHidden = true
 		resp.Activity.HiddenReason = unavailableActivityName
 	} else {
+		activityAddress := act.Address
+		if activityAddress == "" {
+			var profile models.OrganizerProfile
+			if err := s.DB.WithContext(ctx).Where("organizer_id = ?", act.OrganizerID).First(&profile).Error; err == nil {
+				activityAddress = profile.Address
+			}
+		}
 		resp.Activity.ID = act.ID
 		resp.Activity.Name = act.Name
+		resp.Activity.Address = activityAddress
 		resp.Activity.StartTime = act.StartTime
 		resp.Activity.EndTime = act.EndTime
-		resp.Activity.PosterList = act.PosterList
+		resp.Activity.PosterList = firstNonEmpty(act.PosterList, act.PosterDetail, act.PosterWechat, act.PosterLong)
 		resp.Activity.IsHidden = act.IsHidden == 1
 		resp.Activity.HiddenReason = act.HiddenReason
 	}
@@ -5785,6 +5979,20 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 		}
 	}
 	return updates, nil
+}
+
+func hasExplicitActivityLocation(req types.ActivityCreateRequest) bool {
+	return req.Address != nil || req.Latitude != nil || req.Longitude != nil
+}
+
+func validateExplicitActivityLocation(req types.ActivityCreateRequest) error {
+	if req.Address == nil || strings.TrimSpace(*req.Address) == "" {
+		return errors.New("自定义活动地址不能为空")
+	}
+	if req.Latitude == nil || req.Longitude == nil {
+		return errors.New("自定义活动地址必须同时提供经纬度")
+	}
+	return validateChinaCoordinate(*req.Latitude, *req.Longitude)
 }
 
 // activityEditNeedsReaudit deliberately treats every writable content field

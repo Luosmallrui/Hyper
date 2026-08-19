@@ -102,6 +102,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		organizer.GET("/refunds", h.wrap(h.ListOrganizerRefunds))
 		organizer.GET("/refunds/:refund_no", h.wrap(h.GetOrganizerRefundDetail))
 		organizer.GET("/verifiers", h.wrap(h.ListVerifiers))
+		organizer.GET("/verification-records", h.wrap(h.ListOrganizerVerificationRecords))
 		organizer.POST("/verifier", h.wrap(h.AddVerifier))
 		organizer.PATCH("/verifier/:id/status", h.wrap(h.UpdateVerifierStatus))
 		organizer.DELETE("/verifier/:id", h.wrap(h.DeleteVerifier))
@@ -155,8 +156,9 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		verifier.GET("/activation-info", h.wrap(h.GetVerifierActivationInfo))
 		verifier.POST("/activate", auth, h.wrap(h.ActivateVerifier))
 		verifier.POST("/scan", h.wrap(h.ScanOrder))
-		verifier.POST("/confirm", h.wrap(h.ConfirmVerify))
-		verifier.GET("/verified-list", h.wrap(h.ListVerified))
+		verifier.POST("/confirm", auth, h.wrap(h.ConfirmVerify))
+		verifier.GET("/verified-list", auth, h.wrap(h.ListVerified))
+		verifier.GET("/orders/:order_no", auth, h.wrap(h.GetVerifierOrderDetail))
 	}
 
 	viewers := v1.Group("/viewers", auth)
@@ -1370,6 +1372,18 @@ func (h *Ticketing) GetOrganizerOrderDetail(c *gin.Context) error {
 	return nil
 }
 
+func (h *Ticketing) GetVerifierOrderDetail(c *gin.Context) error {
+	resp, err := h.TicketingService.GetVerifierOrderDetail(c.Request.Context(), currentUserID(c), c.Param("order_no"))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "订单不存在或不属于当前核销员")
+		}
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
 func (h *Ticketing) CancelOrganizerTicketOrder(c *gin.Context) error {
 	var req types.CancelOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1450,6 +1464,31 @@ func (h *Ticketing) CancelRefund(c *gin.Context) error {
 
 func (h *Ticketing) ListVerifiers(c *gin.Context) error {
 	resp, err := h.TicketingService.ListVerifiers(c.Request.Context(), currentUserID(c), page(c), size(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+func (h *Ticketing) ListOrganizerVerificationRecords(c *gin.Context) error {
+	verifierID, err := ticketingQueryInt(c, "verifier_id", 0)
+	if err != nil {
+		return err
+	}
+	activityID, err := ticketingQueryInt(c, "activity_id", 0)
+	if err != nil {
+		return err
+	}
+	resp, err := h.TicketingService.ListOrganizerVerificationRecords(c.Request.Context(), currentUserID(c), types.VerificationRecordFilter{
+		VerifierID: int64(verifierID),
+		ActivityID: int64(activityID),
+		Keyword:    c.Query("keyword"),
+		StartDate:  c.Query("start_date"),
+		EndDate:    c.Query("end_date"),
+		Page:       page(c),
+		Size:       size(c),
+	})
 	if err != nil {
 		return err
 	}
@@ -1560,7 +1599,11 @@ func (h *Ticketing) ConfirmVerify(c *gin.Context) error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return err
 	}
-	if err := h.TicketingService.ConfirmVerify(c.Request.Context(), verifierID(c), req); err != nil {
+	verifierID, err := h.TicketingService.ResolveBoundVerifierID(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		return response.NewError(http.StatusForbidden, err.Error())
+	}
+	if err := h.TicketingService.ConfirmVerify(c.Request.Context(), verifierID, req); err != nil {
 		return err
 	}
 	response.Success(c, gin.H{"success": true})
@@ -1568,8 +1611,11 @@ func (h *Ticketing) ConfirmVerify(c *gin.Context) error {
 }
 
 func (h *Ticketing) ListVerified(c *gin.Context) error {
-	resp, err := h.TicketingService.ListVerified(c.Request.Context(), verifierID(c), page(c), size(c))
+	resp, err := h.TicketingService.ListVerifiedByUser(c.Request.Context(), currentUserID(c), page(c), size(c))
 	if err != nil {
+		if strings.Contains(err.Error(), "核销员") || strings.Contains(err.Error(), "登录") {
+			return response.NewError(http.StatusForbidden, err.Error())
+		}
 		return err
 	}
 	response.Success(c, resp)
@@ -1603,11 +1649,6 @@ func (h *Ticketing) UploadFile(c *gin.Context) error {
 
 func currentUserID(c *gin.Context) int64 {
 	return int64(c.GetInt("user_id"))
-}
-
-func verifierID(c *gin.Context) int64 {
-	id, _ := strconv.ParseInt(c.GetHeader("X-Verifier-Id"), 10, 64)
-	return id
 }
 
 func isViewerConflict(err error) bool {

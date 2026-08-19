@@ -33,6 +33,7 @@ type INoteService interface {
 	GetALlNote(ctx context.Context) ([]*models.Note, error)
 	GetNoteByChannelID(ctx context.Context, userId int, cursor int64, pageSize int, channelId int) (types.ListNotesRep, error)
 	GetRelatedNotes(ctx context.Context, req types.ListRelatedNotesReq, currentUserID uint64) (types.ListNotesRep, error)
+	EnrichNoteCards(ctx context.Context, notes []*types.Note, currentUserID uint64)
 	RecordShare(ctx context.Context, userID, noteID uint64, channel string) error
 }
 
@@ -141,6 +142,40 @@ func (e *noteEnrichment) getStats(noteID uint64) *types.NoteStats {
 		return s
 	}
 	return &types.NoteStats{}
+}
+
+// EnrichNoteCards adds author and aggregate fields to compact note cards. It
+// deliberately uses the existing batched enrichment path so profile lists do
+// not issue a separate query for every card.
+func (s *NoteService) EnrichNoteCards(ctx context.Context, notes []*types.Note, currentUserID uint64) {
+	if len(notes) == 0 {
+		return
+	}
+	userIDs := make([]uint64, 0, len(notes))
+	noteIDs := make([]uint64, 0, len(notes))
+	for _, note := range notes {
+		if note == nil || note.ID <= 0 {
+			continue
+		}
+		userIDs = append(userIDs, uint64(note.UserID))
+		noteIDs = append(noteIDs, uint64(note.ID))
+	}
+	enrich := s.enrichNotes(ctx, userIDs, noteIDs, currentUserID)
+	for _, note := range notes {
+		if note == nil || note.ID <= 0 {
+			continue
+		}
+		if user, ok := enrich.Users[uint64(note.UserID)]; ok {
+			note.Nickname = user.Nickname
+			note.Avatar = user.Avatar
+		}
+		stats := enrich.getStats(uint64(note.ID))
+		note.LikeCount = stats.LikeCount
+		note.CollCount = stats.CollCount
+		note.CommentCount = stats.CommentCount
+		note.ShareCount = stats.ShareCount
+		note.IsLiked = enrich.LikeStatus[uint64(note.ID)]
+	}
 }
 
 // ============================================================================

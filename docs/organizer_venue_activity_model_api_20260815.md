@@ -166,6 +166,24 @@ PUT /api/v1/admin/organizers/:id/audit
 
 ## 4. 发布活动
 
+场地主办方发布 `party` 活动时，step 2 可选择活动地点：
+
+- 不传 `address`、`latitude`、`longitude`：自动继承已审核场地的省、市、区、地址和坐标。
+- 显式传入上述任一位置字段：视为自定义活动地点，必须同时传非空 `address`、`latitude`、`longitude`；`province`、`city`、`district` 如传入则按活动自身资料保存，不再被场地主资料覆盖。
+- 自定义活动地点不会修改场地主办方的固定场地资料；若要迁址，仍走场地资料二次审核。
+
+示例：
+
+```json
+{
+  "step": 2,
+  "address": "成都市武侯区音乐公园",
+  "latitude": 30.6352,
+  "longitude": 104.0431,
+  "district": "武侯区"
+}
+```
+
 ```http
 POST /api/v1/activity/create
 Authorization: Bearer <access_token>

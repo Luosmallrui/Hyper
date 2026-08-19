@@ -791,11 +791,16 @@ func (s *AdminService) DeleteVerifier(ctx context.Context, id int64) error {
 func (s *AdminService) ListVerificationRecords(ctx context.Context, page, pageSize int, keyword string, organizerID int64) (*types.AdminPageResponse[map[string]any], error) {
 	page, pageSize = normalizeAdminPage(page, pageSize)
 	query := s.DB.WithContext(ctx).Table("verification_records vr").
-		Select("vr.*, v.name AS verifier_name, v.phone AS verifier_phone, o.name AS organizer_name, tor.order_no, a.name AS activity_name").
+		Select(`vr.*, v.name AS verifier_name, v.phone AS verifier_phone, v.user_id AS verifier_user_id,
+			o.name AS organizer_name, tor.order_no, tor.quantity, tor.buyer_name, tor.buyer_id_card,
+			a.name AS activity_name, COALESCE(NULLIF(a.poster_list, ''), NULLIF(a.poster_detail, ''), NULLIF(a.poster_wechat, ''), NULLIF(a.poster_long, '')) AS poster_list,
+			ts.name AS ticket_spec_name, u.mobile AS buyer_phone`).
 		Joins("LEFT JOIN verifiers v ON v.id = vr.verifier_id").
 		Joins("LEFT JOIN organizers o ON o.id = v.organizer_id").
 		Joins("LEFT JOIN ticket_orders tor ON tor.id = vr.order_id").
-		Joins("LEFT JOIN activities a ON a.id = vr.activity_id")
+		Joins("LEFT JOIN activities a ON a.id = vr.activity_id").
+		Joins("LEFT JOIN ticket_specs ts ON ts.id = tor.ticket_spec_id").
+		Joins("LEFT JOIN users u ON u.id = tor.user_id")
 	if organizerID > 0 {
 		query = query.Where("v.organizer_id = ?", organizerID)
 	}

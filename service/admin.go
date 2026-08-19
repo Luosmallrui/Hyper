@@ -55,7 +55,7 @@ type IAdminService interface {
 	GetSettings(ctx context.Context) ([]types.AdminSettingItem, error)
 	UpdateSettings(ctx context.Context, settings []types.AdminSettingItem) error
 	GetSystemConfig(ctx context.Context) (*types.AdminSystemConfig, error)
-	UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfig) error
+	UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfigUpdateRequest) error
 	GetDashboardStats(ctx context.Context) (*types.AdminDashboardStats, error)
 	GetAdminProfile(ctx context.Context, adminID int64) (*types.AdminProfileResponse, error)
 	UpdateAdminProfile(ctx context.Context, adminID int64, req types.AdminProfileRequest) error
@@ -1719,30 +1719,48 @@ func (s *AdminService) GetSystemConfig(ctx context.Context) (*types.AdminSystemC
 	}, nil
 }
 
-func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfig) error {
-	config.SystemName = strings.TrimSpace(config.SystemName)
-	config.ICPRecordNo = strings.TrimSpace(config.ICPRecordNo)
-	config.CustomerServicePhone = strings.TrimSpace(config.CustomerServicePhone)
-	config.CustomerServiceWechat = strings.TrimSpace(config.CustomerServiceWechat)
-	config.CustomerServiceEmail = strings.TrimSpace(config.CustomerServiceEmail)
-	config.CustomerServiceHours = strings.TrimSpace(config.CustomerServiceHours)
-	config.WithdrawArrivalCycle = strings.TrimSpace(config.WithdrawArrivalCycle)
-	if config.SystemName == "" {
-		return errors.New("系统名称不能为空")
+func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.AdminSystemConfigUpdateRequest) error {
+	settings := make([]types.AdminSettingItem, 0, 9)
+	appendString := func(key, remark string, value *string, maxLen int, required bool) error {
+		if value == nil {
+			return nil
+		}
+		trimmed := strings.TrimSpace(*value)
+		if required && trimmed == "" {
+			return errors.New("系统名称不能为空")
+		}
+		if len(trimmed) > maxLen {
+			return errors.New("系统配置字段长度超限")
+		}
+		settings = append(settings, types.AdminSettingItem{Key: key, Value: trimmed, Remark: remark})
+		return nil
 	}
-	if len(config.SystemName) > 100 || len(config.ICPRecordNo) > 100 || len(config.CustomerServicePhone) > 50 || len(config.CustomerServiceWechat) > 100 || len(config.CustomerServiceEmail) > 100 || len(config.CustomerServiceHours) > 100 || len(config.WithdrawArrivalCycle) > 100 {
-		return errors.New("系统配置字段长度超限")
+	if err := appendString("system_name", "平台系统名称", config.SystemName, 100, true); err != nil {
+		return err
 	}
-	settings := []types.AdminSettingItem{
-		{Key: "system_name", Value: config.SystemName, Remark: "平台系统名称"}, {Key: "icp_record_no", Value: config.ICPRecordNo, Remark: "ICP备案号"},
-		{Key: "customer_service_phone", Value: config.CustomerServicePhone, Remark: "客服电话"}, {Key: "customer_service_wechat", Value: config.CustomerServiceWechat, Remark: "客服微信"},
-		{Key: "customer_service_email", Value: config.CustomerServiceEmail, Remark: "客服邮箱"}, {Key: "customer_service_hours", Value: config.CustomerServiceHours, Remark: "客服服务时间"},
-		{Key: "withdraw_arrival_cycle", Value: config.WithdrawArrivalCycle, Remark: "商家提现到账周期展示文案"},
+	if err := appendString("icp_record_no", "ICP备案号", config.ICPRecordNo, 100, false); err != nil {
+		return err
 	}
-	// Keep an existing service account when older PC clients do not yet submit
-	// this optional field. A positive value explicitly replaces the account.
-	if config.CustomerServiceUserID > 0 {
-		settings = append(settings, types.AdminSettingItem{Key: "customer_service_user_id", Value: strconv.FormatInt(config.CustomerServiceUserID, 10), Remark: "客服聊天用户 ID"})
+	if err := appendString("customer_service_phone", "客服电话", config.CustomerServicePhone, 50, false); err != nil {
+		return err
+	}
+	if err := appendString("customer_service_wechat", "客服微信", config.CustomerServiceWechat, 100, false); err != nil {
+		return err
+	}
+	if err := appendString("customer_service_email", "客服邮箱", config.CustomerServiceEmail, 100, false); err != nil {
+		return err
+	}
+	if err := appendString("customer_service_hours", "客服服务时间", config.CustomerServiceHours, 100, false); err != nil {
+		return err
+	}
+	if err := appendString("withdraw_arrival_cycle", "商家提现到账周期展示文案", config.WithdrawArrivalCycle, 100, false); err != nil {
+		return err
+	}
+	if config.CustomerServiceUserID != nil {
+		if *config.CustomerServiceUserID < 0 {
+			return errors.New("客服聊天用户 ID 不能小于 0")
+		}
+		settings = append(settings, types.AdminSettingItem{Key: "customer_service_user_id", Value: strconv.FormatInt(*config.CustomerServiceUserID, 10), Remark: "客服聊天用户 ID"})
 	}
 	if config.DirectMessageEnabled != nil {
 		value := "0"
@@ -1750,6 +1768,9 @@ func (s *AdminService) UpdateSystemConfig(ctx context.Context, config types.Admi
 			value = "1"
 		}
 		settings = append(settings, types.AdminSettingItem{Key: "direct_message_enabled", Value: value, Remark: "普通用户私信开关"})
+	}
+	if len(settings) == 0 {
+		return errors.New("至少提交一项系统配置")
 	}
 	return s.UpdateSettings(ctx, settings)
 }

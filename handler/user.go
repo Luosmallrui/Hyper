@@ -333,6 +333,7 @@ func (u *User) GetMyNotes(c *gin.Context) error {
 		_ = json.Unmarshal([]byte(note.Location), &respNotes[i].Location)
 		_ = json.Unmarshal([]byte(note.MediaData), &respNotes[i].MediaData)
 	}
+	u.NoteService.EnrichNoteCards(c.Request.Context(), respNotes, uint64(userID))
 
 	if err != nil {
 		return response.NewError(http.StatusInternalServerError, err.Error())

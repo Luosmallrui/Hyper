@@ -54,11 +54,19 @@ Content-Type: application/json
 
 字段未提交时，后端保留原开关值，兼容尚未升级的管理端。
 
+也支持只更新私信开关：
+
+```json
+{ "direct_message_enabled": true }
+```
+
 ## 客户端公开配置
 
 ```http
 GET /api/v1/system-config
 ```
+
+该公开接口响应使用 `Cache-Control: no-store`，配置保存后客户端重新请求即可拿到最新开关。
 
 响应同样包含：
 
