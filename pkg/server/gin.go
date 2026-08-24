@@ -87,6 +87,10 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	r.HEAD("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+	// Serve the Mini Program's map web-view from the API host. Production
+	// deploys its files to /root/map-h5; MAP_H5_DIR keeps the location explicit
+	// for other environments without coupling the route to the process cwd.
+	r.StaticFS("/map", http.Dir(mapH5Dir()))
 	api := r.Group("/api")
 	h.Auth.RegisterRouter(api)
 	h.Map.RegisterRouter(api)
@@ -111,6 +115,16 @@ func NewGinEngine(h *Handlers) *gin.Engine {
 	h.Ticketing.RegisterRouter(api)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	return r
+}
+
+func mapH5Dir() string {
+	if dir := os.Getenv("MAP_H5_DIR"); dir != "" {
+		return dir
+	}
+	if _, err := os.Stat("/root/map-h5/index.html"); err == nil {
+		return "/root/map-h5"
+	}
+	return "./map-h5"
 }
 
 func CORSMiddleware() gin.HandlerFunc {
