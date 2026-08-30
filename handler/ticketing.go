@@ -1643,10 +1643,11 @@ func (h *Ticketing) ConfirmVerify(c *gin.Context) error {
 	if err != nil {
 		return response.NewError(http.StatusForbidden, err.Error())
 	}
-	if err := h.TicketingService.ConfirmVerify(c.Request.Context(), verifierID, req); err != nil {
+	resp, err := h.TicketingService.ConfirmVerify(c.Request.Context(), verifierID, req)
+	if err != nil {
 		return err
 	}
-	response.Success(c, gin.H{"success": true})
+	response.Success(c, resp)
 	return nil
 }
 

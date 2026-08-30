@@ -120,7 +120,7 @@ type ITicketingService interface {
 	GetVerifierActivationInfo(ctx context.Context, verifierID int64) (*types.VerifierActivationInfoResponse, error)
 	ActivateVerifier(ctx context.Context, userID int64, req types.ActivateVerifierRequest) (*types.ActivateVerifierResponse, error)
 	ScanOrder(ctx context.Context, req types.ScanOrderRequest) (*types.ScanOrderResponse, error)
-	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error
+	ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) (*types.ConfirmVerifyResponse, error)
 	ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
 	ListVerifiedByUser(ctx context.Context, userID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error)
 	ListOrganizerVerificationRecords(ctx context.Context, userID int64, filter types.VerificationRecordFilter) (*types.PageResponse[types.VerifiedListItem], error)
@@ -3758,6 +3758,14 @@ func (s *TicketingService) ApplyRefund(ctx context.Context, userID int64, req ty
 		if order.Status != models.TicketOrderStatusUsable {
 			return errors.New("当前订单不可退款")
 		}
+		// 产品决策（2026-08-24）：存在任意核销记录（含部分核销）的订单不允许退款
+		var verifiedCount int64
+		if err := tx.Model(&models.VerificationRecord{}).Where("order_id = ?", order.ID).Count(&verifiedCount).Error; err != nil {
+			return err
+		}
+		if verifiedCount > 0 {
+			return errors.New("已核销门票不支持退款")
+		}
 		var count int64
 		if err := tx.Model(&models.Refund{}).Where("order_id = ? AND status IN ?", order.ID, []int8{0, 1}).Count(&count).Error; err != nil {
 			return err
@@ -4829,6 +4837,15 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	_ = s.DB.WithContext(ctx).First(&spec, order.TicketSpecID).Error
 	var buyer models.Users
 	_ = s.DB.WithContext(ctx).Select("mobile").First(&buyer, order.UserID).Error
+	verifiedCount := s.orderVerifiedCount(ctx, order.ID)
+	// 兼容历史订单：整单核销的老数据只有 1 条核销记录但 quantity 可能 >1
+	if order.Status == models.TicketOrderStatusUsed && verifiedCount < order.Quantity {
+		verifiedCount = order.Quantity
+	}
+	remaining := order.Quantity - verifiedCount
+	if remaining < 0 {
+		remaining = 0
+	}
 	item := struct {
 		OrderNo           string                  `json:"order_no"`
 		ActivityID        int64                   `json:"activity_id"`
@@ -4836,6 +4853,8 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 		PosterList        string                  `json:"poster_list"`
 		TicketSpecName    string                  `json:"ticket_spec_name"`
 		Quantity          int                     `json:"quantity"`
+		VerifiedCount     int                     `json:"verified_count"`
+		Remaining         int                     `json:"remaining"`
 		BuyerNameMasked   string                  `json:"buyer_name_masked"`
 		BuyerIDCardMasked string                  `json:"buyer_id_card_masked"`
 		BuyerPhoneMasked  string                  `json:"buyer_phone_masked"`
@@ -4847,6 +4866,8 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 		PosterList:        firstNonEmpty(activity.PosterList, activity.PosterDetail, activity.PosterWechat, activity.PosterLong),
 		TicketSpecName:    spec.Name,
 		Quantity:          order.Quantity,
+		VerifiedCount:     verifiedCount,
+		Remaining:         remaining,
 		BuyerNameMasked:   maskName(order.BuyerName),
 		BuyerIDCardMasked: maskIDCard(order.BuyerIDCard),
 		BuyerPhoneMasked:  maskPhone(buyer.Mobile),
@@ -4857,8 +4878,20 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	return &types.ScanOrderResponse{Success: true, Order: &item}, nil
 }
 
-func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// orderVerifiedCount 返回订单已核销张数（一张票对应一条 verification_records 记录）
+func (s *TicketingService) orderVerifiedCount(ctx context.Context, orderID int64) int {
+	var count int64
+	if err := s.DB.WithContext(ctx).Model(&models.VerificationRecord{}).Where("order_id = ?", orderID).Count(&count).Error; err != nil {
+		return 0
+	}
+	return int(count)
+}
+
+// ConfirmVerify 按张核销：quantity>1 的订单可分多次核销，每次默认核销 1 张
+// （可通过 req.Quantity 指定本次张数），全部核销完成后订单才置为已使用。
+func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) (*types.ConfirmVerifyResponse, error) {
+	resp := &types.ConfirmVerifyResponse{OrderNo: req.OrderNo}
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var verifier models.Verifier
 		if err := tx.First(&verifier, verifierID).Error; err != nil {
 			return err
@@ -4888,16 +4921,50 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 		if refundCount > 0 {
 			return errors.New("订单售后处理中，暂不可核销")
 		}
-		if err := tx.Model(&order).Update("status", models.TicketOrderStatusUsed).Error; err != nil {
+		var verifiedCount int64
+		if err := tx.Model(&models.VerificationRecord{}).Where("order_id = ?", order.ID).Count(&verifiedCount).Error; err != nil {
 			return err
 		}
-		return tx.Create(&models.VerificationRecord{
-			OrderID:    order.ID,
-			VerifierID: verifier.ID,
-			ActivityID: order.ActivityID,
-			VerifiedAt: time.Now(),
-		}).Error
+		remaining := order.Quantity - int(verifiedCount)
+		if remaining <= 0 {
+			return errors.New("订单已全部核销")
+		}
+		// 默认核销 1 张，超出剩余张数时按剩余张数核销
+		n := req.Quantity
+		if n <= 0 {
+			n = 1
+		}
+		if n > remaining {
+			n = remaining
+		}
+		now := time.Now()
+		for i := 0; i < n; i++ {
+			if err := tx.Create(&models.VerificationRecord{
+				OrderID:    order.ID,
+				VerifierID: verifier.ID,
+				ActivityID: order.ActivityID,
+				VerifiedAt: now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		verifiedCount += int64(n)
+		// 最后一张核销完成，订单才整单置为已使用
+		if int(verifiedCount) >= order.Quantity {
+			if err := tx.Model(&order).Update("status", models.TicketOrderStatusUsed).Error; err != nil {
+				return err
+			}
+		}
+		resp.Success = true
+		resp.Quantity = order.Quantity
+		resp.VerifiedCount = int(verifiedCount)
+		resp.Remaining = order.Quantity - int(verifiedCount)
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *TicketingService) ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error) {
@@ -5503,6 +5570,15 @@ func (s *TicketingService) buildOrderDetail(ctx context.Context, order models.Ti
 		QRCode:         order.QRCode,
 		QRCodeURL:      order.QRCodeURL,
 		ExpireTime:     order.ExpireTime,
+	}
+	resp.VerifiedCount = s.orderVerifiedCount(ctx, order.ID)
+	// 兼容历史整单核销订单：只有 1 条核销记录但 quantity 可能 >1
+	if order.Status == models.TicketOrderStatusUsed && resp.VerifiedCount < order.Quantity {
+		resp.VerifiedCount = order.Quantity
+	}
+	resp.Remaining = order.Quantity - resp.VerifiedCount
+	if resp.Remaining < 0 {
+		resp.Remaining = 0
 	}
 	if activityMissing {
 		resp.Activity.ID = order.ActivityID

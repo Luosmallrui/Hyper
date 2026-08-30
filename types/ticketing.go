@@ -640,6 +640,8 @@ type TicketOrderDetailResponse struct {
 	PointsDiscount   int64  `json:"points_discount"`
 	RefundNo         string `json:"refund_no,omitempty"`
 	Quantity         int    `json:"quantity"`
+	VerifiedCount    int    `json:"verified_count"` // 已核销张数（2026-08-30 新增，>0 时不允许退款）
+	Remaining        int    `json:"remaining"`      // 剩余可核销张数
 	Activity         struct {
 		ID           int64     `json:"id"`
 		Name         string    `json:"name"`
@@ -930,6 +932,8 @@ type ScanOrderResponse struct {
 		PosterList        string            `json:"poster_list"`
 		TicketSpecName    string            `json:"ticket_spec_name"`
 		Quantity          int               `json:"quantity"`
+		VerifiedCount     int               `json:"verified_count"`
+		Remaining         int               `json:"remaining"`
 		BuyerNameMasked   string            `json:"buyer_name_masked"`
 		BuyerIDCardMasked string            `json:"buyer_id_card_masked"`
 		BuyerPhoneMasked  string            `json:"buyer_phone_masked"`
@@ -940,6 +944,17 @@ type ScanOrderResponse struct {
 
 type ConfirmVerifyRequest struct {
 	OrderNo string `json:"order_no" binding:"required"`
+	// Quantity 本次核销张数，缺省为 1；超过剩余可核销张数时按剩余张数核销
+	Quantity int `json:"quantity"`
+}
+
+// ConfirmVerifyResponse 按张核销结果（2026-08-30 新增，全部为增量字段）
+type ConfirmVerifyResponse struct {
+	Success       bool   `json:"success"`
+	OrderNo       string `json:"order_no"`
+	Quantity      int    `json:"quantity"`       // 订单总张数
+	VerifiedCount int    `json:"verified_count"` // 累计已核销张数（含本次）
+	Remaining     int    `json:"remaining"`      // 剩余可核销张数
 }
 
 type VerifiedListItem struct {

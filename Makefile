@@ -101,22 +101,22 @@ SERVER_DIR  ?= /root
 SERVER_KEY  ?= SHA256:Nn7QJMhgVovIR8hR6hpoFh3XSFrIiM9ehiJw27q/Iag
 
 # Windows: use plink/pscp (sshpass is unreliable under MSYS2/Git Bash)
-# Others:   use sshpass + scp/ssh
+# Others:   use sshpass + rsync/ssh
 ifeq ($(OS),Windows_NT)
 SSH_CMD := plink -batch -hostkey "$(SERVER_KEY)" -pw '$(SERVER_PASS)'
 SCP_CMD := pscp -batch -hostkey "$(SERVER_KEY)" -pw '$(SERVER_PASS)'
+PUSH_CMD = $(SCP_CMD) $(BIN_DIR)/$(1) $(SERVER_USER)@$(SERVER_HOST):$(SERVER_DIR)/.$(1).new
 else
-SSH_CMD := sshpass -p '$(SERVER_PASS)' ssh -o StrictHostKeyChecking=no
-SCP_CMD := sshpass -p '$(SERVER_PASS)' scp -o StrictHostKeyChecking=no
+SSH_OPTS := -o StrictHostKeyChecking=no -o LogLevel=ERROR
+SSH_CMD := sshpass -p '$(SERVER_PASS)' ssh $(SSH_OPTS)
+PUSH_CMD = sshpass -p '$(SERVER_PASS)' rsync --progress --rsh="ssh $(SSH_OPTS)" $(BIN_DIR)/$(1) $(SERVER_USER)@$(SERVER_HOST):$(SERVER_DIR)/.$(1).new
 endif
 
 .PHONY: push
 push: build
 	@echo "==> upload api-server & conn-server to $(SERVER_USER)@$(SERVER_HOST):$(SERVER_DIR)"
-	@$(SCP_CMD) \
-		$(BIN_DIR)/api-server $(SERVER_USER)@$(SERVER_HOST):$(SERVER_DIR)/.api-server.new
-	@$(SCP_CMD) \
-		$(BIN_DIR)/conn-server $(SERVER_USER)@$(SERVER_HOST):$(SERVER_DIR)/.conn-server.new
+	@$(call PUSH_CMD,api-server)
+	@$(call PUSH_CMD,conn-server)
 	@$(SSH_CMD) $(SERVER_USER)@$(SERVER_HOST) \
 		"cd $(SERVER_DIR) && chmod +x .api-server.new .conn-server.new && mv -f .api-server.new api-server && mv -f .conn-server.new conn-server"
 	@echo "==> push done"
