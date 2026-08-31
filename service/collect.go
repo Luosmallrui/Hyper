@@ -31,7 +31,9 @@ type CollectService struct {
 	CollectionDAO *dao.NoteCollectionDAO
 	StatsDAO      *dao.NoteStatsDAO
 	NoteDAO       *dao.NoteDAO
+	UserDAO       *dao.Users
 	Redis         *redis.Client
+	NotifyService INotificationService
 }
 
 func (s *CollectService) CheckCollectStatus(ctx context.Context, userID, noteID uint64) (bool, error) {
@@ -62,6 +64,7 @@ func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint
 	defer s.Redis.Del(ctx, lockKey)
 
 	// 状态迁移与计数更新放进同一事务（行锁保证并发下只迁移一次）
+	collected := false // 只有真正发生状态迁移才置 true，用于决定是否通知作者
 	err = s.CollectionDAO.Db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item models.NoteCollection
 		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -83,6 +86,7 @@ func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint
 				return err
 			}
 		}
+		collected = true
 
 		result := tx.Model(&models.NoteStats{}).
 			Where("note_id = ?", noteID).
@@ -104,7 +108,38 @@ func (s *CollectService) Collect(ctx context.Context, userID uint64, noteID uint
 		return err
 	}
 	s.invalidateStatsCache(ctx, noteID)
+	if collected {
+		s.notifyAuthorOnCollect(userID, noteID)
+	}
 	return nil
+}
+
+// notifyAuthorOnCollect 收藏成功后异步通知笔记作者；不阻塞主流程，失败仅记日志。
+// 不能用请求级 ctx（HTTP 返回后会被取消），这里使用独立的带超时后台 ctx。
+func (s *CollectService) notifyAuthorOnCollect(userID, noteID uint64) {
+	if s.NotifyService == nil || s.UserDAO == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		note, err := s.NoteDAO.GetByID(ctx, noteID)
+		if err != nil || note == nil {
+			return
+		}
+		// 自己收藏自己的笔记不通知
+		if note.UserID == userID {
+			return
+		}
+		nickname := "有人"
+		if collector, err := s.UserDAO.FindById(ctx, userID); err == nil && collector != nil && collector.Nickname != "" {
+			nickname = collector.Nickname
+		}
+		payload := fmt.Sprintf(`{"note_id":%d,"from_user_id":%d}`, noteID, userID)
+		s.NotifyService.Notify(ctx, int64(note.UserID), types.NotifyTypeInteraction,
+			"收到收藏", nickname+" 收藏了你的笔记", payload)
+	}()
 }
 
 func (s *CollectService) Uncollect(ctx context.Context, userID uint64, noteID uint64) error {

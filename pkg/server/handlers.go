@@ -26,4 +26,5 @@ type Handlers struct {
 	Event           *handler.Event
 	Admin           *handler.Admin
 	Ticketing       *handler.Ticketing
+	Notification    *handler.NotificationHandler
 }

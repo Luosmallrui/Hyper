@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -33,11 +34,12 @@ type IFollowService interface {
 }
 
 type FollowService struct {
-	FollowDAO *dao.UserFollowDAO
-	StatsDAO  *dao.UserStatsDAO
-	UserDAO   *dao.Users
-	Producer  rmq_client.Producer
-	Redis     *redis.Client
+	FollowDAO     *dao.UserFollowDAO
+	StatsDAO      *dao.UserStatsDAO
+	UserDAO       *dao.Users
+	Producer      rmq_client.Producer
+	Redis         *redis.Client
+	NotifyService INotificationService
 }
 
 func (s *FollowService) GetFollowingIDs(ctx context.Context, userID int) ([]int, error) {
@@ -117,6 +119,13 @@ func (s *FollowService) Follow(ctx context.Context, followerID, followeeID uint6
 
 		if _, err := s.Producer.Send(ctx, msg); err != nil {
 			log.Printf("[MQ] 发送关注通知失败: %v", err)
+		}
+
+		// 同步写入被关注者的通知收件箱（followerID == followeeID 已在入口拦截）
+		if s.NotifyService != nil {
+			notifyPayload := fmt.Sprintf(`{"from_user_id":%d}`, followerID)
+			s.NotifyService.Notify(ctx, int64(followeeID), types.NotifyTypeInteraction,
+				"新的粉丝", follower.Nickname+" 关注了你", notifyPayload)
 		}
 	}()
 

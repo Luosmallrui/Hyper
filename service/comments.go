@@ -33,6 +33,7 @@ type CommentsService struct {
 	UserService    IUserService
 	WeChatService  IWeChatService
 	Redis          *redis.Client
+	NotifyService  INotificationService
 }
 
 type ICommentsService interface {
@@ -481,6 +482,10 @@ func (s *CommentsService) CreateComment(ctx context.Context, req *types.CreateCo
 		return nil, err
 	}
 
+	// 4.5 异步通知：笔记作者收到评论；若是回复，被回复的评论作者收到回复提醒。
+	// 不阻塞主流程，失败仅记日志。
+	s.notifyOnCommentCreated(comment, moderationUser.Nickname)
+
 	// 5. 组装返回数据
 	users := s.UserService.BatchGetUserInfo(ctx, []uint64{userID})
 	user := users[userID]
@@ -501,6 +506,42 @@ func (s *CommentsService) CreateComment(ctx context.Context, req *types.CreateCo
 	}
 
 	return resp, nil
+}
+
+// notifyOnCommentCreated 评论创建成功后异步通知相关作者；不阻塞主流程，失败仅记日志。
+// 不能用请求级 ctx（HTTP 返回后会被取消），这里使用独立的带超时后台 ctx。
+func (s *CommentsService) notifyOnCommentCreated(comment *models.Comment, nickname string) {
+	if s.NotifyService == nil {
+		return
+	}
+	if nickname == "" {
+		nickname = "有人"
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		payload := fmt.Sprintf(`{"note_id":%d,"comment_id":%d,"from_user_id":%d}`, comment.NoteID, comment.ID, comment.UserID)
+
+		// 1. 通知笔记作者（自己评论自己的笔记不通知）
+		var note models.Note
+		noteErr := s.DB.WithContext(ctx).Select("id", "user_id").Where("id = ?", comment.NoteID).First(&note).Error
+		if noteErr == nil && note.UserID != comment.UserID {
+			s.NotifyService.Notify(ctx, int64(note.UserID), types.NotifyTypeInteraction,
+				"收到评论", nickname+" 评论了你的笔记", payload)
+		}
+
+		// 2. 回复场景：同时通知被回复评论的作者
+		// （自己回复自己不通知；与笔记作者同一人时不重复通知）
+		if comment.RootID > 0 && comment.ParentID > 0 {
+			var parent models.Comment
+			parentErr := s.DB.WithContext(ctx).Select("id", "user_id").Where("id = ?", comment.ParentID).First(&parent).Error
+			if parentErr == nil && parent.UserID != comment.UserID && (noteErr != nil || parent.UserID != note.UserID) {
+				s.NotifyService.Notify(ctx, int64(parent.UserID), types.NotifyTypeInteraction,
+					"收到回复", nickname+" 回复了你的评论", payload)
+			}
+		}
+	}()
 }
 
 // GetComments 获取一级评论列表(游标分页)

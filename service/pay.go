@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,8 +26,9 @@ import (
 var _ IPayService = (*PayService)(nil)
 
 type PayService struct {
-	DB     *gorm.DB
-	Config *config.Config
+	DB            *gorm.DB
+	Config        *config.Config
+	NotifyService INotificationService
 }
 
 func (p *PayService) OrderDetail(ctx context.Context, OrderId string, userId int) (*types.OrderDetail, error) {
@@ -354,8 +356,11 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 		return nil
 	}
 
+	// paidNow 标记本次回调是否真正发生了"待支付->已支付"流转；
+	// 微信回调会重试，只有首次流转成功才给买家发支付成功通知。
+	paidNow := false
 	// 开启事务
-	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 幂等检查：查询流水表并锁定行（SELECT FOR UPDATE）
 		var record models.PayRecord
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -369,6 +374,7 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 			log.L.Info("订单已处理过，跳过", zap.String("order_sn", orderSn))
 			return nil
 		}
+		paidNow = true
 
 		// 校验微信实付金额与下单金额一致，不一致拒绝入账（返回错误让微信重试，便于核查）
 		if notify.Amount == nil || notify.Amount.Total == nil {
@@ -443,6 +449,69 @@ func (p *PayService) ProcessOrderPaySuccess(ctx context.Context, notify *payment
 
 		return nil
 	})
+	if err == nil && paidNow {
+		// 首次支付成功才通知买家；回调重试（流水已是已支付）不会重复通知
+		p.notifyPaySuccess(orderSn)
+	}
+	return err
+}
+
+// notifyPaySuccess 订单首次支付成功后异步通知买家（商品订单与票务订单都覆盖）。
+// 不阻塞回调主流程，失败仅记日志。
+func (p *PayService) notifyPaySuccess(orderSn string) {
+	if p.NotifyService == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		payload := fmt.Sprintf(`{"order_no":%s}`, strconv.Quote(orderSn))
+		if strings.HasPrefix(orderSn, "T") {
+			// 票务订单：尽量带上活动名/票种名
+			var order models.TicketOrder
+			if err := p.DB.WithContext(ctx).Where("order_no = ?", orderSn).First(&order).Error; err != nil {
+				log.L.Warn("支付成功通知查询票务订单失败", zap.String("order_sn", orderSn), zap.Error(err))
+				return
+			}
+			name := ""
+			var activity models.Activity
+			if err := p.DB.WithContext(ctx).Select("name").Where("id = ?", order.ActivityID).First(&activity).Error; err == nil {
+				name = activity.Name
+			}
+			var spec models.TicketSpec
+			if err := p.DB.WithContext(ctx).Select("name").Where("id = ?", order.TicketSpecID).First(&spec).Error; err == nil && spec.Name != "" {
+				if name != "" {
+					name = name + "·" + spec.Name
+				} else {
+					name = spec.Name
+				}
+			}
+			content := "您的订单支付成功"
+			if name != "" {
+				content = fmt.Sprintf("您购买的 %s 支付成功", name)
+			}
+			p.NotifyService.Notify(ctx, order.UserID, types.NotifyTypePayment, "支付成功", content, payload)
+			return
+		}
+
+		// 商品订单：带上商品名
+		var order models.Order
+		if err := p.DB.WithContext(ctx).Where("order_sn = ?", orderSn).First(&order).Error; err != nil {
+			log.L.Warn("支付成功通知查询订单失败", zap.String("order_sn", orderSn), zap.Error(err))
+			return
+		}
+		name := ""
+		var item models.OrderItem
+		if err := p.DB.WithContext(ctx).Select("product_name").Where("order_sn = ?", orderSn).First(&item).Error; err == nil {
+			name = item.ProductName
+		}
+		content := "您的订单支付成功"
+		if name != "" {
+			content = fmt.Sprintf("您购买的 %s 支付成功", name)
+		}
+		p.NotifyService.Notify(ctx, int64(order.UserID), types.NotifyTypePayment, "支付成功", content, payload)
+	}()
 }
 
 func (p *PayService) processTicketOrderPaySuccess(tx *gorm.DB, orderNo string, tradeType string) error {
@@ -639,7 +708,10 @@ func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddo
 		return err
 	}
 
-	return p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// refundedNow 标记本次回调是否真正把退款置为成功；
+	// 微信退款回调会重试，只有首次流转成功才给买家发退款成功通知。
+	refundedNow := false
+	err = p.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var refund models.Refund
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
@@ -666,6 +738,7 @@ func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddo
 			return err
 		}
 		if status == models.RefundStatusSuccess {
+			refundedNow = true
 			var order models.TicketOrder
 			if err := tx.First(&order, refund.OrderID).Error; err == nil {
 				_ = tx.Model(&models.TicketSpec{}).
@@ -685,6 +758,36 @@ func (p *PayService) ProcessRefundNotify(ctx context.Context, wxRefund *refunddo
 			Description: "微信退款回调：" + wechatStatus,
 		}).Error
 	})
+	if err == nil && refundedNow {
+		// 首次退款成功才通知买家；回调重试（退款单已是成功）不会重复通知
+		p.notifyRefundSuccess(refundNo)
+	}
+	return err
+}
+
+// notifyRefundSuccess 退款首次成功后异步通知买家；不阻塞回调主流程，失败仅记日志。
+func (p *PayService) notifyRefundSuccess(refundNo string) {
+	if p.NotifyService == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var refund models.Refund
+		if err := p.DB.WithContext(ctx).Where("refund_no = ?", refundNo).First(&refund).Error; err != nil {
+			log.L.Warn("退款成功通知查询退款单失败", zap.String("refund_no", refundNo), zap.Error(err))
+			return
+		}
+		var order models.TicketOrder
+		if err := p.DB.WithContext(ctx).First(&order, refund.OrderID).Error; err != nil {
+			log.L.Warn("退款成功通知查询票务订单失败", zap.String("refund_no", refundNo), zap.Error(err))
+			return
+		}
+		payload := fmt.Sprintf(`{"order_no":%s,"refund_no":%s}`, strconv.Quote(order.OrderNo), strconv.Quote(refundNo))
+		content := fmt.Sprintf("退款 ¥%.2f 已原路退回", float64(refund.RefundAmount)/100)
+		p.NotifyService.Notify(ctx, order.UserID, types.NotifyTypePayment, "退款成功", content, payload)
+	}()
 }
 
 func (p *PayService) SyncWechatRefund(ctx context.Context, weChatClient *core.Client, refundNo string) (*models.Refund, error) {

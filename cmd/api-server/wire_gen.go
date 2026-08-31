@@ -28,42 +28,52 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config: cfg,
 		Redis:  redisClient,
 	}
+	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
+	producer := rocketmq.InitProducer(rocketMQConfig)
 	userService := &service.UserService{
 		Config:        cfg,
 		UsersRepo:     users,
 		Redis:         redisClient,
 		DB:            db,
 		WeChatService: weChatService,
+		MqProducer:    producer,
 	}
 	ossConfig := config.ProvideOssConfig(cfg)
 	image := dao.NewImage(db)
 	iOssService := service.NewOssService(ossConfig, image)
 	userFollowDAO := dao.NewUserFollowDAO(db)
 	userStatsDAO := dao.NewUserStatsDAO(db)
-	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
-	producer := rocketmq.InitProducer(rocketMQConfig)
+	notificationService := &service.NotificationService{
+		DB:         db,
+		MqProducer: producer,
+	}
 	followService := &service.FollowService{
-		FollowDAO: userFollowDAO,
-		StatsDAO:  userStatsDAO,
-		UserDAO:   users,
-		Producer:  producer,
-		Redis:     redisClient,
+		FollowDAO:     userFollowDAO,
+		StatsDAO:      userStatsDAO,
+		UserDAO:       users,
+		Producer:      producer,
+		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	noteLikeDAO := dao.NewNoteLikeDAO(db)
 	noteStatsDAO := dao.NewNoteStatsDAO(db)
 	noteDAO := dao.NewNoteDAO(db)
 	likeService := &service.LikeService{
-		LikeDAO:  noteLikeDAO,
-		StatsDAO: noteStatsDAO,
-		NoteDAO:  noteDAO,
-		Redis:    redisClient,
+		LikeDAO:       noteLikeDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+		UserDAO:       users,
+		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	noteCollectionDAO := dao.NewNoteCollectionDAO(db)
 	collectService := &service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		UserDAO:       users,
 		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	smsService := &service.SMSService{
 		Config: cfg,
@@ -81,8 +91,9 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		SmsService:     smsService,
 	}
 	payService := &service.PayService{
-		DB:     db,
-		Config: cfg,
+		DB:            db,
+		Config:        cfg,
+		NotifyService: notificationService,
 	}
 	pay := handler.NewPay(cfg, payService, db)
 	mapDao := dao.NewMapDao()
@@ -143,6 +154,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		UserService:    userService,
 		WeChatService:  weChatService,
 		Redis:          redisClient,
+		NotifyService:  notificationService,
 	}
 	topic := dao.NewTopic(db)
 	topicService := &service.TopicService{
@@ -185,23 +197,28 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		MqProducer:    producer,
 	}
 	serviceFollowService := service.FollowService{
-		FollowDAO: userFollowDAO,
-		StatsDAO:  userStatsDAO,
-		UserDAO:   users,
-		Producer:  producer,
-		Redis:     redisClient,
+		FollowDAO:     userFollowDAO,
+		StatsDAO:      userStatsDAO,
+		UserDAO:       users,
+		Producer:      producer,
+		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	serviceLikeService := service.LikeService{
-		LikeDAO:  noteLikeDAO,
-		StatsDAO: noteStatsDAO,
-		NoteDAO:  noteDAO,
-		Redis:    redisClient,
+		LikeDAO:       noteLikeDAO,
+		StatsDAO:      noteStatsDAO,
+		NoteDAO:       noteDAO,
+		UserDAO:       users,
+		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	serviceCollectService := service.CollectService{
 		CollectionDAO: noteCollectionDAO,
 		StatsDAO:      noteStatsDAO,
 		NoteDAO:       noteDAO,
+		UserDAO:       users,
 		Redis:         redisClient,
+		NotifyService: notificationService,
 	}
 	user := &handler.User{
 		Config:         cfg,
@@ -287,6 +304,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Config:        cfg,
 		WeChatService: weChatService,
 		OssService:    iOssService,
+		NotifyService: notificationService,
 	}
 	order := &handler.Order{
 		Config:           cfg,
@@ -344,6 +362,10 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		TicketingService: ticketingService,
 		OssService:       iOssService,
 	}
+	notificationHandler := &handler.NotificationHandler{
+		Config:              cfg,
+		NotificationService: notificationService,
+	}
 	handlers := &server.Handlers{
 		Auth:            auth,
 		Pay:             pay,
@@ -366,6 +388,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		Event:           event,
 		Admin:           handlerAdmin,
 		Ticketing:       ticketing,
+		Notification:    notificationHandler,
 	}
 	engine := server.NewGinEngine(handlers)
 	appProvider := &server.AppProvider{

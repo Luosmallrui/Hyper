@@ -53,6 +53,13 @@ func (m *NoticeSubscribe) handleSystem(ctx context.Context, msgs *rmq_client.Mes
 			return nil
 		}
 		m.handlePlatformMessage(ctx, &data)
+	case "user_notification":
+		var data types.NotificationPayload
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			log.L.Error("unmarshal user notification error", zap.Error(err))
+			return nil
+		}
+		m.handleUserNotification(ctx, &data)
 	}
 
 	return nil
@@ -102,5 +109,23 @@ func (m *NoticeSubscribe) handlePlatformMessage(ctx context.Context, data *types
 	content := socket.NewSenderContent().
 		SetReceive(cids...).
 		SetMessage("notice.platform_message", data)
+	socket.Session.Chat.Write(content)
+}
+
+// handleUserNotification 用户收件箱通知的在线实时提醒（离线靠收件箱接口补拉）
+func (m *NoticeSubscribe) handleUserNotification(ctx context.Context, data *types.NotificationPayload) {
+	sid := server.GetServerId()
+	channel := socket.Session.Chat.Name()
+	cids, err := m.ConnectService.GetUidFromClientIds(ctx, sid, channel, int(data.UserID))
+	if err != nil {
+		log.L.Error("GetUidFromClientIds error", zap.Error(err))
+		return
+	}
+	if len(cids) == 0 {
+		return
+	}
+	content := socket.NewSenderContent().
+		SetReceive(cids...).
+		SetMessage("notice.new", data)
 	socket.Session.Chat.Write(content)
 }

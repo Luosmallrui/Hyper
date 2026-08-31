@@ -75,15 +75,16 @@ func InitSocketServer(cfg *config.Config) *socket.AppProvider {
 		Config: cfg,
 		Redis:  redisClient,
 	}
+	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
+	producer := rocketmq.InitProducer(rocketMQConfig)
 	userService := &service.UserService{
 		Config:        cfg,
 		UsersRepo:     users,
 		Redis:         redisClient,
 		DB:            db,
 		WeChatService: weChatService,
+		MqProducer:    producer,
 	}
-	rocketMQConfig := config.ProvideRocketMQConfig(cfg)
-	producer := rocketmq.InitProducer(rocketMQConfig)
 	noteDAO := dao.NewNoteDAO(db)
 	messageService := &service.MessageService{
 		MessageDao:     messageDAO,

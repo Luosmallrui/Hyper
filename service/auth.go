@@ -5,6 +5,7 @@ import (
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/encrypt"
+	"Hyper/pkg/snowflake"
 	"Hyper/pkg/utils"
 	"Hyper/types"
 	"context"
@@ -12,10 +13,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
+	"strconv"
 	"time"
 
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/dysmsapi"
+	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -47,6 +51,7 @@ type UserService struct {
 	Redis         *redis.Client
 	DB            *gorm.DB
 	WeChatService IWeChatService
+	MqProducer    rmq_client.Producer
 }
 
 func (s *UserService) GetUserInfo(ctx context.Context, uid int) (*models.Users, error) {
@@ -85,8 +90,69 @@ func (s *UserService) UpdateMobile(ctx context.Context, UserId int, PhoneNumber 
 }
 
 func (s *UserService) RegisterOrLogin(ctx context.Context, phone string) (*models.Users, error) {
-	return s.UsersRepo.RegisterOrLogin(ctx, phone)
+	// 先记录是否为首次注册（RegisterOrLogin 内部对并发首登有 1062 兜底，
+	// 极端并发下可能多发一条欢迎语，业务上可接受）
+	isNewUser := !s.UsersRepo.IsMobileExist(ctx, phone)
+	user, err := s.UsersRepo.RegisterOrLogin(ctx, phone)
+	if err != nil {
+		return nil, err
+	}
+	if isNewUser {
+		// 新用户首次创建成功后发欢迎语；fire-and-forget，绝不影响注册
+		s.sendWelcomeMessage(user.Id)
+	}
+	return user, nil
+}
 
+// sendWelcomeMessage 新用户注册后，以 platform_setting 配置的客服账号
+// （customer_service_user_id）给其发一条单聊欢迎语。未配置客服账号则跳过。
+// 复用现有单聊持久化路径：与 SendMessage 一样投递到 IM MQ，由消费端统一落库
+// 并做 WS 推送；失败只记日志。
+func (s *UserService) sendWelcomeMessage(userID int) {
+	if s.MqProducer == nil || userID <= 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var setting models.PlatformSetting
+		if err := s.DB.WithContext(ctx).Where("setting_key = ?", "customer_service_user_id").First(&setting).Error; err != nil {
+			return // 未配置客服账号，跳过
+		}
+		csUserID, err := strconv.ParseInt(setting.Value, 10, 64)
+		if err != nil || csUserID <= 0 || csUserID == int64(userID) {
+			return
+		}
+
+		targetID := int64(userID)
+		lo, hi := csUserID, targetID
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		msg := &types.Message{
+			Id:          snowflake.GenID(),
+			SenderID:    csUserID,
+			TargetID:    targetID,
+			SessionType: types.SessionTypeSingle,
+			SessionHash: GetSessionHash(csUserID, targetID),
+			SessionID:   fmt.Sprintf("%d_%d", lo, hi),
+			MsgType:     types.MsgTypeText,
+			Content:     "欢迎来到 HyperFun",
+			Timestamp:   time.Now().UnixMilli(),
+			Status:      types.MsgStatusSending,
+			Ext:         map[string]interface{}{},
+			Channel:     types.ChannelChat,
+		}
+		body, err := json.Marshal(msg)
+		if err != nil {
+			log.Printf("[welcome] 序列化欢迎语失败: %v", err)
+			return
+		}
+		if _, err := s.MqProducer.Send(ctx, &rmq_client.Message{Topic: types.ImTopicChat, Body: body}); err != nil {
+			log.Printf("[welcome] 发送注册欢迎语失败: user_id=%d err=%v", userID, err)
+		}
+	}()
 }
 
 func (s *UserService) GetOrCreateByOpenID(ctx context.Context, openid string) (*models.Users, error) {

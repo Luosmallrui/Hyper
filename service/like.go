@@ -47,10 +47,12 @@ type ILikeService interface {
 }
 
 type LikeService struct {
-	LikeDAO  *dao.NoteLikeDAO
-	StatsDAO *dao.NoteStatsDAO
-	NoteDAO  *dao.NoteDAO
-	Redis    *redis.Client
+	LikeDAO       *dao.NoteLikeDAO
+	StatsDAO      *dao.NoteStatsDAO
+	NoteDAO       *dao.NoteDAO
+	UserDAO       *dao.Users
+	Redis         *redis.Client
+	NotifyService INotificationService
 }
 
 func (s *LikeService) Like(ctx context.Context, userID uint64, noteID uint64) error {
@@ -82,7 +84,11 @@ func (s *LikeService) Like(ctx context.Context, userID uint64, noteID uint64) er
 	}
 
 	// 状态迁移与计数更新在同一事务中完成（内部加行锁，并发下只迁移一次）
-	return s.createLikeRecord(ctx, userID, noteID)
+	if err := s.createLikeRecord(ctx, userID, noteID); err != nil {
+		return err
+	}
+	s.notifyAuthorOnLike(userID, noteID)
+	return nil
 }
 
 func (s *LikeService) Unlike(ctx context.Context, userID uint64, noteID uint64) error {
@@ -207,6 +213,9 @@ func (s *LikeService) LikeNote(ctx context.Context, userID, noteID uint64) error
 	// 4. 更新 Redis 缓存(即使失败也不影响)
 	s.updateRedisAfterLike(ctx, userID, noteID)
 
+	// 5. 通知笔记作者（取消点赞 Unlike/UnlikeNote 不通知）
+	s.notifyAuthorOnLike(userID, noteID)
+
 	return nil
 }
 
@@ -237,6 +246,34 @@ func (s *LikeService) UnlikeNote(ctx context.Context, userID, noteID uint64) err
 	s.updateRedisAfterUnlike(ctx, userID, noteID)
 
 	return nil
+}
+
+// notifyAuthorOnLike 点赞成功后异步通知笔记作者；不阻塞主流程，失败仅记日志。
+// 不能用请求级 ctx（HTTP 返回后会被取消），这里使用独立的带超时后台 ctx。
+func (s *LikeService) notifyAuthorOnLike(userID, noteID uint64) {
+	if s.NotifyService == nil || s.UserDAO == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		note, err := s.NoteDAO.GetByID(ctx, noteID)
+		if err != nil || note == nil {
+			return
+		}
+		// 自己赞自己的笔记不通知
+		if note.UserID == userID {
+			return
+		}
+		nickname := "有人"
+		if liker, err := s.UserDAO.FindById(ctx, userID); err == nil && liker != nil && liker.Nickname != "" {
+			nickname = liker.Nickname
+		}
+		payload := fmt.Sprintf(`{"note_id":%d,"from_user_id":%d}`, noteID, userID)
+		s.NotifyService.Notify(ctx, int64(note.UserID), types.NotifyTypeInteraction,
+			"收到点赞", nickname+" 赞了你的笔记", payload)
+	}()
 }
 
 // 写数据库:创建或恢复点赞记录，并更新统计。

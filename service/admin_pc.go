@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -1348,6 +1349,29 @@ func (s *AdminService) CreateMessage(ctx context.Context, adminID int64, req typ
 func (s *AdminService) publishPlatformMessage(ctx context.Context, msg models.PlatformMessage, targetIDs []int64) error {
 	if s.MqProducer == nil {
 		return errors.New("消息队列未初始化")
+	}
+	// C 端收件人直接落用户通知收件箱（organizers 类型的消息走主办方自己的已读模型，不在此落库）。
+	// 实时提醒仍由下面的 platform_message WS 推送覆盖，这里只写库、不再额外发 MQ。
+	if msg.Target != "merchant" && msg.Target != "organizer" && msg.Target != "business" && len(targetIDs) > 0 {
+		content := msg.Content
+		if rs := []rune(content); len(rs) > 500 { // user_notifications.content 上限 500
+			content = string(rs[:500])
+		}
+		payload := fmt.Sprintf(`{"message_id":%d}`, msg.ID)
+		notifications := make([]models.UserNotification, 0, len(targetIDs))
+		for _, targetID := range targetIDs {
+			notifications = append(notifications, models.UserNotification{
+				UserID:  targetID,
+				Type:    types.NotifyTypeSystem,
+				Title:   msg.Title,
+				Content: content,
+				Payload: payload,
+			})
+		}
+		// 落库失败不阻塞发布流程，仅记日志
+		if err := s.DB.WithContext(ctx).Create(&notifications).Error; err != nil {
+			log.Printf("[platform_message] 写入用户通知收件箱失败: message_id=%d err=%v", msg.ID, err)
+		}
 	}
 	mediaData := []string{}
 	if msg.MediaData != "" {

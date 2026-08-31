@@ -142,6 +142,7 @@ type TicketingService struct {
 	Config        *config.Config
 	WeChatService IWeChatService
 	OssService    IOssService
+	NotifyService INotificationService
 }
 
 var _ ITicketingService = (*TicketingService)(nil)
@@ -4891,6 +4892,10 @@ func (s *TicketingService) orderVerifiedCount(ctx context.Context, orderID int64
 // （可通过 req.Quantity 指定本次张数），全部核销完成后订单才置为已使用。
 func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, req types.ConfirmVerifyRequest) (*types.ConfirmVerifyResponse, error) {
 	resp := &types.ConfirmVerifyResponse{OrderNo: req.OrderNo}
+	// 核销成功后通知买家所需的信息（事务内捕获，事务提交成功后才发送）
+	var buyerID int64
+	var activityName string
+	verifiedNow := 0
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var verifier models.Verifier
 		if err := tx.First(&verifier, verifierID).Error; err != nil {
@@ -4905,12 +4910,14 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 		}
 		// 核销员只能核销所属主办方的活动订单
 		var activity models.Activity
-		if err := tx.Select("organizer_id").First(&activity, order.ActivityID).Error; err != nil {
+		if err := tx.Select("organizer_id", "name").First(&activity, order.ActivityID).Error; err != nil {
 			return err
 		}
 		if verifier.OrganizerID != activity.OrganizerID {
 			return errors.New("该订单不属于当前核销员所属主办方")
 		}
+		buyerID = order.UserID
+		activityName = activity.Name
 		if order.Status != models.TicketOrderStatusUsable {
 			return errors.New("订单不可核销")
 		}
@@ -4937,6 +4944,7 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 		if n > remaining {
 			n = remaining
 		}
+		verifiedNow = n
 		now := time.Now()
 		for i := 0; i < n; i++ {
 			if err := tx.Create(&models.VerificationRecord{
@@ -4964,7 +4972,25 @@ func (s *TicketingService) ConfirmVerify(ctx context.Context, verifierID int64, 
 	if err != nil {
 		return nil, err
 	}
+	// 事务提交成功后异步通知买家；失败不阻塞核销主流程
+	s.notifyTicketVerified(req.OrderNo, buyerID, activityName, verifiedNow)
 	return resp, nil
+}
+
+// notifyTicketVerified 核销成功后异步通知买家；不阻塞主流程，失败仅记日志。
+// 不能用请求级 ctx（HTTP 返回后会被取消），这里使用独立的带超时后台 ctx。
+func (s *TicketingService) notifyTicketVerified(orderNo string, buyerID int64, activityName string, count int) {
+	if s.NotifyService == nil || buyerID <= 0 || count <= 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		content := fmt.Sprintf("您的 %s 门票已核销 %d 张", activityName, count)
+		payload := fmt.Sprintf(`{"order_no":%s}`, strconv.Quote(orderNo))
+		s.NotifyService.Notify(ctx, buyerID, types.NotifyTypePayment, "门票已核销", content, payload)
+	}()
 }
 
 func (s *TicketingService) ListVerified(ctx context.Context, verifierID int64, page, size int) (*types.PageResponse[types.VerifiedListItem], error) {

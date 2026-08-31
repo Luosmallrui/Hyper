@@ -1028,3 +1028,21 @@ CREATE TABLE IF NOT EXISTS `note_collections`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='笔记收藏记录表';
+
+-- 用户通知收件箱（2026-08-31 新增：系统/互动/支付消息统一落库）
+CREATE TABLE IF NOT EXISTS `user_notifications`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`    bigint unsigned NOT NULL COMMENT '接收用户ID',
+    `type`       varchar(20)     NOT NULL COMMENT 'system:系统消息 interaction:互动通知 payment:支付消息',
+    `title`      varchar(100)    NOT NULL COMMENT '标题',
+    `content`    varchar(500)    NOT NULL DEFAULT '' COMMENT '内容',
+    `payload`    varchar(500)    NOT NULL DEFAULT '' COMMENT 'JSON 字符串，跳转参数',
+    `is_read`    tinyint         NOT NULL DEFAULT 0 COMMENT '0:未读 1:已读',
+    `created_at` datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_user_id` (`user_id`, `id`) USING BTREE,
+    KEY `idx_user_read` (`user_id`, `is_read`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='用户通知收件箱';

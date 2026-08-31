@@ -51,6 +51,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		wire.Struct(new(handler.Event), "*"),
 		wire.Struct(new(handler.Admin), "*"),
 		wire.Struct(new(handler.Ticketing), "*"),
+		wire.Struct(new(handler.NotificationHandler), "*"),
 
 		wire.Struct(new(server.AppProvider), "*"),
 		wire.Struct(new(server.Handlers), "*"),
