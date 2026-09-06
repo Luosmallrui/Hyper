@@ -120,6 +120,7 @@ type OrganizerProfile struct {
 	ID            int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrganizerID   int64     `gorm:"column:organizer_id;not null;uniqueIndex" json:"organizer_id"`
 	CoverImage    string    `gorm:"column:cover_image;size:255" json:"cover_image"`
+	MapCover      string    `gorm:"column:map_cover;size:255" json:"map_cover"`
 	Gallery       string    `gorm:"column:gallery;type:text" json:"gallery"`
 	Description   string    `gorm:"column:description;type:text" json:"description"`
 	BusinessHours string    `gorm:"column:business_hours;size:100" json:"business_hours"`

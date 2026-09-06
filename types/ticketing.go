@@ -34,6 +34,7 @@ type OrganizerApplyRequest struct {
 // an organizer with a fixed public place, not an activities row.
 type OrganizerVenueProfileInput struct {
 	CoverImage    string   `json:"cover_image"`
+	MapCover      string   `json:"map_cover"`
 	Gallery       []string `json:"gallery"`
 	Description   string   `json:"description"`
 	BusinessHours string   `json:"business_hours"`
@@ -271,6 +272,7 @@ type OrganizerProfileRequest struct {
 	// existing flat fields remain accepted for backward compatibility.
 	VenueProfile  *OrganizerVenueProfileInput `json:"venue_profile,omitempty"`
 	CoverImage    string                      `json:"cover_image"`
+	MapCover      string                      `json:"map_cover"`
 	Gallery       []string                    `json:"gallery"`
 	Description   string                      `json:"description"`
 	BusinessHours string                      `json:"business_hours"`
@@ -292,6 +294,7 @@ type OrganizerProfileResponse struct {
 	Logo                      string                         `json:"logo"`
 	MarkerIcon                string                         `json:"marker_icon"`
 	CoverImage                string                         `json:"cover_image"`
+	MapCover                  string                         `json:"map_cover"`
 	Gallery                   []string                       `json:"gallery"`
 	Description               string                         `json:"description"`
 	BusinessHours             string                         `json:"business_hours"`
@@ -515,6 +518,7 @@ type ActivityCreateRequest struct {
 	PosterLong       *string              `json:"poster_long"`
 	PosterList       *string              `json:"poster_list"`
 	PosterWechat     *string              `json:"poster_wechat"`
+	PosterMap        *string              `json:"poster_map"`
 	TicketSpecs      []TicketSpecSaveItem `json:"ticket_specs"`
 	QualificationDoc *string              `json:"qualification_doc"`
 }

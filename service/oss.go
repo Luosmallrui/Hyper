@@ -7,6 +7,7 @@ import (
 	"Hyper/pkg/snowflake"
 	"Hyper/types"
 	"context"
+	"errors"
 	"strings"
 
 	"fmt"
@@ -55,6 +56,12 @@ type IOssService interface {
 	UploadImage(ctx context.Context, userID int, header *multipart.FileHeader) (*types.UploadImageResp, error)
 	UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error)
 	UploadRaw(ctx context.Context, reader io.Reader, objectKey string) error
+
+	// ObjectExists 判断对象是否已存在（用于按 key 缓存复用，避免重复生成/上传）
+	ObjectExists(ctx context.Context, objectKey string) (bool, error)
+
+	// CDNUrl 返回对象的 CDN 访问地址
+	CDNUrl(objectKey string) string
 }
 
 func (s *OssService) UploadIcon(ctx context.Context, header *multipart.FileHeader) (*types.UploadImageResp, error) {
@@ -331,6 +338,27 @@ func (s *OssService) UploadReader(
 // UploadRaw 上传原始流（不写 image 表）
 func (s *OssService) UploadRaw(ctx context.Context, reader io.Reader, objectKey string) error {
 	return s.UploadReader(ctx, reader, objectKey)
+}
+
+// ObjectExists 用 HeadObject 判断对象是否存在
+func (s *OssService) ObjectExists(ctx context.Context, objectKey string) (bool, error) {
+	_, err := s.Client.HeadObject(ctx, &oss.HeadObjectRequest{
+		Bucket: oss.Ptr(s.BucketName),
+		Key:    oss.Ptr(objectKey),
+	})
+	if err != nil {
+		var svcErr *oss.ServiceError
+		if errors.As(err, &svcErr) && svcErr.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// CDNUrl 返回对象的 CDN 访问地址
+func (s *OssService) CDNUrl(objectKey string) string {
+	return s.CDNBaseURL + objectKey
 }
 
 // Download 下载到本地文件

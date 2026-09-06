@@ -1046,3 +1046,7 @@ CREATE TABLE IF NOT EXISTS `user_notifications`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT ='用户通知收件箱';
+
+-- 2026-09-03 地图封面
+-- ALTER TABLE `activities` ADD COLUMN `poster_map` varchar(255) NOT NULL DEFAULT '' COMMENT '地图封面' AFTER `poster_wechat`;
+-- ALTER TABLE `organizer_profiles` ADD COLUMN `map_cover` varchar(255) NOT NULL DEFAULT '' COMMENT '地图封面' AFTER `cover_image`;

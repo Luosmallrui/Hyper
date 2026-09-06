@@ -312,6 +312,7 @@ func (s *AdminService) getAdminVenueProfile(ctx context.Context, organizerID int
 	}
 	if err == nil {
 		profile.CoverImage = stored.CoverImage
+		profile.MapCover = stored.MapCover
 		profile.Description = stored.Description
 		profile.BusinessHours = stored.BusinessHours
 		profile.ContactName = stored.ContactName
@@ -347,6 +348,9 @@ func (s *AdminService) getAdminVenueProfile(ctx context.Context, organizerID int
 func fillAdminVenueProfileFromLegacy(profile *types.OrganizerVenueProfileInput, legacy models.Activity) {
 	if profile.CoverImage == "" {
 		profile.CoverImage = firstAdminNonEmpty(legacy.PosterList, legacy.PosterDetail, legacy.PosterWechat, legacy.PosterLong)
+	}
+	if profile.MapCover == "" {
+		profile.MapCover = legacy.PosterMap
 	}
 	if profile.Description == "" {
 		profile.Description = legacy.Description

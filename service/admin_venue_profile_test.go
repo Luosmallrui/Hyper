@@ -9,11 +9,11 @@ import (
 func TestFillAdminVenueProfileFromLegacy(t *testing.T) {
 	profile := &types.OrganizerVenueProfileInput{Gallery: []string{}}
 	legacy := models.Activity{
-		PosterList: "list.png", PosterDetail: "detail.png", PosterLong: "long.png",
+		PosterList: "list.png", PosterDetail: "detail.png", PosterLong: "long.png", PosterMap: "map.png",
 		Description: "旧场地介绍", Address: "成都市武侯区", Latitude: 30.6, Longitude: 104.0,
 	}
 	fillAdminVenueProfileFromLegacy(profile, legacy)
-	if profile.CoverImage != "list.png" || profile.Description != "旧场地介绍" || profile.Address != "成都市武侯区" {
+	if profile.CoverImage != "list.png" || profile.MapCover != "map.png" || profile.Description != "旧场地介绍" || profile.Address != "成都市武侯区" {
 		t.Fatalf("legacy profile not filled: %+v", profile)
 	}
 	if len(profile.Gallery) != 3 {
@@ -22,9 +22,9 @@ func TestFillAdminVenueProfileFromLegacy(t *testing.T) {
 }
 
 func TestFillAdminVenueProfileFromLegacyKeepsCurrentFields(t *testing.T) {
-	profile := &types.OrganizerVenueProfileInput{CoverImage: "current.png", Gallery: []string{"current-gallery.png"}}
-	fillAdminVenueProfileFromLegacy(profile, models.Activity{PosterList: "legacy.png", PosterDetail: "detail.png"})
-	if profile.CoverImage != "current.png" || len(profile.Gallery) != 1 || profile.Gallery[0] != "current-gallery.png" {
+	profile := &types.OrganizerVenueProfileInput{CoverImage: "current.png", MapCover: "current-map.png", Gallery: []string{"current-gallery.png"}}
+	fillAdminVenueProfileFromLegacy(profile, models.Activity{PosterList: "legacy.png", PosterDetail: "detail.png", PosterMap: "legacy-map.png"})
+	if profile.CoverImage != "current.png" || profile.MapCover != "current-map.png" || len(profile.Gallery) != 1 || profile.Gallery[0] != "current-gallery.png" {
 		t.Fatalf("current profile should win: %+v", profile)
 	}
 }

@@ -110,18 +110,18 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 // longer require a synthetic activities row.
 func (m *Map) getVenueMarkers(c *gin.Context, limit int, tagIDs []int64) ([]types.MapMarker, error) {
 	type venueRow struct {
-		ID, UserID                                      int64
-		Name, Logo, MarkerIcon                          string
-		Province, City, District                        string
-		CoverImage, Description, BusinessHours, Address string
-		Latitude, Longitude                             float64
-		AverageSpend                                    int64
-		CreatedAt                                       time.Time
+		ID, UserID                                                int64
+		Name, Logo, MarkerIcon                                    string
+		Province, City, District                                  string
+		CoverImage, MapCover, Description, BusinessHours, Address string
+		Latitude, Longitude                                       float64
+		AverageSpend                                              int64
+		CreatedAt                                                 time.Time
 	}
 	var venues []venueRow
 	query := m.DB.WithContext(c.Request.Context()).Table("organizers o").
 		Select(`o.id, o.user_id, o.name, o.logo, o.marker_icon, o.province, o.city, o.district, o.created_at,
-			COALESCE(p.cover_image, '') AS cover_image, COALESCE(p.description, '') AS description,
+			COALESCE(p.cover_image, '') AS cover_image, COALESCE(p.map_cover, '') AS map_cover, COALESCE(p.description, '') AS description,
 			COALESCE(p.business_hours, '') AS business_hours, COALESCE(p.address, '') AS address,
 			COALESCE(p.latitude, 0) AS latitude, COALESCE(p.longitude, 0) AS longitude,
 			COALESCE(p.average_spend, 0) AS average_spend`).
@@ -171,7 +171,7 @@ func (m *Map) getVenueMarkers(c *gin.Context, limit int, tagIDs []int64) ([]type
 			DetailType: "venue", DetailURL: fmt.Sprintf("/api/v1/venues/%d", venue.ID),
 			UserID: venue.UserID, User: venue.Name, UserName: venue.Name, UserAvatar: venue.Logo, UserAvatarCamel: venue.Logo,
 			Title: venue.Name, Type: models.OrganizerTypeVenue, Location: venue.Address, Address: venue.Address,
-			Lat: venue.Latitude, Lng: venue.Longitude, CoverImage: firstMarkerValue(venue.CoverImage, venue.Logo),
+			Lat: venue.Latitude, Lng: venue.Longitude, CoverImage: firstMarkerValue(venue.MapCover, venue.CoverImage, venue.Logo),
 			CreatedAt: formatMarkerTime(venue.CreatedAt), AvgPrice: venue.AverageSpend,
 			Icon:     firstMarkerValue(venue.MarkerIcon, "https://cdn.hypercn.cn/icon/jiuba.png"),
 			IsFollow: followed[venue.ID], FollowCount: followCounts[venue.ID],
@@ -466,7 +466,7 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 			Address:          activity.Address,
 			Lat:              activity.Latitude,
 			Lng:              activity.Longitude,
-			CoverImage:       activity.PosterList,
+			CoverImage:       firstMarkerValue(activity.PosterMap, activity.PosterList),
 			CreatedAt:        formatMarkerTime(activity.CreatedAt),
 			AvgPrice:         priceMap[activity.ID],
 			CurrentCount:     0,

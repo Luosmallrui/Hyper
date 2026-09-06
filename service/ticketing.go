@@ -79,6 +79,8 @@ type ITicketingService interface {
 	DeleteOrganizerStaff(ctx context.Context, userID, staffID int64) error
 	ListOrganizerOperationLogs(ctx context.Context, userID int64, page, size int, keyword string) (*types.PageResponse[models.OrganizerOperationLog], error)
 	GetActivity(ctx context.Context, userID, activityID int64) (*types.ActivityDetailResponse, error)
+	// GetActivityWxacode 返回活动分享海报用的小程序码 CDN URL（按活动缓存，重复调用不重复消耗微信配额）
+	GetActivityWxacode(ctx context.Context, activityID int64) (string, error)
 	RecordActivityView(ctx context.Context, userID, activityID int64, visitorID string) error
 	SubscribeActivity(ctx context.Context, userID, activityID int64) error
 	UnsubscribeActivity(ctx context.Context, userID, activityID int64) error
@@ -1533,6 +1535,7 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 		City:          org.City,
 		District:      org.District,
 		CoverImage:    profile.CoverImage,
+		MapCover:      profile.MapCover,
 		Description:   profile.Description,
 		BusinessHours: profile.BusinessHours,
 		ContactName:   profile.ContactName,
@@ -1548,7 +1551,7 @@ func (s *TicketingService) GetOrganizerProfile(ctx context.Context, userID int64
 	}
 	if org.Type == models.OrganizerTypeVenue {
 		resp.VenueProfile = &types.OrganizerVenueProfileInput{
-			CoverImage: profile.CoverImage, Gallery: resp.Gallery, Description: profile.Description,
+			CoverImage: profile.CoverImage, MapCover: profile.MapCover, Gallery: resp.Gallery, Description: profile.Description,
 			BusinessHours: profile.BusinessHours, ContactName: profile.ContactName, ServicePhone: profile.ServicePhone,
 			Address: profile.Address, Latitude: profile.Latitude, Longitude: profile.Longitude, AverageSpend: profile.AverageSpend,
 		}
@@ -1575,7 +1578,7 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 		return err
 	}
 	profileInput := types.OrganizerVenueProfileInput{
-		CoverImage: req.CoverImage, Gallery: req.Gallery, Description: req.Description,
+		CoverImage: req.CoverImage, MapCover: req.MapCover, Gallery: req.Gallery, Description: req.Description,
 		BusinessHours: req.BusinessHours, ContactName: req.ContactName, ServicePhone: req.ServicePhone,
 		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude, AverageSpend: req.AverageSpend,
 	}
@@ -1644,9 +1647,9 @@ func (s *TicketingService) UpdateOrganizerProfile(ctx context.Context, userID in
 				return err
 			}
 		}
-		profile := models.OrganizerProfile{OrganizerID: org.ID, CoverImage: profileInput.CoverImage, Gallery: string(gallery), Description: profileInput.Description, BusinessHours: profileInput.BusinessHours, ContactName: profileInput.ContactName, ServicePhone: profileInput.ServicePhone, Address: profileInput.Address, Latitude: profileInput.Latitude, Longitude: profileInput.Longitude, AverageSpend: profileInput.AverageSpend}
+		profile := models.OrganizerProfile{OrganizerID: org.ID, CoverImage: profileInput.CoverImage, MapCover: profileInput.MapCover, Gallery: string(gallery), Description: profileInput.Description, BusinessHours: profileInput.BusinessHours, ContactName: profileInput.ContactName, ServicePhone: profileInput.ServicePhone, Address: profileInput.Address, Latitude: profileInput.Latitude, Longitude: profileInput.Longitude, AverageSpend: profileInput.AverageSpend}
 		updates := map[string]any{
-			"cover_image": profileInput.CoverImage, "gallery": string(gallery), "description": profileInput.Description,
+			"cover_image": profileInput.CoverImage, "map_cover": profileInput.MapCover, "gallery": string(gallery), "description": profileInput.Description,
 			"business_hours": profileInput.BusinessHours, "contact_name": profileInput.ContactName, "service_phone": profileInput.ServicePhone,
 			"address": profileInput.Address, "latitude": profileInput.Latitude, "longitude": profileInput.Longitude, "average_spend": profileInput.AverageSpend,
 			"updated_at": time.Now(),
@@ -1676,9 +1679,9 @@ func upsertOrganizerVenueProfile(tx *gorm.DB, organizerID int64, revision *types
 	if err != nil {
 		return err
 	}
-	profile := models.OrganizerProfile{OrganizerID: organizerID, CoverImage: revision.CoverImage, Gallery: string(gallery), Description: revision.Description, BusinessHours: revision.BusinessHours, ContactName: revision.ContactName, ServicePhone: revision.ServicePhone, Address: revision.Address, Latitude: revision.Latitude, Longitude: revision.Longitude, AverageSpend: revision.AverageSpend}
+	profile := models.OrganizerProfile{OrganizerID: organizerID, CoverImage: revision.CoverImage, MapCover: revision.MapCover, Gallery: string(gallery), Description: revision.Description, BusinessHours: revision.BusinessHours, ContactName: revision.ContactName, ServicePhone: revision.ServicePhone, Address: revision.Address, Latitude: revision.Latitude, Longitude: revision.Longitude, AverageSpend: revision.AverageSpend}
 	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "organizer_id"}}, DoUpdates: clause.Assignments(map[string]any{
-		"cover_image": profile.CoverImage, "gallery": profile.Gallery, "description": profile.Description,
+		"cover_image": profile.CoverImage, "map_cover": profile.MapCover, "gallery": profile.Gallery, "description": profile.Description,
 		"business_hours": profile.BusinessHours, "contact_name": profile.ContactName, "service_phone": profile.ServicePhone,
 		"address": profile.Address, "latitude": profile.Latitude, "longitude": profile.Longitude, "average_spend": profile.AverageSpend, "updated_at": time.Now(),
 	})}).Create(&profile).Error
@@ -4879,6 +4882,28 @@ func (s *TicketingService) ScanOrder(ctx context.Context, req types.ScanOrderReq
 	return &types.ScanOrderResponse{Success: true, Order: &item}, nil
 }
 
+// GetActivityWxacode 生成活动分享海报用的小程序码并转存 CDN。
+// 按 activity_id 缓存：已生成过直接返回既有 URL，不重复消耗微信接口配额；
+// 活动上下架不影响码的有效性（仅做存在性校验）。
+func (s *TicketingService) GetActivityWxacode(ctx context.Context, activityID int64) (string, error) {
+	var act models.Activity
+	if err := s.DB.WithContext(ctx).Select("id").First(&act, activityID).Error; err != nil {
+		return "", err // gorm.ErrRecordNotFound，由 handler wrap 映射为 404
+	}
+	key := fmt.Sprintf("ticketing/wxacode/activity/%d.png", activityID)
+	if exists, err := s.OssService.ObjectExists(ctx, key); err == nil && exists {
+		return s.OssService.CDNUrl(key), nil
+	}
+	data, err := s.WeChatService.GenerateUnlimitedQRCode(ctx, strconv.FormatInt(activityID, 10), "pages/activity/index")
+	if err != nil {
+		return "", err
+	}
+	if err := s.OssService.UploadRaw(ctx, bytes.NewReader(data), key); err != nil {
+		return "", err
+	}
+	return s.OssService.CDNUrl(key), nil
+}
+
 // orderVerifiedCount 返回订单已核销张数（一张票对应一条 verification_records 记录）
 func (s *TicketingService) orderVerifiedCount(ctx context.Context, orderID int64) int {
 	var count int64
@@ -6084,6 +6109,7 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 	putString(updates, "poster_long", req.PosterLong)
 	putString(updates, "poster_list", req.PosterList)
 	putString(updates, "poster_wechat", req.PosterWechat)
+	putString(updates, "poster_map", req.PosterMap)
 	putString(updates, "qualification_doc", req.QualificationDoc)
 	if activityType == models.ActivityTypeParty {
 		if req.StartTime != nil {

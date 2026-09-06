@@ -127,6 +127,7 @@ func (h *Ticketing) RegisterRouter(r gin.IRouter) {
 		activity.GET("/:id/statistics", auth, h.wrap(h.GetActivityStatistics))
 		activity.GET("/:id/statistics/daily", auth, h.wrap(h.GetActivityDailyStatistics))
 		activity.GET("/:id", optionalAuth, h.wrap(h.GetActivity))
+		activity.GET("/:id/wxacode", optionalAuth, h.wrap(h.GetActivityWxacode))
 		activity.POST("/:id/subscribe", auth, h.wrap(h.SubscribeActivity))
 		activity.POST("/:id/unsubscribe", auth, h.wrap(h.UnsubscribeActivity))
 		activity.DELETE("/:id", auth, h.wrap(h.DeleteActivity))
@@ -952,6 +953,23 @@ func (h *Ticketing) GetActivity(c *gin.Context) error {
 	return nil
 }
 
+// GetActivityWxacode 返回活动分享海报用的小程序码 CDN URL（按活动缓存复用）
+func (h *Ticketing) GetActivityWxacode(c *gin.Context) error {
+	id, err := parseID(c.Param("id"))
+	if err != nil {
+		return err
+	}
+	url, err := h.TicketingService.GetActivityWxacode(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "活动不存在")
+		}
+		return err
+	}
+	response.Success(c, gin.H{"url": url})
+	return nil
+}
+
 func (h *Ticketing) SubscribeActivity(c *gin.Context) error {
 	id, err := parseID(c.Param("id"))
 	if err != nil {
@@ -1740,10 +1758,12 @@ func buildUploadKey(fileType string, header *multipart.FileHeader) (string, erro
 		"poster_long":       true,
 		"poster_list":       true,
 		"poster_wechat":     true,
+		"poster_map":        true,
 		"qualification_doc": true,
 		"avatar":            true,
 		"organizer_logo":    true,
 		"venue_cover":       true,
+		"venue_map_cover":   true,
 		"venue_gallery":     true,
 		"collection_share":  true,
 		"post":              true,

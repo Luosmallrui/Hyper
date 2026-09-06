@@ -101,6 +101,7 @@ type Activity struct {
 	PosterLong            string     `gorm:"column:poster_long;size:255" json:"poster_long"`
 	PosterList            string     `gorm:"column:poster_list;size:255" json:"poster_list"`
 	PosterWechat          string     `gorm:"column:poster_wechat;size:255" json:"poster_wechat"`
+	PosterMap             string     `gorm:"column:poster_map;size:255" json:"poster_map"`
 	QualificationDoc      string     `gorm:"column:qualification_doc;size:255" json:"qualification_doc"`
 	Status                int8       `gorm:"column:status;not null;default:0;index" json:"status"`
 	AuditType             string     `gorm:"column:audit_type;size:20;not null;default:initial;index" json:"audit_type"`
