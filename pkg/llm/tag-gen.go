@@ -69,7 +69,9 @@ func GenNoteTag(ctx context.Context, ossURL string) []string {
 			{OfUser: &userMessage},
 		},
 	}
-	completion, err := client.Chat.Completions.New(ctx, params)
+	// 关闭思考模式：打标/分类是简单任务，思考会慢 3 倍且多烧输出 token
+	completion, err := client.Chat.Completions.New(ctx, params,
+		option.WithJSONSet("thinking", map[string]any{"type": "disabled"}))
 	if err != nil {
 		log.L.Error("failed to gen tag", zap.Error(err))
 		return make([]string, 0)
@@ -134,7 +136,9 @@ func ClassifyMultiImageNote(ctx context.Context, title, content string, ossURLs 
 			{OfUser: &userMessage},
 		},
 	}
-	completion, err := client.Chat.Completions.New(ctx, params)
+	// 关闭思考模式：打标/分类是简单任务，思考会慢 3 倍且多烧输出 token
+	completion, err := client.Chat.Completions.New(ctx, params,
+		option.WithJSONSet("thinking", map[string]any{"type": "disabled"}))
 	if err != nil {
 		log.L.Error("failed to gen tag", zap.Error(err))
 		return ""
