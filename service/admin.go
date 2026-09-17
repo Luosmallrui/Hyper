@@ -1869,24 +1869,31 @@ func (s *AdminService) GetDashboardStats(ctx context.Context) (*types.AdminDashb
 		return nil, err
 	}
 
-	if err := db.Model(&models.Merchant{}).Where("type = ?", "场地").Count(&stats.TotalParties).Error; err != nil {
+	// 场地：以 organizers（type=venue 且已审核）为准；历史 Merchant/activities 兼容数据不重复计数
+	if err := db.Model(&models.Organizer{}).
+		Where("type = ? AND status = ?", models.OrganizerTypeVenue, models.OrganizerStatusApproved).
+		Count(&stats.TotalParties).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&models.Merchant{}).Where("type = ?", "派对").Count(&stats.TotalEvents).Error; err != nil {
+	// 活动：activities 表 type=party
+	if err := db.Model(&models.Activity{}).Where("type = ?", models.ActivityTypeParty).Count(&stats.TotalEvents).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&models.EventTicket{}).Count(&stats.TotalTickets).Error; err != nil {
+	// 票券：ticket_specs 票种数
+	if err := db.Model(&models.TicketSpec{}).Count(&stats.TotalTickets).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&models.Order{}).Count(&stats.TotalOrders).Error; err != nil {
+	// 订单：票务订单（老商城订单数据已于 2026-09-17 清理）
+	if err := db.Model(&models.TicketOrder{}).Count(&stats.TotalOrders).Error; err != nil {
 		return nil, err
 	}
 	if err := db.Model(&models.Users{}).Count(&stats.TotalUsers).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Model(&models.Order{}).
-		Where("status >= ?", 20).
-		Select("COALESCE(SUM(total_amount), 0)").
+	// 总收入：票务已支付订单（可使用/已使用，不含退款中与已退款），单位分
+	if err := db.Model(&models.TicketOrder{}).
+		Where("status IN ?", []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed}).
+		Select("COALESCE(SUM(actual_price), 0)").
 		Scan(&stats.TotalRevenue).Error; err != nil {
 		return nil, err
 	}
