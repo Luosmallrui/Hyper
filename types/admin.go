@@ -307,7 +307,9 @@ type AdminDashboardStats struct {
 	TotalTickets   int64 `json:"total_tickets"`
 	TotalOrders    int64 `json:"total_orders"`
 	TotalUsers     int64 `json:"total_users"`
-	TotalRevenue   int64 `json:"total_revenue"` // 单位：分
+	TotalRevenue   int64 `json:"total_revenue"` // 单位：分（毛收入，买家实付）
+	WechatFee      int64 `json:"wechat_fee"`    // 预估微信手续费（分，按支付日期分段：2026-09-30 前 0.54%，之后 0.6%）
+	NetRevenue     int64 `json:"net_revenue"`   // 预估净收入（分）= total_revenue - wechat_fee
 }
 
 type AdminFinanceSummary struct {

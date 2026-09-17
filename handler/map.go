@@ -82,19 +82,20 @@ func (m *Map) GetMarkers(c *gin.Context) error {
 		return nil
 	}
 	requestedActivityType := m.resolveActivityTypeFilter(c)
-	if (source == "all" || source == "venue") && requestedActivityType != models.ActivityTypeParty {
-		venues, err := m.getVenueMarkers(c, limit, tagIDs)
-		if err != nil {
-			return err
-		}
-		markers = append(markers, venues...)
-	}
+	// 活动在前，商家（场地）在后
 	if source == "all" || source == "activity" || source == "party" || source == "venue" {
 		activities, err := m.getActivityMarkers(c, limit, tagIDs)
 		if err != nil {
 			return err
 		}
 		markers = append(markers, activities...)
+	}
+	if (source == "all" || source == "venue") && requestedActivityType != models.ActivityTypeParty {
+		venues, err := m.getVenueMarkers(c, limit, tagIDs)
+		if err != nil {
+			return err
+		}
+		markers = append(markers, venues...)
 	}
 
 	response.Success(c, types.MapMarkerResponse{
@@ -350,7 +351,8 @@ func (m *Map) getActivityMarkers(c *gin.Context, limit int, tagIDs []int64) ([]t
 	if businessArea := strings.TrimSpace(c.Query("business_area")); businessArea != "" {
 		query = query.Where("a.address LIKE ?", "%"+businessArea+"%")
 	}
-	if err := query.Order("a.created_at DESC").Limit(limit).Scan(&activities).Error; err != nil {
+	// 按「距当前时间最近」排序：未开始的活动越近越靠前，已结束的活动按结束距今越近越靠前（越旧越靠后）
+	if err := query.Order("ABS(UNIX_TIMESTAMP(a.start_time) - UNIX_TIMESTAMP()) ASC, a.id DESC").Limit(limit).Scan(&activities).Error; err != nil {
 		return nil, err
 	}
 

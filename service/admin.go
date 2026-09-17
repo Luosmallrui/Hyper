@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -1897,6 +1898,29 @@ func (s *AdminService) GetDashboardStats(ctx context.Context) (*types.AdminDashb
 		Scan(&stats.TotalRevenue).Error; err != nil {
 		return nil, err
 	}
+	// 预估微信手续费：按单笔金额 × 费率四舍五入到分累加。
+	// 费率与商户号结算周期一致（微信商户平台公示）：
+	//   2026-09-30 及之前 0.54%，2026-10-01 起 0.6%
+	var paidOrders []struct {
+		ActualPrice int64
+		PayTime     *time.Time
+	}
+	if err := db.Model(&models.TicketOrder{}).
+		Select("actual_price, pay_time").
+		Where("status IN ?", []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed}).
+		Where("actual_price > 0").
+		Scan(&paidOrders).Error; err != nil {
+		return nil, err
+	}
+	feeRateCutoff := time.Date(2026, 10, 1, 0, 0, 0, 0, time.Local)
+	for _, o := range paidOrders {
+		rate := 0.0054
+		if o.PayTime != nil && !o.PayTime.Before(feeRateCutoff) {
+			rate = 0.006
+		}
+		stats.WechatFee += int64(math.Round(float64(o.ActualPrice) * rate))
+	}
+	stats.NetRevenue = stats.TotalRevenue - stats.WechatFee
 
 	return stats, nil
 }
