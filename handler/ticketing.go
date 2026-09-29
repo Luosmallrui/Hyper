@@ -313,8 +313,53 @@ func (h *Ticketing) ListOrganizerWithdraws(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	response.Success(c, resp)
+	// 双写兼容（docs/backend_change_requests_20260818.md 6.3）：
+	// 老前端读 list[].amount/bank_account_name/...，新前端读 flow_list[].total_amount/bank_account.xxx
+	response.Success(c, gin.H{
+		"list":        resp.List,
+		"total":       resp.Total,
+		"flow_list":   buildWithdrawFlowItems(resp.List),
+		"total_items": resp.Total,
+	})
 	return nil
+}
+
+// withdrawFlowItem 新版提现流水形状（别名，金额单位分）
+type withdrawFlowItem struct {
+	ID          int64  `json:"id"`
+	FlowNo      string `json:"flow_no"`
+	Status      int8   `json:"status"`
+	TotalAmount int64  `json:"total_amount"`
+	Reason      string `json:"reason"`
+	BankAccount struct {
+		AccountHolder string `json:"account_holder"`
+		BankName      string `json:"bank_name"`
+	} `json:"bank_account"`
+	CreateTime  string `json:"create_time"`
+	ArrivalTime string `json:"arrival_time"`
+}
+
+func buildWithdrawFlowItems(list []models.OrganizerWithdraw) []withdrawFlowItem {
+	items := make([]withdrawFlowItem, 0, len(list))
+	for _, w := range list {
+		item := withdrawFlowItem{
+			ID:          w.ID,
+			FlowNo:      fmt.Sprintf("WD%s%06d", w.CreatedAt.Format("20060102"), w.ID),
+			Status:      w.Status,
+			TotalAmount: w.Amount,
+			Reason:      w.Remark,
+			CreateTime:  w.CreatedAt.Format("2006-01-02 15:04:05"),
+			// 打款完成（status=2）才给打款时间，否则空串
+			ArrivalTime: "",
+		}
+		item.BankAccount.AccountHolder = w.BankAccountName
+		item.BankAccount.BankName = w.BankName
+		if w.Status == 2 {
+			item.ArrivalTime = w.UpdatedAt.Format("2006-01-02 15:04:05")
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (h *Ticketing) ListOrganizerFollowers(c *gin.Context) error {
