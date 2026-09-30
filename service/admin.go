@@ -41,6 +41,7 @@ type IAdminService interface {
 	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error)
 	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
 	GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error)
+	ListRefunds(ctx context.Context, page, pageSize int, refundStatus *int8, keyword string) (*types.AdminRefundListResponse, error)
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
 	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
 	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
@@ -1314,6 +1315,87 @@ func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string)
 		VerificationRecords: verificationRecords,
 		PayRecords:          payRecords,
 	}, nil
+}
+
+// ListRefunds returns the after-sales (refund) order list for the admin PC.
+func (s *AdminService) ListRefunds(ctx context.Context, page, pageSize int, refundStatus *int8, keyword string) (*types.AdminRefundListResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	query := s.DB.WithContext(ctx).Table("refunds r").
+		Joins("LEFT JOIN ticket_orders o ON o.id = r.order_id").
+		Joins("LEFT JOIN activities a ON a.id = o.activity_id").
+		Joins("LEFT JOIN ticket_specs ts ON ts.id = o.ticket_spec_id").
+		Joins("LEFT JOIN users u ON u.id = o.user_id")
+	if refundStatus != nil {
+		query = query.Where("r.status = ?", *refundStatus)
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where(`r.refund_no LIKE ?
+			OR o.order_no LIKE ?
+			OR o.buyer_name LIKE ?
+			OR u.nickname LIKE ?
+			OR u.mobile LIKE ?
+			OR a.name LIKE ?
+			OR ts.name LIKE ?`, like, like, like, like, like, like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		RefundNo       string
+		OrderNo        string
+		Status         int8
+		Reason         string
+		RefundAmount   int64
+		ActivityID     int64
+		ActivityName   string
+		TicketSpecName string
+		BuyerName      string
+		UserName       string
+		UserMobile     string
+		CreatedAt      time.Time
+		UpdatedAt      time.Time
+	}
+	if err := query.Select(`r.refund_no, o.order_no, r.status, r.reason, r.refund_amount,
+		a.id AS activity_id, COALESCE(a.name, '') AS activity_name,
+		COALESCE(ts.name, '') AS ticket_spec_name,
+		COALESCE(o.buyer_name, '') AS buyer_name,
+		COALESCE(u.nickname, '') AS user_name, COALESCE(u.mobile, '') AS user_mobile,
+		r.created_at, r.updated_at`).
+		Order("r.id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	list := make([]types.AdminRefundListItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, types.AdminRefundListItem{
+			RefundNo:       row.RefundNo,
+			OrderNo:        row.OrderNo,
+			Status:         row.Status,
+			Reason:         row.Reason,
+			RefundAmount:   row.RefundAmount,
+			ActivityID:     row.ActivityID,
+			ActivityName:   row.ActivityName,
+			TicketSpecName: row.TicketSpecName,
+			BuyerName:      row.BuyerName,
+			UserName:       row.UserName,
+			UserMobile:     row.UserMobile,
+			CreatedAt:      formatAdminTime(row.CreatedAt),
+			UpdatedAt:      formatAdminTime(row.UpdatedAt),
+		})
+	}
+	return &types.AdminRefundListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 // GetRefundDetail returns one refund and the order context required by the admin refund detail page.

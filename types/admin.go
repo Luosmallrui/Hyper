@@ -215,6 +215,31 @@ type AdminRefundDetail struct {
 	PayRecords          []models.PayRecord   `json:"pay_records"`
 }
 
+// AdminRefundListItem 售后订单列表项（GET /v1/admin/refunds）
+type AdminRefundListItem struct {
+	RefundNo       string `json:"refund_no"`
+	OrderNo        string `json:"order_no"`
+	Status         int8   `json:"status"`
+	Reason         string `json:"reason"`
+	RefundAmount   int64  `json:"refund_amount"` // 分
+	ActivityID     int64  `json:"activity_id"`
+	ActivityName   string `json:"activity_name"`
+	TicketSpecName string `json:"ticket_spec_name"`
+	BuyerName      string `json:"buyer_name"`
+	UserName       string `json:"user_name"`
+	UserMobile     string `json:"user_mobile"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+// AdminRefundListResponse 售后订单列表响应
+type AdminRefundListResponse struct {
+	List     []AdminRefundListItem `json:"list"`
+	Total    int64                 `json:"total"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"pageSize"`
+}
+
 // AdminUpdatePartyStatusRequest 更新派对状态
 type AdminUpdatePartyStatusRequest struct {
 	Status string `json:"status" binding:"required"`

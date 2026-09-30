@@ -91,6 +91,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.GET("/orders/:order_no", context.Wrap(a.GetOrderDetail))
 		authorized.POST("/orders/:order_no/refund/approve", context.Wrap(a.ApproveOrderRefund))
 		authorized.POST("/orders/:order_no/refund/reject", context.Wrap(a.RejectOrderRefund))
+		authorized.GET("/refunds", context.Wrap(a.GetRefundList))
 		authorized.GET("/refunds/:refund_no", context.Wrap(a.GetRefundDetail))
 
 		// 财务结算
@@ -1432,6 +1433,23 @@ func (a *Admin) GetOrderDetail(c *gin.Context) error {
 	resp, err := a.AdminService.GetTicketOrderDetail(c.Request.Context(), c.Param("order_no"))
 	if err != nil {
 		return response.NewError(404, err.Error())
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+// GetRefundList 售后订单列表
+// GET /api/v1/admin/refunds?page=1&pageSize=20&refund_status=pending_review&keyword=xxx
+func (a *Admin) GetRefundList(c *gin.Context) error {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	refundStatus, err := adminRefundStatusQuery(c.Query("refund_status"))
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
+	resp, err := a.AdminService.ListRefunds(c.Request.Context(), page, pageSize, refundStatus, c.Query("keyword"))
+	if err != nil {
+		return err
 	}
 	response.Success(c, resp)
 	return nil
