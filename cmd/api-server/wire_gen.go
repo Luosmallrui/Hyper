@@ -345,13 +345,16 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 	}
 	admin := dao.NewAdmin(db)
 	v := provideJwtSecret(cfg)
+	wechatPayConfig := config.ProvideWechatPayConfig(cfg)
 	adminService := &service.AdminService{
-		AdminDAO:       admin,
-		DB:             db,
-		Secret:         v,
-		WeChatService:  weChatService,
-		MqProducer:     producer,
-		MessageService: messageService,
+		AdminDAO:        admin,
+		DB:              db,
+		Secret:          v,
+		WeChatService:   weChatService,
+		MqProducer:      producer,
+		MessageService:  messageService,
+		PayService:      payService,
+		WechatPayConfig: wechatPayConfig,
 	}
 	handlerAdmin := &handler.Admin{
 		Config:       cfg,

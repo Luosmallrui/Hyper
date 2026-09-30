@@ -28,6 +28,7 @@ func InitServer(cfg *config.Config) *server.AppProvider {
 		client.NewRedisClient,
 		config.ProvideOssConfig,
 		config.ProvideRocketMQConfig,
+		config.ProvideWechatPayConfig,
 		rocketmq.InitProducer,
 		server.NewGinEngine,
 		cache.ProviderSet,

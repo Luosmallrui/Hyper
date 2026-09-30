@@ -1,6 +1,7 @@
 package service
 
 import (
+	"Hyper/config"
 	"Hyper/dao"
 	"Hyper/models"
 	"Hyper/pkg/encrypt"
@@ -16,6 +17,9 @@ import (
 	"time"
 
 	rmq_client "github.com/apache/rocketmq-clients/golang/v5"
+	"github.com/wechatpay-apiv3/wechatpay-go/core"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
+	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -113,12 +117,14 @@ type IAdminService interface {
 }
 
 type AdminService struct {
-	AdminDAO       *dao.Admin
-	DB             *gorm.DB
-	Secret         []byte
-	WeChatService  IWeChatService
-	MqProducer     rmq_client.Producer
-	MessageService IMessageService
+	AdminDAO        *dao.Admin
+	DB              *gorm.DB
+	Secret          []byte
+	WeChatService   IWeChatService
+	MqProducer      rmq_client.Producer
+	MessageService  IMessageService
+	PayService      IPayService
+	WechatPayConfig *config.WechatPayConfig
 }
 
 var _ IAdminService = (*AdminService)(nil)
@@ -1429,26 +1435,43 @@ func (s *AdminService) GetRefundDetail(ctx context.Context, refundNo string) (*t
 }
 
 func (s *AdminService) ApproveOrderRefund(ctx context.Context, orderNo string) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var order models.TicketOrder
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_no = ?", orderNo).First(&order).Error; err != nil {
-			return err
-		}
-		var refund models.Refund
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("order_id = ?", order.ID).Order("id DESC").First(&refund).Error; err != nil {
-			return err
-		}
-		if refund.Status != models.RefundStatusAuditing {
-			return errors.New("退款单状态不可审核通过")
-		}
-		if err := tx.Model(&refund).Updates(map[string]any{"status": models.RefundStatusRunning, "wechat_status": "ADMIN_APPROVED"}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&order).Update("status", models.TicketOrderStatusRefunding).Error; err != nil {
-			return err
-		}
-		return tx.Create(&models.RefundLog{RefundID: refund.ID, Status: "退款中", Description: "管理员审核通过，等待退款处理"}).Error
-	})
+	// 校验订单存在、退款单处于待审核（防重复通过）
+	var order models.TicketOrder
+	if err := s.DB.WithContext(ctx).Where("order_no = ?", orderNo).First(&order).Error; err != nil {
+		return err
+	}
+	var refund models.Refund
+	if err := s.DB.WithContext(ctx).Where("order_id = ?", order.ID).Order("id DESC").First(&refund).Error; err != nil {
+		return err
+	}
+	if refund.Status != models.RefundStatusAuditing {
+		return errors.New("退款单状态不可审核通过")
+	}
+	// 审核通过即发起微信退款（ApplyWechatRefund 内部完成微信退款创建、
+	// 订单/退款状态流转、退款日志与积分回收，避免"通过 but 没退钱"的卡单）
+	client, err := s.wechatPayClient()
+	if err != nil {
+		return err
+	}
+	return s.PayService.ApplyWechatRefund(ctx, client, refund.RefundNo)
+}
+
+// wechatPayClient 惰性构建微信支付客户端（退款审核调用频率低，每次新建即可）
+func (s *AdminService) wechatPayClient() (*core.Client, error) {
+	cfg := s.WechatPayConfig
+	if cfg == nil {
+		return nil, errors.New("微信支付配置缺失")
+	}
+	mchPrivateKey, err := utils.LoadPrivateKeyWithPath(cfg.MchPrivateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("加载商户私钥失败: %w", err)
+	}
+	client, err := core.NewClient(context.Background(),
+		option.WithWechatPayAutoAuthCipher(cfg.MchID, cfg.MchCertificateSerialNumber, mchPrivateKey, cfg.MchAPIv3Key))
+	if err != nil {
+		return nil, fmt.Errorf("创建微信支付客户端失败: %w", err)
+	}
+	return client, nil
 }
 
 func (s *AdminService) RejectOrderRefund(ctx context.Context, orderNo string, reason string) error {
