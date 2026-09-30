@@ -114,6 +114,7 @@ type OrganizerWithdrawInfoResponse struct {
 	ContactName           string                  `json:"contact_name"`
 	ContactPhone          string                  `json:"contact_phone"`
 	CanWithdraw           bool                    `json:"can_withdraw"`
+	AccountApproved       bool                    `json:"account_approved"` // 收款账户已审核通过（与余额无关），用于前端区分"未审核"和"余额为0"
 	GrossAmount           int64                   `json:"gross_amount"`
 	RefundAmount          int64                   `json:"refund_amount"`
 	WithdrawAmount        int64                   `json:"withdraw_amount"`

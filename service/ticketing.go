@@ -319,6 +319,8 @@ func (s *TicketingService) GetWithdrawInfo(ctx context.Context, userID int64) (*
 		ContactName:           org.BankContactName,
 		ContactPhone:          org.BankContactPhone,
 		CanWithdraw:           org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "" && funds.AvailableAmount > 0,
+		// 审批通过才会回写银行账户到 organizers，账户非空即代表已通过审核
+		AccountApproved:       org.BankAccountName != "" && org.BankAccountNo != "" && org.BankName != "",
 		GrossAmount:           funds.GrossAmount,
 		RefundAmount:          funds.RefundAmount,
 		WithdrawAmount:        funds.WithdrawAmount,

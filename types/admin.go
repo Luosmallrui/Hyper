@@ -190,6 +190,11 @@ type AdminTicketOrderItem struct {
 	PayTime        string `json:"pay_time"`
 	ExpireTime     string `json:"expire_time"`
 	CreatedAt      string `json:"created_at"`
+	// 最新一笔退款信息（无退款时缺省），与 refund_status 筛选的 MAX(id) 口径一致
+	RefundNo     string `json:"refund_no,omitempty"`
+	RefundStatus *int8  `json:"refund_status,omitempty"`
+	RefundReason string `json:"refund_reason,omitempty"`
+	RefundAmount int64  `json:"refund_amount,omitempty"`
 }
 
 type AdminTicketOrderDetail struct {

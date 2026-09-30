@@ -1827,6 +1827,23 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 			specMap[spec.ID] = spec
 		}
 	}
+	// 每单最新一笔退款（id 最大），用于列表展示退款单号/状态/原因/金额
+	orderIDs := make([]int64, 0, len(orders))
+	for _, order := range orders {
+		orderIDs = append(orderIDs, order.ID)
+	}
+	latestRefundMap := map[int64]models.Refund{}
+	if len(orderIDs) > 0 {
+		var refunds []models.Refund
+		if err := s.DB.WithContext(ctx).Where("order_id IN ?", orderIDs).Order("id DESC").Find(&refunds).Error; err != nil {
+			return nil, err
+		}
+		for _, refund := range refunds {
+			if _, ok := latestRefundMap[refund.OrderID]; !ok {
+				latestRefundMap[refund.OrderID] = refund
+			}
+		}
+	}
 	list := make([]types.AdminTicketOrderItem, 0, len(orders))
 	for _, order := range orders {
 		item := types.AdminTicketOrderItem{
@@ -1857,6 +1874,12 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 		}
 		if spec, ok := specMap[order.TicketSpecID]; ok {
 			item.TicketSpecName = spec.Name
+		}
+		if refund, ok := latestRefundMap[order.ID]; ok {
+			item.RefundNo = refund.RefundNo
+			item.RefundStatus = &refund.Status
+			item.RefundReason = refund.Reason
+			item.RefundAmount = refund.RefundAmount
 		}
 		list = append(list, item)
 	}
