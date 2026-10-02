@@ -693,6 +693,9 @@ func (a *Admin) UpdateNoteStatus(c *gin.Context) error {
 		return response.NewError(http.StatusBadRequest, "动态状态仅支持 -1删除、0隐藏、1公开")
 	}
 	if err := a.AdminService.UpdateNoteStatus(c.Request.Context(), adminParamID(c), int(req.Status)); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(http.StatusNotFound, "动态不存在（若从列表操作，请确认使用 id_str 字段）")
+		}
 		return err
 	}
 	response.Success(c, gin.H{"success": true})

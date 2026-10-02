@@ -821,7 +821,11 @@ func (s *AdminService) ListNotes(ctx context.Context, page, pageSize int, status
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		query = query.Where("n.title LIKE ? OR n.content LIKE ? OR u.nickname LIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
-	return adminMapPage(query.Order("n.id desc"), page, pageSize)
+	resp, err := adminMapPage(query.Order("n.id desc"), page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *AdminService) UpdateNoteStatus(ctx context.Context, noteID int64, status int) error {
@@ -1480,6 +1484,20 @@ func adminMapPage(query *gorm.DB, page, pageSize int) (*types.AdminPageResponse[
 	var rows []map[string]any
 	if err := query.Session(&gorm.Session{}).Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, err
+	}
+	// 雪花 ID（19 位）超出 JS Number 安全范围会丢精度（2088659393691258880 → …259000），
+	// 统一补一个字符串形式的 id_str 供前端操作（删除/审核等）时回传
+	for _, row := range rows {
+		switch id := row["id"].(type) {
+		case int64:
+			row["id_str"] = strconv.FormatInt(id, 10)
+		case int32:
+			row["id_str"] = strconv.FormatInt(int64(id), 10)
+		case uint64:
+			row["id_str"] = strconv.FormatUint(id, 10)
+		case float64:
+			row["id_str"] = strconv.FormatInt(int64(id), 10)
+		}
 	}
 	return &types.AdminPageResponse[map[string]any]{List: rows, Total: total, Page: page, PageSize: pageSize}, nil
 }
