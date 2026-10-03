@@ -183,6 +183,8 @@ type AdminTicketOrderItem struct {
 	BuyerIDCard    string `json:"buyer_id_card"`
 	ActivityID     int64  `json:"activity_id"`
 	ActivityName   string `json:"activity_name"`
+	OrganizerID    int64  `json:"organizer_id"`   // 商家（主办方）ID
+	OrganizerName  string `json:"organizer_name"` // 商家名称
 	TicketSpecID   int64  `json:"ticket_spec_id"`
 	TicketSpecName string `json:"ticket_spec_name"`
 	PayMethod      string `json:"pay_method"`
@@ -198,12 +200,36 @@ type AdminTicketOrderItem struct {
 }
 
 type AdminTicketOrderDetail struct {
-	Order               AdminTicketOrderItem `json:"order"`
-	Viewers             []OrderViewerItem    `json:"viewers"`
-	Refunds             []models.Refund      `json:"refunds"`
-	RefundLogs          []models.RefundLog   `json:"refund_logs"`
-	VerificationRecords []map[string]any     `json:"verification_records"`
-	PayRecords          []models.PayRecord   `json:"pay_records"`
+	Order               AdminTicketOrderItem   `json:"order"`
+	Viewers             []OrderViewerItem      `json:"viewers"`
+	Refunds             []models.Refund        `json:"refunds"`
+	RefundLogs          []models.RefundLog     `json:"refund_logs"`
+	VerificationRecords []map[string]any       `json:"verification_records"`
+	PayRecords          []AdminPayRecordItem   `json:"pay_records"`
+}
+
+// AdminPayRecordItem 支付流水的统一前端形状（金额 number 分，pay_time RFC3339）
+type AdminPayRecordItem struct {
+	TransactionID string `json:"transaction_id"`
+	Amount        uint64 `json:"amount"` // 分
+	PayMethod     string `json:"pay_method"`
+	Status        int8   `json:"status"`   // 支付流水状态：0 待支付 2 已支付 4 已关闭
+	PayTime       string `json:"pay_time"` // RFC3339，未支付为空串
+}
+
+// AdminOrderDailyStat 订单日聚合（图表用）
+type AdminOrderDailyStat struct {
+	Date         string `json:"date"`
+	OrderCount   int64  `json:"order_count"`   // 当日已支付订单数（按支付时间）
+	GrossAmount  int64  `json:"gross_amount"`  // 当日实付金额（分）
+	RefundAmount int64  `json:"refund_amount"` // 当日申请退款金额（分，按退款申请时间）
+}
+
+// AdminOrderStatsResponse 订单聚合统计响应（GET /v1/admin/orders/stats）
+type AdminOrderStatsResponse struct {
+	Daily         []AdminOrderDailyStat `json:"daily"`          // 按日期升序，无订单日期补零
+	StatusCounts  map[string]int64      `json:"status_counts"`  // 订单主状态分布（窗口内，按创建时间）
+	ChannelCounts map[string]int64      `json:"channel_counts"` // 销售渠道分布（窗口内，按创建时间）
 }
 
 type AdminRefundDetail struct {
@@ -212,7 +238,7 @@ type AdminRefundDetail struct {
 	Viewers             []OrderViewerItem    `json:"viewers"`
 	RefundLogs          []models.RefundLog   `json:"refund_logs"`
 	VerificationRecords []map[string]any     `json:"verification_records"`
-	PayRecords          []models.PayRecord   `json:"pay_records"`
+	PayRecords          []AdminPayRecordItem `json:"pay_records"`
 }
 
 // AdminRefundListItem 售后订单列表项（GET /v1/admin/refunds）

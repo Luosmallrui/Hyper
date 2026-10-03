@@ -42,10 +42,11 @@ type IAdminService interface {
 	GetEventTicketList(ctx context.Context, eventID int64, page, pageSize int) (*types.AdminTicketListResponse, error)
 	GetAllTickets(ctx context.Context, page, pageSize int, keyword string) (*types.AdminTicketListResponse, error)
 	GetOrderList(ctx context.Context, page, pageSize int, eventID int64) (*types.AdminOrderListResponse, error)
-	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error)
+	GetTicketOrderList(ctx context.Context, page, pageSize int, activityID, organizerID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error)
 	GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error)
 	GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error)
 	ListRefunds(ctx context.Context, page, pageSize int, refundStatus *int8, keyword string) (*types.AdminRefundListResponse, error)
+	GetOrderStats(ctx context.Context, days int) (*types.AdminOrderStatsResponse, error)
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
 	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
 	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
@@ -1211,7 +1212,7 @@ func (s *AdminService) GetOrderList(ctx context.Context, page, pageSize int, eve
 	}, nil
 }
 
-func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error) {
+func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize int, activityID, organizerID int64, status, refundStatus *int8, keyword, salesChannel string) (*types.AdminTicketOrderListResponse, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -1227,6 +1228,9 @@ func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize in
 		Joins("LEFT JOIN ticket_specs ts ON ts.id = ticket_orders.ticket_spec_id")
 	if activityID > 0 {
 		query = query.Where("ticket_orders.activity_id = ?", activityID)
+	}
+	if organizerID > 0 {
+		query = query.Where("a.organizer_id = ?", organizerID)
 	}
 	if status != nil {
 		query = query.Where("ticket_orders.status = ?", *status)
@@ -1271,6 +1275,120 @@ func (s *AdminService) GetTicketOrderList(ctx context.Context, page, pageSize in
 		return nil, err
 	}
 	return &types.AdminTicketOrderListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+// GetOrderStats 订单聚合统计（订单页图表用）。
+// 口径：daily 的 order_count/gross_amount 按「支付时间」统计已支付订单
+//（待支付/已取消不计入，退款中与已退款订单属于已支付，仍计入毛额）；
+// refund_amount 按退款申请时间统计；status_counts/channel_counts 按创建时间统计窗口内全部订单。
+func (s *AdminService) GetOrderStats(ctx context.Context, days int) (*types.AdminOrderStatsResponse, error) {
+	if days <= 0 {
+		days = 30
+	}
+	if days > 90 {
+		days = 90
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	start := today.AddDate(0, 0, -(days - 1))
+
+	// 已支付订单：按支付时间聚合
+	paidStatuses := []int8{models.TicketOrderStatusUsable, models.TicketOrderStatusUsed,
+		models.TicketOrderStatusRefunding, models.TicketOrderStatusRefundSuccess, models.TicketOrderStatusRefundReject}
+	// 注意必须用 DATE_FORMAT 而非 DATE()：DSN 开了 parseTime=True，
+	// DATE() 会被驱动解析成 time.Time，Scan 进 string 得到 RFC3339 全格式，
+	// 导致按 "2006-01-02" 补零的 key 永远对不上（曾导致 daily 全为 0）
+	var dailyRows []struct {
+		Day        string
+		OrderCount int64
+		Gross      int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Select("DATE_FORMAT(pay_time, '%Y-%m-%d') AS day, COUNT(*) AS order_count, COALESCE(SUM(actual_price),0) AS gross").
+		Where("pay_time IS NOT NULL AND pay_time >= ? AND status IN ?", start, paidStatuses).
+		Group("DATE_FORMAT(pay_time, '%Y-%m-%d')").Scan(&dailyRows).Error; err != nil {
+		return nil, err
+	}
+	grossByDay := map[string]struct {
+		Count int64
+		Gross int64
+	}{}
+	for _, row := range dailyRows {
+		grossByDay[row.Day] = struct {
+			Count int64
+			Gross int64
+		}{row.OrderCount, row.Gross}
+	}
+
+	// 退款金额：按退款申请时间聚合
+	var refundRows []struct {
+		Day    string
+		Amount int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.Refund{}).
+		Select("DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COALESCE(SUM(refund_amount),0) AS amount").
+		Where("created_at >= ?", start).
+		Group("DATE_FORMAT(created_at, '%Y-%m-%d')").Scan(&refundRows).Error; err != nil {
+		return nil, err
+	}
+	refundByDay := map[string]int64{}
+	for _, row := range refundRows {
+		refundByDay[row.Day] = row.Amount
+	}
+
+	// 日期升序补零
+	daily := make([]types.AdminOrderDailyStat, 0, days)
+	for i := 0; i < days; i++ {
+		day := start.AddDate(0, 0, i).Format("2006-01-02")
+		entry := types.AdminOrderDailyStat{Date: day, RefundAmount: refundByDay[day]}
+		if g, ok := grossByDay[day]; ok {
+			entry.OrderCount = g.Count
+			entry.GrossAmount = g.Gross
+		}
+		daily = append(daily, entry)
+	}
+
+	// 状态分布（窗口内全部订单，按创建时间）
+	var statusRows []struct {
+		Status int8
+		Count  int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Select("status, COUNT(*) AS count").
+		Where("created_at >= ?", start).
+		Group("status").Scan(&statusRows).Error; err != nil {
+		return nil, err
+	}
+	statusCounts := map[string]int64{}
+	for _, row := range statusRows {
+		statusCounts[strconv.Itoa(int(row.Status))] = row.Count
+	}
+
+	// 渠道分布（窗口内全部订单，按创建时间）
+	var channelRows []struct {
+		Channel string
+		Count   int64
+	}
+	if err := s.DB.WithContext(ctx).Model(&models.TicketOrder{}).
+		Select("sales_channel AS channel, COUNT(*) AS count").
+		Where("created_at >= ?", start).
+		Group("sales_channel").Scan(&channelRows).Error; err != nil {
+		return nil, err
+	}
+	channelCounts := map[string]int64{}
+	for _, row := range channelRows {
+		channel := strings.TrimSpace(row.Channel)
+		if channel == "" {
+			channel = "other"
+		}
+		channelCounts[channel] = row.Count
+	}
+
+	return &types.AdminOrderStatsResponse{
+		Daily:         daily,
+		StatusCounts:  statusCounts,
+		ChannelCounts: channelCounts,
+	}, nil
 }
 
 func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string) (*types.AdminTicketOrderDetail, error) {
@@ -1320,8 +1438,26 @@ func (s *AdminService) GetTicketOrderDetail(ctx context.Context, orderNo string)
 		Refunds:             refunds,
 		RefundLogs:          logs,
 		VerificationRecords: verificationRecords,
-		PayRecords:          payRecords,
+		PayRecords:          normalizeAdminPayRecords(payRecords),
 	}, nil
+}
+
+// normalizeAdminPayRecords 把支付流水统一成前端约定形状（amount 数字/分、pay_time RFC3339）
+func normalizeAdminPayRecords(records []models.PayRecord) []types.AdminPayRecordItem {
+	items := make([]types.AdminPayRecordItem, 0, len(records))
+	for _, r := range records {
+		item := types.AdminPayRecordItem{
+			TransactionID: r.TransactionId,
+			Amount:        r.AmountTotal,
+			PayMethod:     r.PayMethod,
+			Status:        r.PayStatus,
+		}
+		if r.FinishedAt != nil {
+			item.PayTime = r.FinishedAt.Format(time.RFC3339)
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 // ListRefunds returns the after-sales (refund) order list for the admin PC.
@@ -1963,6 +2099,21 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 			}
 		}
 	}
+	// 活动所属商家名称（列表项 organizer_id/organizer_name）
+	organizerIDs := make([]int64, 0, len(orders))
+	for _, activity := range activityMap {
+		organizerIDs = append(organizerIDs, activity.OrganizerID)
+	}
+	organizerMap := map[int64]string{}
+	if len(organizerIDs) > 0 {
+		var organizers []models.Organizer
+		if err := s.DB.WithContext(ctx).Select("id, name").Where("id IN ?", organizerIDs).Find(&organizers).Error; err != nil {
+			return nil, err
+		}
+		for _, organizer := range organizers {
+			organizerMap[organizer.ID] = organizer.Name
+		}
+	}
 	list := make([]types.AdminTicketOrderItem, 0, len(orders))
 	for _, order := range orders {
 		item := types.AdminTicketOrderItem{
@@ -1990,6 +2141,8 @@ func (s *AdminService) buildAdminTicketOrderItems(ctx context.Context, orders []
 		}
 		if activity, ok := activityMap[order.ActivityID]; ok {
 			item.ActivityName = activity.Name
+			item.OrganizerID = activity.OrganizerID
+			item.OrganizerName = organizerMap[activity.OrganizerID]
 		}
 		if spec, ok := specMap[order.TicketSpecID]; ok {
 			item.TicketSpecName = spec.Name

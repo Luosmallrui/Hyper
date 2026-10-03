@@ -88,6 +88,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 
 		// 订单管理
 		authorized.GET("/orders", context.Wrap(a.GetOrderList))
+		authorized.GET("/orders/stats", context.Wrap(a.GetOrderStats))
 		authorized.GET("/orders/:order_no", context.Wrap(a.GetOrderDetail))
 		authorized.POST("/orders/:order_no/refund/approve", context.Wrap(a.ApproveOrderRefund))
 		authorized.POST("/orders/:order_no/refund/reject", context.Wrap(a.RejectOrderRefund))
@@ -1406,6 +1407,7 @@ func (a *Admin) GetOrderList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	activityID, _ := strconv.ParseInt(c.Query("activity_id"), 10, 64)
+	organizerID, _ := strconv.ParseInt(c.Query("organizer_id"), 10, 64)
 	keyword := c.Query("keyword")
 	var status *int8
 	if raw := c.Query("status"); raw != "" {
@@ -1424,12 +1426,24 @@ func (a *Admin) GetOrderList(c *gin.Context) error {
 		return response.NewError(400, err.Error())
 	}
 
-	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, status, refundStatus, keyword, c.Query("sales_channel"))
+	result, err := a.AdminService.GetTicketOrderList(c.Request.Context(), page, pageSize, activityID, organizerID, status, refundStatus, keyword, c.Query("sales_channel"))
 	if err != nil {
 		return response.NewError(500, "查询失败: "+err.Error())
 	}
 
 	response.Success(c, result)
+	return nil
+}
+
+// GetOrderStats 订单聚合统计（图表用）
+// GET /api/v1/admin/orders/stats?days=30
+func (a *Admin) GetOrderStats(c *gin.Context) error {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+	resp, err := a.AdminService.GetOrderStats(c.Request.Context(), days)
+	if err != nil {
+		return response.NewError(500, "统计失败: "+err.Error())
+	}
+	response.Success(c, resp)
 	return nil
 }
 
