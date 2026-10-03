@@ -104,6 +104,7 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		// 用户管理
 		authorized.GET("/users", context.Wrap(a.GetUserList))
 		authorized.PUT("/users/:id/status", context.Wrap(a.UpdateUserStatus))
+		authorized.PUT("/users/:id/password", context.Wrap(a.ResetUserPassword))
 		authorized.GET("/users/:id/records/:type", context.Wrap(a.ListUserRecords))
 		authorized.GET("/viewers", context.Wrap(a.ListViewers))
 		authorized.GET("/verifiers", context.Wrap(a.ListVerifiers))
@@ -1580,6 +1581,27 @@ func (a *Admin) UpdateUserStatus(c *gin.Context) error {
 	}
 	if err := a.AdminService.UpdateUserStatus(c.Request.Context(), int(id), req.Status); err != nil {
 		return response.NewError(500, err.Error())
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+// ResetUserPassword 管理端直接设置/重置用户密码（免短信验证）
+// PUT /api/v1/admin/users/:id/password
+func (a *Admin) ResetUserPassword(c *gin.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的用户ID")
+	}
+	var req struct {
+		Password string `json:"password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "密码必填且不少于 6 位")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.user.reset_password", ResourceType: "user", ResourceID: c.Param("id")})
+	if err := a.AdminService.ResetUserPassword(c.Request.Context(), id, req.Password); err != nil {
+		return response.NewError(400, err.Error())
 	}
 	response.Success(c, gin.H{"success": true})
 	return nil

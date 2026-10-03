@@ -53,6 +53,7 @@ type IAdminService interface {
 	ListPlatformFinanceFlows(ctx context.Context, page, pageSize int, filter types.AdminPlatformFlowFilter) (*types.AdminPlatformFlowListResponse, error)
 	GetUserList(ctx context.Context, page, pageSize int, keyword string) (*types.AdminUserListResponse, error)
 	UpdateUserStatus(ctx context.Context, userID int, status int8) error
+	ResetUserPassword(ctx context.Context, userID int64, password string) error
 	ListBanners(ctx context.Context) ([]models.PlatformBanner, error)
 	CreateBanner(ctx context.Context, req types.AdminBannerRequest) (int64, error)
 	UpdateBanner(ctx context.Context, id int64, req types.AdminBannerRequest) error
@@ -1734,6 +1735,19 @@ func (s *AdminService) countUserBehavior(ctx context.Context, userIDs []int) map
 
 func (s *AdminService) UpdateUserStatus(ctx context.Context, userID int, status int8) error {
 	result := s.DB.WithContext(ctx).Model(&models.Users{}).Where("id = ?", userID).Updates(map[string]any{"status": status, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("用户不存在")
+	}
+	return nil
+}
+
+// ResetUserPassword 管理端直接设置/重置用户密码（免短信验证）
+func (s *AdminService) ResetUserPassword(ctx context.Context, userID int64, password string) error {
+	result := s.DB.WithContext(ctx).Model(&models.Users{}).Where("id = ?", userID).
+		Updates(map[string]any{"password": encrypt.HashPassword(password), "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}
