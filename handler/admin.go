@@ -59,6 +59,11 @@ func (a *Admin) RegisterRouter(r gin.IRouter) {
 		authorized.PUT("/organizers/:id/audit", context.Wrap(a.AuditOrganizer))
 		authorized.PATCH("/organizers/:id/status", context.Wrap(a.UpdateOrganizerEnabled))
 		authorized.PUT("/organizers/:id/tags", context.Wrap(a.UpdateOrganizerTags))
+		authorized.GET("/organizers/:id/roles", context.Wrap(a.AdminListOrganizerRoles))
+		authorized.GET("/organizers/:id/staff", context.Wrap(a.AdminListOrganizerStaff))
+		authorized.POST("/organizers/:id/staff", context.Wrap(a.AdminSaveOrganizerStaff))
+		authorized.PUT("/organizers/:id/staff/:staffId", context.Wrap(a.AdminUpdateOrganizerStaff))
+		authorized.DELETE("/organizers/:id/staff/:staffId", context.Wrap(a.AdminDeleteOrganizerStaff))
 		authorized.PUT("/venues/:id/tags", context.Wrap(a.UpdateOrganizerTags))
 		authorized.DELETE("/organizers/:id", context.Wrap(a.DeleteOrganizer))
 		authorized.POST("/wechat-subscribe", context.Wrap(a.BindWechatSubscribe))
@@ -1139,8 +1144,83 @@ func (a *Admin) DeleteOrganizer(c *gin.Context) error {
 	return nil
 }
 
-// GetPartyList 获取所有派对/场地列表
-// GET /api/v1/admin/parties?page=1&pageSize=20&keyword=xxx&type=派对
+// ============ 管理端商家子账号管理 ============
+
+// AdminListOrganizerRoles GET /api/v1/admin/organizers/:id/roles
+func (a *Admin) AdminListOrganizerRoles(c *gin.Context) error {
+	resp, err := a.AdminService.AdminListOrganizerRoles(c.Request.Context(), adminParamID(c))
+	if err != nil {
+		return err
+	}
+	response.Success(c, gin.H{"list": resp})
+	return nil
+}
+
+// AdminListOrganizerStaff GET /api/v1/admin/organizers/:id/staff?page=1&pageSize=20&keyword=
+func (a *Admin) AdminListOrganizerStaff(c *gin.Context) error {
+	resp, err := a.AdminService.AdminListOrganizerStaff(c.Request.Context(), adminParamID(c), adminPage(c), adminPageSize(c), c.Query("keyword"))
+	if err != nil {
+		return err
+	}
+	response.Success(c, resp)
+	return nil
+}
+
+// AdminSaveOrganizerStaff POST /api/v1/admin/organizers/:id/staff（新增）
+func (a *Admin) AdminSaveOrganizerStaff(c *gin.Context) error {
+	var req types.AdminOrganizerStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "姓名和手机号不能为空")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.organizer.save_staff", ResourceType: "organizer", ResourceID: c.Param("id"), Remark: req.Name + " " + req.Phone})
+	id, err := a.AdminService.AdminSaveOrganizerStaff(c.Request.Context(), adminParamID(c), 0, req)
+	if err != nil {
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+// AdminUpdateOrganizerStaff PUT /api/v1/admin/organizers/:id/staff/:staffId（编辑）
+func (a *Admin) AdminUpdateOrganizerStaff(c *gin.Context) error {
+	var req types.AdminOrganizerStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return response.NewError(400, "姓名和手机号不能为空")
+	}
+	staffID, err := strconv.ParseInt(c.Param("staffId"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的员工ID")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.organizer.save_staff", ResourceType: "organizer", ResourceID: c.Param("id"), Remark: c.Param("staffId")})
+	id, err := a.AdminService.AdminSaveOrganizerStaff(c.Request.Context(), adminParamID(c), staffID, req)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "子账号不存在")
+		}
+		return response.NewError(400, err.Error())
+	}
+	response.Success(c, gin.H{"id": id})
+	return nil
+}
+
+// AdminDeleteOrganizerStaff DELETE /api/v1/admin/organizers/:id/staff/:staffId
+func (a *Admin) AdminDeleteOrganizerStaff(c *gin.Context) error {
+	staffID, err := strconv.ParseInt(c.Param("staffId"), 10, 64)
+	if err != nil {
+		return response.NewError(400, "无效的员工ID")
+	}
+	setAdminAuditMeta(c, adminAuditMeta{Action: "admin.organizer.delete_staff", ResourceType: "organizer", ResourceID: c.Param("id"), Remark: c.Param("staffId")})
+	if err := a.AdminService.AdminDeleteOrganizerStaff(c.Request.Context(), adminParamID(c), staffID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response.NewError(404, "子账号不存在")
+		}
+		return err
+	}
+	response.Success(c, gin.H{"success": true})
+	return nil
+}
+
+// GetPartyList 获取所有派对/场地列表// GET /api/v1/admin/parties?page=1&pageSize=20&keyword=xxx&type=派对
 func (a *Admin) GetPartyList(c *gin.Context) error {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))

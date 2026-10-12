@@ -90,6 +90,8 @@ type Activity struct {
 	EndTime               time.Time  `gorm:"column:end_time" json:"end_time"`
 	RealNameMode          int8       `gorm:"column:real_name_mode;default:0" json:"real_name_mode"`
 	MinorCheck            int8       `gorm:"column:minor_check;default:0" json:"minor_check"`
+	// SupportRefund 是否支持退票（0 不支持 1 支持），默认支持以保持历史行为
+	SupportRefund         int8       `gorm:"column:support_refund;not null;default:1" json:"support_refund"`
 	Description           string     `gorm:"column:description;type:text" json:"description"`
 	Province              string     `gorm:"column:province;size:50" json:"province"`
 	City                  string     `gorm:"column:city;size:50" json:"city"`

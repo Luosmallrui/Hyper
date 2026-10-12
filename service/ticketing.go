@@ -3764,6 +3764,14 @@ func (s *TicketingService) ApplyRefund(ctx context.Context, userID int64, req ty
 		if order.Status != models.TicketOrderStatusUsable {
 			return errors.New("当前订单不可退款")
 		}
+		// 活动可配置是否支持退票（默认支持）；不支持的活动直接拒绝退款申请
+		var activity models.Activity
+		if err := tx.Select("support_refund").First(&activity, order.ActivityID).Error; err != nil {
+			return err
+		}
+		if activity.SupportRefund == 0 {
+			return errors.New("该活动不支持退票")
+		}
 		// 产品决策（2026-08-24）：存在任意核销记录（含部分核销）的订单不允许退款
 		var verifiedCount int64
 		if err := tx.Model(&models.VerificationRecord{}).Where("order_id = ?", order.ID).Count(&verifiedCount).Error; err != nil {
@@ -6092,6 +6100,7 @@ func activityUpdates(req types.ActivityCreateRequest, activityType string) (map[
 	putString(updates, "share_title", req.ShareTitle)
 	putInt8(updates, "real_name_mode", req.RealNameMode)
 	putInt8(updates, "minor_check", req.MinorCheck)
+	putInt8(updates, "support_refund", req.SupportRefund)
 	putString(updates, "description", req.Description)
 	putString(updates, "province", req.Province)
 	putString(updates, "city", req.City)

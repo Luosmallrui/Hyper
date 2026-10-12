@@ -232,6 +232,36 @@ type AdminOrderStatsResponse struct {
 	ChannelCounts map[string]int64      `json:"channel_counts"` // 销售渠道分布（窗口内，按创建时间）
 }
 
+// AdminOrganizerRoleItem 管理端商家角色列表项
+type AdminOrganizerRoleItem struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Permissions string `json:"permissions"`
+	Status      int8   `json:"status"`
+	StaffCount  int64  `json:"staff_count"`
+}
+
+// AdminOrganizerStaffItem 管理端商家子账号列表项
+type AdminOrganizerStaffItem struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Name      string `json:"name"`
+	Phone     string `json:"phone"`
+	RoleID    int64  `json:"role_id"`
+	RoleName  string `json:"role_name"`
+	Status    int8   `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+// AdminOrganizerStaffRequest 管理端新增/编辑子账号请求（按 phone 解析 user_id）
+type AdminOrganizerStaffRequest struct {
+	Phone  string `json:"phone" binding:"required"`
+	Name   string `json:"name" binding:"required"`
+	RoleID int64  `json:"role_id"`
+	Status int8   `json:"status"`
+}
+
 type AdminRefundDetail struct {
 	Refund              models.Refund        `json:"refund"`
 	Order               AdminTicketOrderItem `json:"order"`

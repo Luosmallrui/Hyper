@@ -1050,3 +1050,6 @@ CREATE TABLE IF NOT EXISTS `user_notifications`
 -- 2026-09-03 地图封面
 -- ALTER TABLE `activities` ADD COLUMN `poster_map` varchar(255) NOT NULL DEFAULT '' COMMENT '地图封面' AFTER `poster_wechat`;
 -- ALTER TABLE `organizer_profiles` ADD COLUMN `map_cover` varchar(255) NOT NULL DEFAULT '' COMMENT '地图封面' AFTER `cover_image`;
+
+-- 2026-10-12 活动退票开关（已在线执行）
+-- ALTER TABLE `activities` ADD COLUMN `support_refund` tinyint NOT NULL DEFAULT 1 COMMENT '是否支持退票: 0不支持 1支持' AFTER `minor_check`;

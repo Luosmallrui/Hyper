@@ -47,6 +47,10 @@ type IAdminService interface {
 	GetRefundDetail(ctx context.Context, refundNo string) (*types.AdminRefundDetail, error)
 	ListRefunds(ctx context.Context, page, pageSize int, refundStatus *int8, keyword string) (*types.AdminRefundListResponse, error)
 	GetOrderStats(ctx context.Context, days int) (*types.AdminOrderStatsResponse, error)
+	AdminListOrganizerRoles(ctx context.Context, organizerID int64) ([]types.AdminOrganizerRoleItem, error)
+	AdminListOrganizerStaff(ctx context.Context, organizerID int64, page, pageSize int, keyword string) (*types.PageResponse[types.AdminOrganizerStaffItem], error)
+	AdminSaveOrganizerStaff(ctx context.Context, organizerID, staffID int64, req types.AdminOrganizerStaffRequest) (int64, error)
+	AdminDeleteOrganizerStaff(ctx context.Context, organizerID, staffID int64) error
 	ApproveOrderRefund(ctx context.Context, orderNo string) error
 	RejectOrderRefund(ctx context.Context, orderNo string, reason string) error
 	GetFinanceSummary(ctx context.Context) (*types.AdminFinanceSummary, error)
@@ -1539,6 +1543,158 @@ func (s *AdminService) ListRefunds(ctx context.Context, page, pageSize int, refu
 		})
 	}
 	return &types.AdminRefundListResponse{List: list, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+// ============ 管理端商家子账号管理（按 organizerID 直查，不依赖商家登录态） ============
+
+// AdminListOrganizerRoles 商家角色列表（含子账号数）
+func (s *AdminService) AdminListOrganizerRoles(ctx context.Context, organizerID int64) ([]types.AdminOrganizerRoleItem, error) {
+	var roles []models.OrganizerRole
+	if err := s.DB.WithContext(ctx).Where("organizer_id = ?", organizerID).Order("created_at DESC").Find(&roles).Error; err != nil {
+		return nil, err
+	}
+	staffCounts := map[int64]int64{}
+	if len(roles) > 0 {
+		roleIDs := make([]int64, 0, len(roles))
+		for _, role := range roles {
+			roleIDs = append(roleIDs, role.ID)
+		}
+		var rows []struct {
+			RoleID int64
+			Count  int64
+		}
+		if err := s.DB.WithContext(ctx).Model(&models.OrganizerStaff{}).
+			Select("role_id, COUNT(*) AS count").
+			Where("role_id IN ?", roleIDs).
+			Group("role_id").Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			staffCounts[row.RoleID] = row.Count
+		}
+	}
+	items := make([]types.AdminOrganizerRoleItem, 0, len(roles))
+	for _, role := range roles {
+		items = append(items, types.AdminOrganizerRoleItem{
+			ID:          role.ID,
+			Name:        role.Name,
+			Description: role.Description,
+			Permissions: role.Permissions,
+			Status:      role.Status,
+			StaffCount:  staffCounts[role.ID],
+		})
+	}
+	return items, nil
+}
+
+// AdminListOrganizerStaff 商家子账号列表（含角色名，支持姓名/手机号模糊搜索）
+func (s *AdminService) AdminListOrganizerStaff(ctx context.Context, organizerID int64, page, pageSize int, keyword string) (*types.PageResponse[types.AdminOrganizerStaffItem], error) {
+	page, pageSize = normalizePage(page, pageSize)
+	query := s.DB.WithContext(ctx).Table("organizer_staff st").
+		Joins("LEFT JOIN organizer_roles r ON r.id = st.role_id").
+		Where("st.organizer_id = ?", organizerID)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("st.name LIKE ? OR st.phone LIKE ?", like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		ID        int64
+		UserID    int64
+		Name      string
+		Phone     string
+		RoleID    int64
+		RoleName  string
+		Status    int8
+		CreatedAt time.Time
+	}
+	if err := query.Select(`st.id, st.user_id, st.name, st.phone, st.role_id,
+		COALESCE(r.name, '') AS role_name, st.status, st.created_at`).
+		Order("st.created_at DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]types.AdminOrganizerStaffItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, types.AdminOrganizerStaffItem{
+			ID:        row.ID,
+			UserID:    row.UserID,
+			Name:      row.Name,
+			Phone:     row.Phone,
+			RoleID:    row.RoleID,
+			RoleName:  row.RoleName,
+			Status:    row.Status,
+			CreatedAt: formatAdminTime(row.CreatedAt),
+		})
+	}
+	return &types.PageResponse[types.AdminOrganizerStaffItem]{List: items, Total: total}, nil
+}
+
+// AdminSaveOrganizerStaff 管理端新增/编辑子账号：按 phone 解析 user_id，未注册返回业务错误
+func (s *AdminService) AdminSaveOrganizerStaff(ctx context.Context, organizerID, staffID int64, req types.AdminOrganizerStaffRequest) (int64, error) {
+	phone := strings.TrimSpace(req.Phone)
+	if phone == "" {
+		return 0, errors.New("手机号不能为空")
+	}
+	var org models.Organizer
+	if err := s.DB.WithContext(ctx).Select("id").First(&org, organizerID).Error; err != nil {
+		return 0, errors.New("主办方不存在")
+	}
+	// 按手机号解析平台用户
+	var user models.Users
+	if err := s.DB.WithContext(ctx).Where("mobile = ?", phone).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errors.New("该手机号未注册平台账号")
+		}
+		return 0, err
+	}
+	if req.RoleID > 0 {
+		var count int64
+		if err := s.DB.WithContext(ctx).Model(&models.OrganizerRole{}).Where("id = ? AND organizer_id = ?", req.RoleID, organizerID).Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count == 0 {
+			return 0, errors.New("角色不存在")
+		}
+	}
+	status := req.Status
+	if status == 0 {
+		status = 1
+	}
+	if staffID > 0 {
+		result := s.DB.WithContext(ctx).Model(&models.OrganizerStaff{}).
+			Where("id = ? AND organizer_id = ?", staffID, organizerID).
+			Updates(map[string]any{"user_id": user.Id, "role_id": req.RoleID, "name": req.Name, "phone": phone, "status": status})
+		if result.Error != nil {
+			return 0, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		return staffID, nil
+	}
+	staff := models.OrganizerStaff{OrganizerID: organizerID, UserID: int64(user.Id), RoleID: req.RoleID, Name: req.Name, Phone: phone, Status: status}
+	if err := s.DB.WithContext(ctx).Create(&staff).Error; err != nil {
+		return 0, err
+	}
+	return staff.ID, nil
+}
+
+// AdminDeleteOrganizerStaff 管理端删除子账号
+func (s *AdminService) AdminDeleteOrganizerStaff(ctx context.Context, organizerID, staffID int64) error {
+	result := s.DB.WithContext(ctx).Where("id = ? AND organizer_id = ?", staffID, organizerID).Delete(&models.OrganizerStaff{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // GetRefundDetail returns one refund and the order context required by the admin refund detail page.

@@ -508,6 +508,8 @@ type ActivityCreateRequest struct {
 	BusinessHours    *string              `json:"business_hours"`
 	RealNameMode     *int8                `json:"real_name_mode"`
 	MinorCheck       *int8                `json:"minor_check"`
+	// SupportRefund 是否支持退票：0 不支持 1 支持；nil 不修改（历史数据默认支持）
+	SupportRefund    *int8                `json:"support_refund"`
 	Description      *string              `json:"description"`
 	Province         *string              `json:"province"`
 	City             *string              `json:"city"`
