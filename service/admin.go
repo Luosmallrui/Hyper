@@ -441,6 +441,10 @@ func (s *AdminService) AuditOrganizer(ctx context.Context, organizerID int64, re
 			updates["enabled"] = 1
 			updates["level"] = fmt.Sprintf("LV%d", level)
 			updates["service_fee_rate"] = feeRate
+			// 审核通过时补默认角色「核销员」（商家无角色才创建，幂等）
+			if err := ensureDefaultOrganizerRole(tx, organizerID); err != nil {
+				return err
+			}
 		}
 		if req.Status == models.OrganizerStatusRejected {
 			updates["reject_reason"] = req.RejectReason

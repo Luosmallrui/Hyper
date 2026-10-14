@@ -5440,6 +5440,29 @@ func defaultOrganizerLevelRules() []models.OrganizerLevelRule {
 	}
 }
 
+// 默认角色「核销员」的权限集合：只含核销管理，是最基础的子账号角色
+var defaultOrganizerRolePermissions = []string{"verifier.manage"}
+
+// ensureDefaultOrganizerRole 审核通过时补默认角色：商家已有任意角色则跳过（幂等），
+// 只在新商家首次通过审核时创建；商家后续可自行删除/修改，不会被重建（不挂任何列表钩子）。
+func ensureDefaultOrganizerRole(db *gorm.DB, organizerID int64) error {
+	var count int64
+	if err := db.Model(&models.OrganizerRole{}).Where("organizer_id = ?", organizerID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	permissions, _ := json.Marshal(defaultOrganizerRolePermissions)
+	return db.Create(&models.OrganizerRole{
+		OrganizerID: organizerID,
+		Name:        "核销员",
+		Description: "默认角色，可执行扫码核销等基础操作",
+		Permissions: string(permissions),
+		Status:      1,
+	}).Error
+}
+
 func (s *TicketingService) ensureOrganizerPostRelations(ctx context.Context, organizerID int64, activityID int, storeID int64) error {
 	if activityID > 0 {
 		var count int64
